@@ -16,16 +16,17 @@
     },
     {
       "title": "Bug ao visualizar usuario no admin",
-      "description": "Bug ao acessar detalhes de um usuario no painel admin. Rota: GET /api/admin/users/:id (adminRoutes.js:95). Controller: getUser no adminController.js. Investigar erro — pode ser problema de include/associação, permissão, ou renderização no frontend.",
+      "description": "Bug ao acessar detalhes de um usuario no painel admin. Causa: icone Star do lucide-react nao estava importado em AdminPage.jsx, causando crash ao renderizar modal de detalhes de vendedores. Fix: adicionado Star aos imports.",
       "priority": "urgent",
-      "status": "in_progress",
+      "status": "done",
       "id": "BUG-view-user",
       "projectId": "rede-capanema",
       "createdAt": "2026-03-09T22:00:00.000Z",
-      "updatedAt": "2026-03-09T18:43:21.234Z",
+      "updatedAt": "2026-03-10T00:00:00.000Z",
       "order": 2,
       "inboxAt": "2026-03-09T22:00:00.000Z",
-      "inProgressAt": "2026-03-09T18:43:21.234Z"
+      "inProgressAt": "2026-03-09T18:43:21.234Z",
+      "doneAt": "2026-03-10T00:00:00.000Z"
     },
     {
       "title": "Data dos pedidos e navegacao ao clicar",

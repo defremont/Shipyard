@@ -87,8 +87,9 @@
       "lastCommitDate": "2026-03-09T13:35:46-03:00",
       "lastCommitMessage": "Add CSV export/import with diff review for client task sharing",
       "techStack": [],
-      "favorite": false
+      "favorite": false,
+      "lastOpenedAt": "2026-03-09T18:48:26.042Z"
     }
   ],
-  "lastScannedAt": "2026-03-09T18:44:36.201Z"
+  "lastScannedAt": "2026-03-09T18:48:26.042Z"
 }
