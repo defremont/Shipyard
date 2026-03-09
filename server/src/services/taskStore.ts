@@ -124,6 +124,33 @@ export async function deleteTask(projectId: string, taskId: string): Promise<boo
   return true;
 }
 
+export async function importTasks(projectId: string, importedTasks: Partial<Task>[]): Promise<number> {
+  const existing = await readTasks(projectId);
+  const now = new Date().toISOString();
+  const created: Task[] = [];
+
+  for (const t of importedTasks) {
+    created.push({
+      title: t.title || 'Untitled',
+      description: t.description || '',
+      priority: (t.priority as Task['priority']) || 'medium',
+      status: (t.status as Task['status']) || 'todo',
+      promptTemplate: t.promptTemplate,
+      id: nanoid(10),
+      projectId,
+      createdAt: t.createdAt || now,
+      updatedAt: now,
+      order: existing.length + created.length,
+      inboxAt: t.inboxAt,
+      inProgressAt: t.inProgressAt,
+      doneAt: t.doneAt,
+    });
+  }
+
+  await writeTasks(projectId, [...existing, ...created]);
+  return created.length;
+}
+
 export async function reorderTasks(projectId: string, taskIds: string[]): Promise<Task[]> {
   const tasks = await readTasks(projectId);
   const reordered: Task[] = [];

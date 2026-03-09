@@ -76,6 +76,28 @@ export function useDeleteTask() {
   })
 }
 
+export function useImportTasks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, tasks }: { projectId: string; tasks: any[] }) =>
+      api.importTasks(projectId, tasks),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+    },
+  })
+}
+
+export function useImportAllTasks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (tasks: any[]) => api.importAllTasks(tasks),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tasks'] })
+    },
+  })
+}
+
 export function useReorderTasks() {
   const queryClient = useQueryClient()
   return useMutation({

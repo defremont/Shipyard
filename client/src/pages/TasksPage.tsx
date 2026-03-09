@@ -17,11 +17,11 @@ import { Header } from '@/components/layout/Header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useAllTasks, useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
+import { useAllTasks, useUpdateTask, useDeleteTask, useImportAllTasks, type Task } from '@/hooks/useTasks'
 import { useProjects, type Project } from '@/hooks/useProjects'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
-import { GripVertical, Pencil, Trash2, Copy, Check } from 'lucide-react'
+import { GripVertical, Pencil, Trash2, Copy, Check, Download, Upload } from 'lucide-react'
 
 interface ColumnConfig {
   key: string
@@ -171,6 +171,7 @@ export function TasksPage() {
   const { data: projects } = useProjects()
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
+  const importAllTasks = useImportAllTasks()
   const [activeTask, setActiveTask] = useState<Task | null>(null)
 
   const sensors = useSensors(
@@ -240,10 +241,55 @@ export function TasksPage() {
     })
   }
 
+  const handleExportAll = () => {
+    if (!tasks?.length) { toast.info('No tasks to export'); return }
+    const data = { exportedAt: new Date().toISOString(), source: 'devdash', tasks }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tasks-all-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImportAll = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const data = JSON.parse(text)
+        const list = Array.isArray(data) ? data : data.tasks
+        if (!Array.isArray(list)) { toast.error('Invalid format: expected { tasks: [...] }'); return }
+        const withProject = list.filter((t: any) => t.projectId)
+        if (withProject.length === 0) { toast.error('No tasks with projectId found'); return }
+        importAllTasks.mutate(withProject, {
+          onSuccess: (res: any) => toast.success(`Imported ${res.imported} tasks`),
+          onError: () => toast.error('Failed to import tasks'),
+        })
+      } catch { toast.error('Failed to read file') }
+    }
+    input.click()
+  }
+
   return (
     <>
       <Header title="All Tasks" />
       <div className="flex-1 overflow-hidden p-6">
+        <div className="flex items-center justify-end gap-1 mb-4">
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={handleExportAll}>
+            <Download className="h-3.5 w-3.5" />
+            Export All
+          </Button>
+          <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={handleImportAll}>
+            <Upload className="h-3.5 w-3.5" />
+            Import
+          </Button>
+        </div>
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}

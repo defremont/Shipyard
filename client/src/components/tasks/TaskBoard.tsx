@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2 } from 'lucide-react'
+import { Plus, Inbox, Loader, CheckCircle2, Download, Upload } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -15,7 +15,8 @@ import {
 import { Button } from '@/components/ui/button'
 import { TaskItem } from './TaskItem'
 import { TaskEditor } from './TaskEditor'
-import { useTasks, useUpdateTask, type Task } from '@/hooks/useTasks'
+import { useTasks, useUpdateTask, useImportTasks, type Task } from '@/hooks/useTasks'
+import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
 interface TaskBoardProps {
@@ -110,6 +111,7 @@ function DraggableTaskItem({ task, projectName, onEdit }: { task: Task; projectN
 export function TaskBoard({ projectId, projectName }: TaskBoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId)
   const updateTask = useUpdateTask()
+  const importTasks = useImportTasks()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
@@ -126,6 +128,39 @@ export function TaskBoard({ projectId, projectName }: TaskBoardProps) {
   const handleNew = () => {
     setEditingTask(null)
     setEditorOpen(true)
+  }
+
+  const handleExport = () => {
+    if (!tasks?.length) { toast.info('No tasks to export'); return }
+    const data = { exportedAt: new Date().toISOString(), source: 'devdash', projectId, tasks }
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tasks-${projectId}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleImport = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.json'
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const data = JSON.parse(text)
+        const list = Array.isArray(data) ? data : data.tasks
+        if (!Array.isArray(list)) { toast.error('Invalid format: expected { tasks: [...] }'); return }
+        importTasks.mutate({ projectId, tasks: list }, {
+          onSuccess: (res: any) => toast.success(`Imported ${res.imported} tasks`),
+          onError: () => toast.error('Failed to import tasks'),
+        })
+      } catch { toast.error('Failed to read file') }
+    }
+    input.click()
   }
 
   const grouped = useMemo(() => {
@@ -182,10 +217,18 @@ export function TaskBoard({ projectId, projectName }: TaskBoardProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold">Tasks ({tasks?.length || 0})</h2>
-        <Button size="sm" className="h-7 gap-1 text-xs" onClick={handleNew}>
-          <Plus className="h-3.5 w-3.5" />
-          New Task
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleExport} title="Export tasks">
+            <Download className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleImport} title="Import tasks">
+            <Upload className="h-3.5 w-3.5" />
+          </Button>
+          <Button size="sm" className="h-7 gap-1 text-xs" onClick={handleNew}>
+            <Plus className="h-3.5 w-3.5" />
+            New Task
+          </Button>
+        </div>
       </div>
 
       <DndContext

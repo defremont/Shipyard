@@ -48,6 +48,34 @@ export async function taskRoutes(app: FastifyInstance) {
     }
   );
 
+  // Import tasks into a project
+  app.post<{ Params: { projectId: string }; Body: { tasks: any[] } }>(
+    '/api/projects/:projectId/tasks/import',
+    async (request) => {
+      const count = await taskStore.importTasks(request.params.projectId, request.body.tasks);
+      return { imported: count };
+    }
+  );
+
+  // Import tasks across multiple projects (tasks must have projectId)
+  app.post<{ Body: { tasks: any[] } }>(
+    '/api/tasks/import',
+    async (request) => {
+      const byProject = new Map<string, any[]>();
+      for (const t of request.body.tasks) {
+        if (!t.projectId) continue;
+        const list = byProject.get(t.projectId) || [];
+        list.push(t);
+        byProject.set(t.projectId, list);
+      }
+      let total = 0;
+      for (const [pid, tasks] of byProject) {
+        total += await taskStore.importTasks(pid, tasks);
+      }
+      return { imported: total };
+    }
+  );
+
   app.post<{ Params: { projectId: string }; Body: { taskIds: string[] } }>(
     '/api/projects/:projectId/tasks/reorder',
     async (request) => {
