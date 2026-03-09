@@ -6,12 +6,13 @@
       "title": "Confirmar antes de deletar tarefa",
       "description": "Adicionar dialog de confirmacao ao clicar em deletar tarefa. Atualmente deleta direto sem confirmar, o que pode causar perda acidental de dados. Usar AlertDialog do shadcn/ui.",
       "priority": "urgent",
-      "status": "in_progress",
+      "status": "done",
       "createdAt": "2026-03-08T10:00:00.000Z",
-      "updatedAt": "2026-03-09T14:00:00.000Z",
+      "updatedAt": "2026-03-09T16:00:00.000Z",
       "order": 0,
       "inboxAt": "2026-03-08T10:00:00.000Z",
-      "inProgressAt": "2026-03-09T14:00:00.000Z"
+      "inProgressAt": "2026-03-09T14:00:00.000Z",
+      "doneAt": "2026-03-09T16:00:00.000Z"
     },
     {
       "id": "tsk_dd_002",
@@ -19,12 +20,13 @@
       "title": "Drag-and-drop nao reordena dentro da mesma coluna",
       "description": "O kanban permite mover entre colunas, mas nao reordena tarefas dentro da mesma coluna. Implementar reorder via @dnd-kit/sortable para manter a ordem personalizada do usuario. A rota POST reorder ja existe no backend.",
       "priority": "high",
-      "status": "in_progress",
+      "status": "done",
       "createdAt": "2026-03-08T11:00:00.000Z",
-      "updatedAt": "2026-03-09T13:00:00.000Z",
+      "updatedAt": "2026-03-09T16:00:00.000Z",
       "order": 1,
       "inboxAt": "2026-03-08T11:00:00.000Z",
-      "inProgressAt": "2026-03-09T13:00:00.000Z"
+      "inProgressAt": "2026-03-09T13:00:00.000Z",
+      "doneAt": "2026-03-09T16:00:00.000Z"
     },
     {
       "id": "tsk_dd_003",
@@ -45,11 +47,13 @@
       "title": "Filtro por prioridade e busca no kanban global (/tasks)",
       "description": "Na pagina /tasks, adicionar filtros por prioridade (urgent/high/medium/low) e campo de busca para filtrar tarefas por titulo. Usar badges clicaveis como toggle filters acima do kanban.",
       "priority": "high",
-      "status": "todo",
+      "status": "done",
       "createdAt": "2026-03-08T09:00:00.000Z",
-      "updatedAt": "2026-03-08T09:00:00.000Z",
+      "updatedAt": "2026-03-09T16:00:00.000Z",
       "order": 3,
-      "inboxAt": "2026-03-08T09:00:00.000Z"
+      "inboxAt": "2026-03-08T09:00:00.000Z",
+      "inProgressAt": "2026-03-09T16:00:00.000Z",
+      "doneAt": "2026-03-09T16:00:00.000Z"
     },
     {
       "id": "tsk_dd_005",
@@ -57,11 +61,13 @@
       "title": "Deteccao de tech stack retornando array vazio",
       "description": "O techStack de varios projetos (incluindo devdash) mostra array vazio mesmo tendo package.json com react, vite, tailwind etc. Revisar projectDiscovery.ts - a funcao buildProject() precisa ler dependencies e devDependencies do package.json para detectar corretamente.",
       "priority": "high",
-      "status": "todo",
+      "status": "done",
       "createdAt": "2026-03-09T08:00:00.000Z",
-      "updatedAt": "2026-03-09T08:00:00.000Z",
+      "updatedAt": "2026-03-09T16:00:00.000Z",
       "order": 4,
-      "inboxAt": "2026-03-09T08:00:00.000Z"
+      "inboxAt": "2026-03-09T08:00:00.000Z",
+      "inProgressAt": "2026-03-09T16:00:00.000Z",
+      "doneAt": "2026-03-09T16:00:00.000Z"
     },
     {
       "id": "tsk_dd_006",

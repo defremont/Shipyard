@@ -1,21 +1,27 @@
 import { useState, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Circle, Clock } from 'lucide-react'
+import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Circle, Clock, Search } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
   useDroppable,
-  useDraggable,
-  closestCenter,
+  closestCorners,
   PointerSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Header } from '@/components/layout/Header'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
 import { useAllTasks, useUpdateTask, useDeleteTask, useImportAllTasks, type Task } from '@/hooks/useTasks'
 import { useProjects, type Project } from '@/hooks/useProjects'
@@ -24,7 +30,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
-import { GripVertical, Pencil, Trash2, Copy, Check, Download, Upload } from 'lucide-react'
+import { GripVertical, Trash2, Copy, Check, Download, Upload } from 'lucide-react'
 
 interface ColumnConfig {
   key: string
@@ -39,6 +45,16 @@ const columns: ColumnConfig[] = [
   { key: 'inbox', label: 'Inbox', icon: Inbox, statuses: ['backlog', 'todo'], dropStatus: 'todo', color: 'text-blue-500' },
   { key: 'in_progress', label: 'In Progress', icon: Loader, statuses: ['in_progress'], dropStatus: 'in_progress', color: 'text-yellow-500' },
   { key: 'done', label: 'Done', icon: CheckCircle2, statuses: ['done'], dropStatus: 'done', color: 'text-green-500' },
+]
+
+const COLUMN_KEYS = new Set(columns.map(c => c.key))
+
+type Priority = Task['priority']
+const priorities: { key: Priority; icon: React.ElementType; color: string; label: string }[] = [
+  { key: 'urgent', icon: AlertTriangle, color: 'text-red-500 border-red-500/50 bg-red-500/10', label: 'Urgent' },
+  { key: 'high', icon: ArrowUp, color: 'text-orange-500 border-orange-500/50 bg-orange-500/10', label: 'High' },
+  { key: 'medium', icon: Minus, color: 'text-blue-500 border-blue-500/50 bg-blue-500/10', label: 'Medium' },
+  { key: 'low', icon: ArrowDown, color: 'text-muted-foreground border-muted-foreground/50 bg-muted', label: 'Low' },
 ]
 
 const priorityConfig = {
@@ -57,6 +73,7 @@ function GlobalTaskCard({ task, project, tasksDir, onStatusToggle, onDelete }: {
 }) {
   const pri = priorityConfig[task.priority]
   const PriIcon = pri.icon
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const handleCopy = () => {
     const prompt = buildTaskPrompt(task, project?.name, project?.path, tasksDir)
@@ -108,15 +125,31 @@ function GlobalTaskCard({ task, project, tasksDir, onStatusToggle, onDelete }: {
         <Button variant="ghost" size="icon" className="h-6 w-6" onClick={handleCopy} title="Copy as prompt">
           <Copy className="h-3 w-3" />
         </Button>
-        <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => onDelete(task)} title="Delete">
-          <Trash2 className="h-3 w-3" />
-        </Button>
+        <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+          <Button variant="ghost" size="icon" className="h-6 w-6 text-destructive" onClick={() => setDeleteOpen(true)} title="Delete">
+            <Trash2 className="h-3 w-3" />
+          </Button>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete task?</AlertDialogTitle>
+              <AlertDialogDescription>
+                "{task.title}" will be permanently deleted. This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={() => onDelete(task)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   )
 }
 
-function DroppableColumn({ col, children, count }: { col: ColumnConfig; children: React.ReactNode; count: number }) {
+function DroppableColumn({ col, children, count, taskIds }: { col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[] }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key })
   const Icon = col.icon
 
@@ -136,27 +169,35 @@ function DroppableColumn({ col, children, count }: { col: ColumnConfig; children
         <span className="text-xs text-muted-foreground">({count})</span>
       </div>
       <div className="flex-1 p-2 space-y-2 overflow-y-auto">
-        {children}
+        <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+          {children}
+        </SortableContext>
       </div>
     </div>
   )
 }
 
-function DraggableGlobalTask({ task, project, tasksDir, onStatusToggle, onDelete }: {
+function SortableGlobalTask({ task, project, tasksDir, onStatusToggle, onDelete }: {
   task: Task
   project?: Project
   tasksDir?: string
   onStatusToggle: (task: Task) => void
   onDelete: (task: Task) => void
 }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { task },
   })
 
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
   return (
     <div
       ref={setNodeRef}
+      style={style}
       className={cn('flex items-start gap-1', isDragging && 'opacity-30')}
       {...attributes}
     >
@@ -178,6 +219,8 @@ export function TasksPage() {
   const deleteTask = useDeleteTask()
   const importAllTasks = useImportAllTasks()
   const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [search, setSearch] = useState('')
+  const [priorityFilters, setPriorityFilters] = useState<Set<Priority>>(new Set())
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -189,11 +232,36 @@ export function TasksPage() {
     return m
   }, [projects])
 
+  const togglePriority = useCallback((p: Priority) => {
+    setPriorityFilters(prev => {
+      const next = new Set(prev)
+      if (next.has(p)) next.delete(p)
+      else next.add(p)
+      return next
+    })
+  }, [])
+
+  const filteredTasks = useMemo(() => {
+    if (!tasks) return []
+    let filtered = tasks
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      filtered = filtered.filter(t =>
+        t.title.toLowerCase().includes(q) ||
+        t.description?.toLowerCase().includes(q) ||
+        projectMap.get(t.projectId)?.name.toLowerCase().includes(q)
+      )
+    }
+    if (priorityFilters.size > 0) {
+      filtered = filtered.filter(t => priorityFilters.has(t.priority))
+    }
+    return filtered
+  }, [tasks, search, priorityFilters, projectMap])
+
   const grouped = useMemo(() => {
     const result: Record<string, Task[]> = { inbox: [], in_progress: [], done: [] }
-    if (!tasks) return result
 
-    for (const task of tasks) {
+    for (const task of filteredTasks) {
       if (task.status === 'done') result.done.push(task)
       else if (task.status === 'in_progress') result.in_progress.push(task)
       else result.inbox.push(task)
@@ -209,7 +277,14 @@ export function TasksPage() {
     }
 
     return result
-  }, [tasks])
+  }, [filteredTasks])
+
+  const findColumnForTask = useCallback((taskId: string): string | undefined => {
+    for (const [key, colTasks] of Object.entries(grouped)) {
+      if (colTasks.some(t => t.id === taskId)) return key
+    }
+    return undefined
+  }, [grouped])
 
   const handleStatusToggle = useCallback((task: Task) => {
     const nextStatus = task.status === 'done' ? 'todo' :
@@ -229,21 +304,28 @@ export function TasksPage() {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     setActiveTask(null)
-    if (!over) return
+    if (!over || active.id === over.id) return
 
     const task = active.data.current?.task as Task
     if (!task) return
 
-    const targetColumn = columns.find(c => c.key === over.id)
-    if (!targetColumn) return
+    // Dropped on a column directly (empty column)
+    if (COLUMN_KEYS.has(over.id as string)) {
+      const targetColumn = columns.find(c => c.key === over.id)!
+      if (!targetColumn.statuses.includes(task.status)) {
+        updateTask.mutate({ projectId: task.projectId, taskId: task.id, status: targetColumn.dropStatus })
+      }
+      return
+    }
 
-    if (targetColumn.statuses.includes(task.status)) return
+    // Dropped on another task — check if cross-column move
+    const overCol = findColumnForTask(over.id as string)
+    if (!overCol) return
 
-    updateTask.mutate({
-      projectId: task.projectId,
-      taskId: task.id,
-      status: targetColumn.dropStatus,
-    })
+    const targetCol = columns.find(c => c.key === overCol)
+    if (targetCol && !targetCol.statuses.includes(task.status)) {
+      updateTask.mutate({ projectId: task.projectId, taskId: task.id, status: targetCol.dropStatus })
+    }
   }
 
   const handleExportAll = () => {
@@ -281,11 +363,48 @@ export function TasksPage() {
     input.click()
   }
 
+  const hasFilters = search.trim() || priorityFilters.size > 0
+
   return (
     <>
       <Header title="All Tasks" />
       <div className="flex-1 overflow-hidden p-6">
-        <div className="flex items-center justify-end gap-1 mb-4">
+        {/* Filters */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="relative flex-1 max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              placeholder="Search tasks..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="h-8 pl-8 text-sm"
+            />
+          </div>
+          <div className="flex items-center gap-1.5">
+            {priorities.map(p => {
+              const Icon = p.icon
+              const active = priorityFilters.has(p.key)
+              return (
+                <button
+                  key={p.key}
+                  onClick={() => togglePriority(p.key)}
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-medium transition-colors',
+                    active ? p.color : 'border-transparent text-muted-foreground hover:bg-accent'
+                  )}
+                >
+                  <Icon className="h-3 w-3" />
+                  {p.label}
+                </button>
+              )
+            })}
+          </div>
+          {hasFilters && (
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setSearch(''); setPriorityFilters(new Set()) }}>
+              Clear
+            </Button>
+          )}
+          <div className="flex-1" />
           <Button variant="ghost" size="sm" className="h-7 gap-1.5 text-xs" onClick={handleExportAll}>
             <Download className="h-3.5 w-3.5" />
             Export All
@@ -295,20 +414,22 @@ export function TasksPage() {
             Import
           </Button>
         </div>
+
         <DndContext
           sensors={sensors}
-          collisionDetection={closestCenter}
+          collisionDetection={closestCorners}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
           <div className="grid grid-cols-3 gap-4 h-full">
             {columns.map(col => {
               const colTasks = grouped[col.key] || []
+              const taskIds = colTasks.map(t => t.id)
               return (
-                <DroppableColumn key={col.key} col={col} count={colTasks.length}>
+                <DroppableColumn key={col.key} col={col} count={colTasks.length} taskIds={taskIds}>
                   {colTasks.length > 0 ? (
                     colTasks.map(task => (
-                      <DraggableGlobalTask
+                      <SortableGlobalTask
                         key={task.id}
                         task={task}
                         project={projectMap.get(task.projectId)}

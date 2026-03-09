@@ -29,36 +29,81 @@ async function isDirectory(path: string): Promise<boolean> {
   }
 }
 
+async function collectDepsFromPackageJson(pkgPath: string): Promise<string[]> {
+  try {
+    const pkg = JSON.parse(await readFile(pkgPath, 'utf-8'));
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    return Object.keys(allDeps || {});
+  } catch {
+    return [];
+  }
+}
+
 async function detectTechStack(projectPath: string): Promise<string[]> {
-  const stack: string[] = [];
+  const stack = new Set<string>();
   const pkgPath = join(projectPath, 'package.json');
 
+  // Collect deps from root package.json
+  let depNames: string[] = [];
   if (await fileExists(pkgPath)) {
+    depNames = await collectDepsFromPackageJson(pkgPath);
+
+    // For monorepos/workspaces, also scan workspace package.json files
     try {
       const pkg = JSON.parse(await readFile(pkgPath, 'utf-8'));
-      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
-      const depNames = Object.keys(allDeps || {});
-
-      if (depNames.some(d => d === 'react' || d === 'react-dom')) stack.push('react');
-      if (depNames.some(d => d === 'next')) stack.push('next');
-      if (depNames.some(d => d === 'vue')) stack.push('vue');
-      if (depNames.some(d => d === 'svelte')) stack.push('svelte');
-      if (depNames.some(d => d === 'vite' || d === '@vitejs/plugin-react' || d === '@vitejs/plugin-react-swc')) stack.push('vite');
-      if (depNames.some(d => d === 'tailwindcss')) stack.push('tailwind');
-      if (depNames.some(d => d === 'typescript' || d === 'tsx')) stack.push('typescript');
-      if (depNames.some(d => d === 'express')) stack.push('express');
-      if (depNames.some(d => d === 'fastify')) stack.push('fastify');
-      if (depNames.some(d => d === 'prisma' || d === '@prisma/client')) stack.push('prisma');
-      if (depNames.some(d => d === 'electron')) stack.push('electron');
-      if (depNames.some(d => d === 'three')) stack.push('three.js');
+      if (pkg.workspaces || pkg.private) {
+        // Check common workspace subdirectories
+        const subdirs = ['client', 'server', 'app', 'web', 'api', 'packages', 'apps'];
+        for (const sub of subdirs) {
+          const subPkg = join(projectPath, sub, 'package.json');
+          if (await fileExists(subPkg)) {
+            const subDeps = await collectDepsFromPackageJson(subPkg);
+            depNames = [...depNames, ...subDeps];
+          }
+        }
+        // Also check pnpm-workspace.yaml packages
+        const workspaceYaml = join(projectPath, 'pnpm-workspace.yaml');
+        if (await fileExists(workspaceYaml)) {
+          const content = await readFile(workspaceYaml, 'utf-8');
+          const packageDirs = content.match(/- ['"]?([^'"\n]+?)\/?\*?['"]?$/gm);
+          if (packageDirs) {
+            for (const line of packageDirs) {
+              const dir = line.replace(/^-\s*['"]?/, '').replace(/\/?\*?['"]?$/, '');
+              if (dir && !subdirs.includes(dir)) {
+                // Check direct directory (non-glob)
+                const dirPkg = join(projectPath, dir, 'package.json');
+                if (await fileExists(dirPkg)) {
+                  const dirDeps = await collectDepsFromPackageJson(dirPkg);
+                  depNames = [...depNames, ...dirDeps];
+                }
+              }
+            }
+          }
+        }
+      }
     } catch {}
   }
 
-  if (await fileExists(join(projectPath, 'Cargo.toml'))) stack.push('rust');
-  if (await fileExists(join(projectPath, 'go.mod'))) stack.push('go');
-  if (await fileExists(join(projectPath, 'requirements.txt')) || await fileExists(join(projectPath, 'pyproject.toml'))) stack.push('python');
+  if (depNames.length > 0) {
+    if (depNames.some(d => d === 'react' || d === 'react-dom')) stack.add('react');
+    if (depNames.some(d => d === 'next')) stack.add('next');
+    if (depNames.some(d => d === 'vue')) stack.add('vue');
+    if (depNames.some(d => d === 'svelte')) stack.add('svelte');
+    if (depNames.some(d => d === 'vite' || d === '@vitejs/plugin-react' || d === '@vitejs/plugin-react-swc')) stack.add('vite');
+    if (depNames.some(d => d === 'tailwindcss')) stack.add('tailwind');
+    if (depNames.some(d => d === 'typescript' || d === 'tsx')) stack.add('typescript');
+    if (depNames.some(d => d === 'express')) stack.add('express');
+    if (depNames.some(d => d === 'fastify')) stack.add('fastify');
+    if (depNames.some(d => d === 'prisma' || d === '@prisma/client')) stack.add('prisma');
+    if (depNames.some(d => d === 'electron')) stack.add('electron');
+    if (depNames.some(d => d === 'three')) stack.add('three.js');
+  }
 
-  return stack;
+  if (await fileExists(join(projectPath, 'Cargo.toml'))) stack.add('rust');
+  if (await fileExists(join(projectPath, 'go.mod'))) stack.add('go');
+  if (await fileExists(join(projectPath, 'requirements.txt')) || await fileExists(join(projectPath, 'pyproject.toml'))) stack.add('python');
+
+  return [...stack];
 }
 
 async function detectGitInfo(projectPath: string): Promise<{

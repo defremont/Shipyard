@@ -60,7 +60,8 @@
       "lastCommitMessage": "docs: simplified portfolio and resume content",
       "gitRemoteUrl": "https://github.com/defremont/dcoderio",
       "techStack": [],
-      "favorite": true
+      "favorite": true,
+      "lastOpenedAt": "2026-03-09T23:40:49.698Z"
     },
     {
       "id": "redes-locais-marketplace",
@@ -138,6 +139,8 @@
       "lastCommitMessage": "feat(admin): added admin dashboard with user management",
       "gitRemoteUrl": "https://github.com/Amachains/smartlca",
       "techStack": [
+        "react",
+        "tailwind",
         "express"
       ],
       "favorite": false
@@ -221,7 +224,8 @@
         "tailwind",
         "typescript"
       ],
-      "favorite": true
+      "favorite": true,
+      "lastOpenedAt": "2026-03-09T23:48:29.612Z"
     },
     {
       "id": "devdash",
@@ -231,18 +235,24 @@
       "isGitRepo": true,
       "gitBranch": "main",
       "gitDirty": true,
-      "gitAhead": 0,
+      "gitAhead": 1,
       "gitBehind": 0,
       "gitStaged": 0,
-      "gitUnstaged": 12,
-      "gitUntracked": 9,
-      "lastCommitDate": "2026-03-09T20:20:01-03:00",
-      "lastCommitMessage": "Redesign Dashboard: simplify layout and integrate task counts into project cards",
+      "gitUnstaged": 5,
+      "gitUntracked": 1,
+      "lastCommitDate": "2026-03-09T20:38:29-03:00",
+      "lastCommitMessage": "Add onboarding wizard, git indicators, setup scripts, and project polish",
       "gitRemoteUrl": "https://github.com/defremont/vibedash",
-      "techStack": [],
+      "techStack": [
+        "react",
+        "vite",
+        "tailwind",
+        "typescript",
+        "fastify"
+      ],
       "favorite": true,
-      "lastOpenedAt": "2026-03-09T23:19:24.226Z"
+      "lastOpenedAt": "2026-03-09T23:38:47.817Z"
     }
   ],
-  "lastScannedAt": "2026-03-09T23:27:24.419Z"
+  "lastScannedAt": "2026-03-09T23:48:29.612Z"
 }

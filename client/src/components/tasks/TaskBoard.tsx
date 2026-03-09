@@ -1,24 +1,25 @@
 import { useState, useCallback, useMemo } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2, Download, Upload, FileSpreadsheet, Info } from 'lucide-react'
+import { Plus, Inbox, Loader, CheckCircle2, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
   useDroppable,
-  useDraggable,
-  closestCenter,
+  closestCorners,
   PointerSensor,
   useSensor,
   useSensors,
   type DragEndEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
+import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { TaskItem } from './TaskItem'
 import { TaskEditor } from './TaskEditor'
 import { TaskViewer } from './TaskViewer'
 import { CsvReviewDialog } from './CsvReviewDialog'
-import { useTasks, useUpdateTask, useImportTasks, type Task } from '@/hooks/useTasks'
+import { useTasks, useUpdateTask, useReorderTasks, useImportTasks, type Task } from '@/hooks/useTasks'
 import { tasksToCSV, parseCSV, diffTasks, type CsvDiff } from '@/lib/csv'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -65,7 +66,9 @@ const columns: ColumnConfig[] = [
   },
 ]
 
-function DroppableColumn({ col, children, count }: { col: ColumnConfig; children: React.ReactNode; count: number }) {
+const COLUMN_KEYS = new Set(columns.map(c => c.key))
+
+function DroppableColumn({ col, children, count, taskIds }: { col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[] }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key })
   const Icon = col.icon
 
@@ -85,21 +88,29 @@ function DroppableColumn({ col, children, count }: { col: ColumnConfig; children
         <span className="text-xs text-muted-foreground">({count})</span>
       </div>
       <div className="flex-1 p-2 space-y-2">
-        {children}
+        <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+          {children}
+        </SortableContext>
       </div>
     </div>
   )
 }
 
-function DraggableTaskItem({ task, projectName, projectPath, onEdit, onView }: { task: Task; projectName?: string; projectPath?: string; onEdit: (task: Task) => void; onView: (task: Task) => void }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+function SortableTaskItem({ task, projectName, projectPath, onEdit, onView }: { task: Task; projectName?: string; projectPath?: string; onEdit: (task: Task) => void; onView: (task: Task) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { task },
   })
 
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  }
+
   return (
     <div
       ref={setNodeRef}
+      style={style}
       className={cn(isDragging && 'opacity-30')}
       {...attributes}
     >
@@ -118,6 +129,7 @@ function DraggableTaskItem({ task, projectName, projectPath, onEdit, onView }: {
 export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId)
   const updateTask = useUpdateTask()
+  const reorderTasks = useReorderTasks()
   const importTasks = useImportTasks()
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -233,6 +245,13 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
     return result
   }, [tasks])
 
+  const findColumnForTask = useCallback((taskId: string): string | undefined => {
+    for (const [key, colTasks] of Object.entries(grouped)) {
+      if (colTasks.some(t => t.id === taskId)) return key
+    }
+    return undefined
+  }, [grouped])
+
   const handleDragStart = (event: DragStartEvent) => {
     setActiveTask(event.active.data.current?.task || null)
   }
@@ -240,21 +259,51 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event
     setActiveTask(null)
-    if (!over) return
+    if (!over || active.id === over.id) return
 
     const task = active.data.current?.task as Task
     if (!task) return
 
-    const targetColumn = columns.find(c => c.key === over.id)
-    if (!targetColumn) return
+    // Dropped on a column directly (empty column)
+    if (COLUMN_KEYS.has(over.id as string)) {
+      const targetColumn = columns.find(c => c.key === over.id)!
+      if (!targetColumn.statuses.includes(task.status)) {
+        updateTask.mutate({ projectId: task.projectId, taskId: task.id, status: targetColumn.dropStatus })
+      }
+      return
+    }
 
-    if (targetColumn.statuses.includes(task.status)) return
+    // Dropped on another task
+    const activeCol = findColumnForTask(active.id as string)
+    const overCol = findColumnForTask(over.id as string)
 
-    updateTask.mutate({
-      projectId: task.projectId,
-      taskId: task.id,
-      status: targetColumn.dropStatus,
-    })
+    if (!activeCol || !overCol) return
+
+    if (activeCol === overCol) {
+      // Same column — reorder
+      const colTasks = grouped[activeCol]
+      const oldIndex = colTasks.findIndex(t => t.id === active.id)
+      const newIndex = colTasks.findIndex(t => t.id === over.id)
+      if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
+        const reordered = arrayMove(colTasks, oldIndex, newIndex)
+        // Build full task order: reordered column + other columns unchanged
+        const allIds: string[] = []
+        for (const col of columns) {
+          if (col.key === activeCol) {
+            allIds.push(...reordered.map(t => t.id))
+          } else {
+            allIds.push(...(grouped[col.key] || []).map(t => t.id))
+          }
+        }
+        reorderTasks.mutate({ projectId, taskIds: allIds })
+      }
+    } else {
+      // Different column — move status
+      const targetCol = columns.find(c => c.key === overCol)
+      if (targetCol && !targetCol.statuses.includes(task.status)) {
+        updateTask.mutate({ projectId: task.projectId, taskId: task.id, status: targetCol.dropStatus })
+      }
+    }
   }
 
   if (isLoading) {
@@ -311,18 +360,19 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
 
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCenter}
+        collisionDetection={closestCorners}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
       >
         <div className="grid grid-cols-3 gap-3">
           {columns.map(col => {
             const colTasks = grouped[col.key] || []
+            const taskIds = colTasks.map(t => t.id)
             return (
-              <DroppableColumn key={col.key} col={col} count={colTasks.length}>
+              <DroppableColumn key={col.key} col={col} count={colTasks.length} taskIds={taskIds}>
                 {colTasks.length > 0 ? (
                   colTasks.map(task => (
-                    <DraggableTaskItem
+                    <SortableTaskItem
                       key={task.id}
                       task={task}
                       projectName={projectName}
