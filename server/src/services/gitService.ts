@@ -83,12 +83,15 @@ export async function getMainBranchLastCommit(projectPath: string): Promise<{ ha
   const git = getGit(projectPath);
   try {
     const branches = await git.branch();
-    const mainBranch = branches.all.find(b => b === 'main') || branches.all.find(b => b === 'master');
-    if (!mainBranch) return null;
-    const log = await git.log({ maxCount: 1, from: mainBranch, to: mainBranch });
-    const latest = log.latest;
-    if (!latest) return null;
-    return { hash: latest.hash, message: latest.message, date: latest.date, author_name: latest.author_name };
+    const mainRef = branches.all.find(b => b === 'main')
+      || branches.all.find(b => b === 'master')
+      || branches.all.find(b => b === 'remotes/origin/main')
+      || branches.all.find(b => b === 'remotes/origin/master');
+    if (!mainRef) return null;
+    const raw = await git.raw(['log', mainRef, '-1', '--format=%H%n%s%n%aI%n%an']);
+    if (!raw.trim()) return null;
+    const [hash, message, date, author_name] = raw.trim().split('\n');
+    return { hash, message, date, author_name };
   } catch {
     return null;
   }
