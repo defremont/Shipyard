@@ -20,8 +20,9 @@ export function CommitForm({ projectId, hasStagedChanges }: CommitFormProps) {
   const handleAICommit = () => {
     const prompt = 'Veja as mudanças staged com git diff --cached, faça o commit com uma mensagem simples e descritiva. Só commitar, sem push.'
     navigator.clipboard.writeText(prompt)
+    const skipPerm = localStorage.getItem('devdash:skipPermissions') === 'true'
     launchTerminal.mutate(
-      { projectId, type: 'claude' },
+      { projectId, type: skipPerm ? 'claude-yolo' : 'claude' },
       { onSuccess: () => toast.success('Claude aberto — cole o prompt') }
     )
   }

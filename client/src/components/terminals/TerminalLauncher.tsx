@@ -56,7 +56,9 @@ export function TerminalLauncher({ projectId, projectPath, projectName }: Termin
   const launchVSCode = useLaunchVSCode()
   const openFolder = useOpenFolder()
   const { data: tasks } = useTasks(projectId)
-  const [skipPermissions, setSkipPermissions] = useState(false)
+  const [skipPermissions, setSkipPermissions] = useState(() => {
+    try { return localStorage.getItem('devdash:skipPermissions') === 'true' } catch { return false }
+  })
 
   const handleCopyContext = () => {
     if (!projectPath || !projectName) return
@@ -107,7 +109,10 @@ export function TerminalLauncher({ projectId, projectPath, projectName }: Termin
             <input
               type="checkbox"
               checked={skipPermissions}
-              onChange={e => setSkipPermissions(e.target.checked)}
+              onChange={e => {
+              setSkipPermissions(e.target.checked)
+              localStorage.setItem('devdash:skipPermissions', String(e.target.checked))
+            }}
               className="rounded border-muted-foreground/30"
             />
             <span className="text-[10px] text-muted-foreground">Skip permissions (--dangerously-skip-permissions)</span>
