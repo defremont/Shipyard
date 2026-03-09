@@ -151,6 +151,64 @@ export async function importTasks(projectId: string, importedTasks: Partial<Task
   return created.length;
 }
 
+export async function applyCsvChanges(
+  projectId: string,
+  changes: {
+    update: Array<{ id: string } & Partial<Omit<Task, 'id' | 'projectId' | 'createdAt'>>>;
+    create: Array<Partial<Omit<Task, 'id' | 'projectId' | 'createdAt' | 'updatedAt' | 'order'>>>;
+    remove: string[];
+  }
+): Promise<{ updated: number; created: number; removed: number }> {
+  let tasks = await readTasks(projectId);
+  const now = new Date().toISOString();
+
+  // Remove
+  const removeSet = new Set(changes.remove);
+  const removedCount = tasks.filter(t => removeSet.has(t.id)).length;
+  tasks = tasks.filter(t => !removeSet.has(t.id));
+
+  // Update
+  let updatedCount = 0;
+  for (const upd of changes.update) {
+    const idx = tasks.findIndex(t => t.id === upd.id);
+    if (idx !== -1) {
+      const oldStatus = tasks[idx].status;
+      const newStatus = upd.status;
+      const statusTimestamps: Partial<Task> = {};
+      if (newStatus && newStatus !== oldStatus) {
+        if (newStatus === 'backlog' || newStatus === 'todo') statusTimestamps.inboxAt = now;
+        else if (newStatus === 'in_progress') statusTimestamps.inProgressAt = now;
+        else if (newStatus === 'done') statusTimestamps.doneAt = now;
+      }
+      tasks[idx] = { ...tasks[idx], ...upd, ...statusTimestamps, updatedAt: now };
+      updatedCount++;
+    }
+  }
+
+  // Create
+  for (const newTask of changes.create) {
+    const status = (newTask.status as Task['status']) || 'todo';
+    tasks.push({
+      title: newTask.title || 'Untitled',
+      description: newTask.description || '',
+      priority: (newTask.priority as Task['priority']) || 'medium',
+      status,
+      promptTemplate: newTask.promptTemplate,
+      id: nanoid(10),
+      projectId,
+      createdAt: now,
+      updatedAt: now,
+      order: tasks.length,
+      inboxAt: (status === 'backlog' || status === 'todo') ? now : undefined,
+      inProgressAt: status === 'in_progress' ? now : undefined,
+      doneAt: status === 'done' ? now : undefined,
+    });
+  }
+
+  await writeTasks(projectId, tasks);
+  return { updated: updatedCount, created: changes.create.length, removed: removedCount };
+}
+
 export async function reorderTasks(projectId: string, taskIds: string[]): Promise<Task[]> {
   const tasks = await readTasks(projectId);
   const reordered: Task[] = [];

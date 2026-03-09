@@ -192,7 +192,7 @@ export function GitPanel({ projectId }: GitPanelProps) {
                 </div>
                 <div className="flex items-center gap-1 shrink-0 mt-0.5">
                   {unpushed && (
-                    <ArrowUp className="h-2.5 w-2.5 text-yellow-500" title="Not pushed" />
+                    <ArrowUp className="h-2.5 w-2.5 text-yellow-500" />
                   )}
                   <span className="text-[9px] font-mono text-muted-foreground/40">
                     {commit.hash.substring(0, 7)}

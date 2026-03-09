@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Search, Loader, AlertTriangle, ArrowUp, Minus, Circle, ArrowRight, Star, GitBranch, Clock, Terminal, Code2, FolderOpen } from 'lucide-react'
+import { Search, Loader, AlertTriangle, ArrowUp, ArrowDown, Minus, Circle, ArrowRight, Star, GitBranch, Clock, Terminal, Code2, FolderOpen } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -17,7 +17,7 @@ const priorityConfig = {
   urgent: { icon: AlertTriangle, color: 'text-red-500', bg: 'bg-red-500/10' },
   high: { icon: ArrowUp, color: 'text-orange-500', bg: 'bg-orange-500/10' },
   medium: { icon: Minus, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-  low: { icon: Circle, color: 'text-muted-foreground', bg: 'bg-muted' },
+  low: { icon: ArrowDown, color: 'text-red-500', bg: 'bg-red-500/10' },
 }
 
 function ActiveProjectGroup({ project, tasks }: { project: Project; tasks: Task[] }) {

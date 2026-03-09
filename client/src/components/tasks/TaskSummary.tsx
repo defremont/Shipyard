@@ -1,6 +1,6 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, Minus, Circle, Clock, Plus } from 'lucide-react'
+import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Circle, Clock, Plus } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -12,7 +12,7 @@ const priorityConfig = {
   urgent: { icon: AlertTriangle, color: 'text-red-500' },
   high: { icon: ArrowUp, color: 'text-orange-500' },
   medium: { icon: Minus, color: 'text-blue-500' },
-  low: { icon: Circle, color: 'text-muted-foreground' },
+  low: { icon: ArrowDown, color: 'text-red-500' },
 }
 
 const statusColors: Record<string, string> = {

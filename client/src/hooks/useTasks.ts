@@ -98,6 +98,18 @@ export function useImportAllTasks() {
   })
 }
 
+export function useApplyCsvChanges() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, changes }: { projectId: string; changes: { update: any[]; create: any[]; remove: string[] } }) =>
+      api.applyCsvChanges(projectId, changes),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+    },
+  })
+}
+
 export function useReorderTasks() {
   const queryClient = useQueryClient()
   return useMutation({

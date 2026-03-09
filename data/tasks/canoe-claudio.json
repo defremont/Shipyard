@@ -80,13 +80,16 @@
       "id": "8",
       "title": "Fluxo pos-aprovacao: datas bloqueadas por padrao",
       "description": "Apos admin aprovar embarcacao, todas as datas devem vir bloqueadas (cinza/nao clicavel). Operador libera datas e define precos em 'Datas e Precos'. Embarcacao so aparece no Navegar quando tiver datas liberadas. Impedir que va pro ar sem configuracao completa.",
-      "status": "pending",
+      "status": "todo",
       "priority": "high",
       "tags": [
         "embarcacoes",
         "calendario",
         "ux"
-      ]
+      ],
+      "inProgressAt": "2026-03-09T16:19:28.847Z",
+      "updatedAt": "2026-03-09T16:29:43.369Z",
+      "inboxAt": "2026-03-09T16:29:43.369Z"
     },
     {
       "id": "9",
@@ -103,13 +106,16 @@
       "id": "10",
       "title": "QR Scanner: selecao de embarcacao + confirmar/cancelar passeio",
       "description": "Scanner existe mas precisa: (1) Lista de embarcacoes do operador para selecionar qual embarque. (2) Validar se QR e do dia correto (msg de erro se for de outro dia). (3) Botao Confirmar Passeio liberado apenas no dia. (4) Botao Cancelar Passeio sempre disponivel com motivo + opcoes pro cliente: Reagendar ou Reembolso (Stripe refund imediato).",
-      "status": "pending",
+      "status": "todo",
       "priority": "high",
       "tags": [
         "qrcode",
         "checkin",
         "passeios"
-      ]
+      ],
+      "inProgressAt": "2026-03-09T16:18:19.667Z",
+      "updatedAt": "2026-03-09T16:18:21.360Z",
+      "inboxAt": "2026-03-09T16:18:21.360Z"
     },
     {
       "id": "11",

@@ -33,6 +33,8 @@ export const api = {
   reorderTasks: (projectId: string, taskIds: string[]) => request(`/projects/${projectId}/tasks/reorder`, { method: 'POST', body: JSON.stringify({ taskIds }) }),
   importTasks: (projectId: string, tasks: any[]) => request<{ imported: number }>(`/projects/${projectId}/tasks/import`, { method: 'POST', body: JSON.stringify({ tasks }) }),
   importAllTasks: (tasks: any[]) => request<{ imported: number }>('/tasks/import', { method: 'POST', body: JSON.stringify({ tasks }) }),
+  applyCsvChanges: (projectId: string, changes: { update: any[]; create: any[]; remove: string[] }) =>
+    request<{ updated: number; created: number; removed: number }>(`/projects/${projectId}/tasks/csv-apply`, { method: 'POST', body: JSON.stringify(changes) }),
 
   // Git
   getGitStatus: (projectId: string) => request<any>(`/projects/${projectId}/git/status`),

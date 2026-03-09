@@ -1,4 +1,4 @@
-import { Pencil, Trash2, Copy, Check, Circle, AlertTriangle, ArrowUp, Minus } from 'lucide-react'
+import { Pencil, Trash2, Copy, Check, Circle, AlertTriangle, ArrowUp, ArrowDown, Minus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
@@ -16,7 +16,7 @@ const priorityConfig = {
   urgent: { icon: AlertTriangle, color: 'text-red-500', label: 'Urgent' },
   high: { icon: ArrowUp, color: 'text-orange-500', label: 'High' },
   medium: { icon: Minus, color: 'text-blue-500', label: 'Medium' },
-  low: { icon: Circle, color: 'text-muted-foreground', label: 'Low' },
+  low: { icon: ArrowDown, color: 'text-red-500', label: 'Low' },
 }
 
 const statusConfig = {

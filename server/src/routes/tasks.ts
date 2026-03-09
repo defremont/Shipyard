@@ -76,6 +76,18 @@ export async function taskRoutes(app: FastifyInstance) {
     }
   );
 
+  // Apply CSV diff changes (batch update/create/remove)
+  app.post<{
+    Params: { projectId: string };
+    Body: { update: Array<{ id: string; [key: string]: any }>; create: Array<{ [key: string]: any }>; remove: string[] }
+  }>(
+    '/api/projects/:projectId/tasks/csv-apply',
+    async (request) => {
+      const result = await taskStore.applyCsvChanges(request.params.projectId, request.body);
+      return result;
+    }
+  );
+
   app.post<{ Params: { projectId: string }; Body: { taskIds: string[] } }>(
     '/api/projects/:projectId/tasks/reorder',
     async (request) => {

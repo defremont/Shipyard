@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, Minus, Circle, Clock } from 'lucide-react'
+import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Circle, Clock } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -42,7 +42,7 @@ const priorityConfig = {
   urgent: { icon: AlertTriangle, color: 'text-red-500' },
   high: { icon: ArrowUp, color: 'text-orange-500' },
   medium: { icon: Minus, color: 'text-blue-500' },
-  low: { icon: Circle, color: 'text-muted-foreground' },
+  low: { icon: ArrowDown, color: 'text-red-500' },
 }
 
 function GlobalTaskCard({ task, project, onStatusToggle, onDelete }: {

@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2, Download, Upload } from 'lucide-react'
+import { Plus, Inbox, Loader, CheckCircle2, Download, Upload, FileSpreadsheet } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -15,7 +15,9 @@ import {
 import { Button } from '@/components/ui/button'
 import { TaskItem } from './TaskItem'
 import { TaskEditor } from './TaskEditor'
+import { CsvReviewDialog } from './CsvReviewDialog'
 import { useTasks, useUpdateTask, useImportTasks, type Task } from '@/hooks/useTasks'
+import { tasksToCSV, parseCSV, diffTasks, type CsvDiff } from '@/lib/csv'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -115,6 +117,8 @@ export function TaskBoard({ projectId, projectName }: TaskBoardProps) {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
   const [activeTask, setActiveTask] = useState<Task | null>(null)
+  const [csvReviewOpen, setCsvReviewOpen] = useState(false)
+  const [csvDiff, setCsvDiff] = useState<CsvDiff | null>(null)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -159,6 +163,38 @@ export function TaskBoard({ projectId, projectName }: TaskBoardProps) {
           onError: () => toast.error('Failed to import tasks'),
         })
       } catch { toast.error('Failed to read file') }
+    }
+    input.click()
+  }
+
+  const handleCsvExport = () => {
+    if (!tasks?.length) { toast.info('No tasks to export'); return }
+    const csv = tasksToCSV(tasks)
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `tasks-${projectId}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success(`Exported ${tasks.length} tasks as CSV`)
+  }
+
+  const handleCsvImport = () => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = '.csv'
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0]
+      if (!file) return
+      try {
+        const text = await file.text()
+        const rows = parseCSV(text)
+        if (rows.length === 0) { toast.error('No valid rows found in CSV'); return }
+        const diff = diffTasks(tasks || [], rows)
+        setCsvDiff(diff)
+        setCsvReviewOpen(true)
+      } catch { toast.error('Failed to read CSV file') }
     }
     input.click()
   }
@@ -221,9 +257,19 @@ export function TaskBoard({ projectId, projectName }: TaskBoardProps) {
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleExport} title="Export tasks">
             <Download className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleImport} title="Import tasks">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleImport} title="Import JSON">
             <Upload className="h-3.5 w-3.5" />
           </Button>
+          <div className="w-px h-4 bg-border mx-0.5" />
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={handleCsvExport} title="Export CSV for client sharing">
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            Export CSV
+          </Button>
+          <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={handleCsvImport} title="Import CSV with diff review">
+            <FileSpreadsheet className="h-3.5 w-3.5" />
+            Import CSV
+          </Button>
+          <div className="w-px h-4 bg-border mx-0.5" />
           <Button size="sm" className="h-7 gap-1 text-xs" onClick={handleNew}>
             <Plus className="h-3.5 w-3.5" />
             New Task
@@ -276,6 +322,15 @@ export function TaskBoard({ projectId, projectName }: TaskBoardProps) {
         open={editorOpen}
         onOpenChange={setEditorOpen}
       />
+
+      {csvDiff && (
+        <CsvReviewDialog
+          open={csvReviewOpen}
+          onOpenChange={setCsvReviewOpen}
+          diff={csvDiff}
+          projectId={projectId}
+        />
+      )}
     </div>
   )
 }
