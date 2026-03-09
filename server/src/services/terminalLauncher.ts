@@ -19,10 +19,10 @@ export async function launchTerminal(projectPath: string, type: TerminalType): P
 
   switch (type) {
     case 'claude':
-      args.push('--title', 'Claude Code', 'cmd.exe', '/k', 'claude');
+      args.push('--title', 'Claude Code', 'cmd.exe', '/k', 'set CLAUDECODE= && claude');
       break;
     case 'claude-yolo':
-      args.push('--title', 'Claude Code', 'cmd.exe', '/k', 'claude --dangerously-skip-permissions');
+      args.push('--title', 'Claude Code', 'cmd.exe', '/k', 'set CLAUDECODE= && claude --dangerously-skip-permissions');
       break;
     case 'dev': {
       const devCmd = await detectDevCommand(projectPath);

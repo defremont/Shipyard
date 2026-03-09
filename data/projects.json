@@ -259,12 +259,12 @@
       "isGitRepo": true,
       "gitBranch": "main",
       "gitDirty": true,
-      "lastCommitDate": "2026-03-09T12:23:11-03:00",
-      "lastCommitMessage": "first commit",
+      "lastCommitDate": "2026-03-09T12:57:47-03:00",
+      "lastCommitMessage": "Add AI commit messages, improve sidebar, tasks and tab system",
       "techStack": [],
       "favorite": true,
-      "lastOpenedAt": "2026-03-09T15:09:34.032Z"
+      "lastOpenedAt": "2026-03-09T15:57:14.062Z"
     }
   ],
-  "lastScannedAt": "2026-03-09T15:51:43.416Z"
+  "lastScannedAt": "2026-03-09T16:01:33.002Z"
 }

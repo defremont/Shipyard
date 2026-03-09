@@ -98,12 +98,6 @@ export function useGitPush() {
   })
 }
 
-export function useGenerateCommitMessage() {
-  return useMutation({
-    mutationFn: (projectId: string) => api.generateCommitMessage(projectId),
-  })
-}
-
 export function useGitPull() {
   const queryClient = useQueryClient()
   return useMutation({

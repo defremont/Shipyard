@@ -42,7 +42,6 @@ export const api = {
   gitCommit: (projectId: string, message: string) => request(`/projects/${projectId}/git/commit`, { method: 'POST', body: JSON.stringify({ message }) }),
   gitPush: (projectId: string) => request(`/projects/${projectId}/git/push`, { method: 'POST' }),
   gitPull: (projectId: string) => request(`/projects/${projectId}/git/pull`, { method: 'POST' }),
-  generateCommitMessage: (projectId: string) => request<{ message: string }>(`/projects/${projectId}/git/generate-commit-message`, { method: 'POST' }),
   getGitLog: (projectId: string) => request<any>(`/projects/${projectId}/git/log`),
   getGitBranches: (projectId: string) => request<any>(`/projects/${projectId}/git/branches`),
 

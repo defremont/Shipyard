@@ -9,6 +9,9 @@ async function getProjectPath(projectId: string): Promise<string | null> {
 }
 
 export async function gitRoutes(app: FastifyInstance) {
+  // Track last fetch time per project to avoid fetching too often
+  const lastFetch = new Map<string, number>();
+
   app.get<{ Params: { projectId: string } }>(
     '/api/projects/:projectId/git/status',
     async (request, reply) => {
@@ -16,6 +19,14 @@ export async function gitRoutes(app: FastifyInstance) {
       if (!path) return reply.status(404).send({ error: 'Project not found' });
 
       try {
+        // Fetch at most once per 60s to keep ahead/behind accurate
+        const now = Date.now();
+        const last = lastFetch.get(path) || 0;
+        if (now - last > 60_000) {
+          lastFetch.set(path, now);
+          await gitService.fetch(path);
+        }
+
         const status = await gitService.getStatus(path);
         return status;
       } catch (err: any) {
@@ -137,21 +148,6 @@ export async function gitRoutes(app: FastifyInstance) {
       try {
         const log = await gitService.getLog(path);
         return log;
-      } catch (err: any) {
-        return reply.status(500).send({ error: err.message });
-      }
-    }
-  );
-
-  app.post<{ Params: { projectId: string } }>(
-    '/api/projects/:projectId/git/generate-commit-message',
-    async (request, reply) => {
-      const path = await getProjectPath(request.params.projectId);
-      if (!path) return reply.status(404).send({ error: 'Project not found' });
-
-      try {
-        const message = await gitService.generateCommitMessage(path);
-        return { message };
       } catch (err: any) {
         return reply.status(500).send({ error: err.message });
       }

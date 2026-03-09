@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Sparkles, Loader2 } from 'lucide-react'
+import { Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { useGitCommit, useGitPush, useGenerateCommitMessage } from '@/hooks/useGit'
+import { useGitCommit, useGitPush } from '@/hooks/useGit'
+import { useLaunchTerminal } from '@/hooks/useProjects'
 import { toast } from 'sonner'
 
 interface CommitFormProps {
@@ -14,13 +15,15 @@ export function CommitForm({ projectId, hasStagedChanges }: CommitFormProps) {
   const [message, setMessage] = useState('')
   const gitCommit = useGitCommit()
   const gitPush = useGitPush()
-  const generateMsg = useGenerateCommitMessage()
+  const launchTerminal = useLaunchTerminal()
 
-  const handleGenerate = () => {
-    generateMsg.mutate(projectId, {
-      onSuccess: (data) => setMessage(data.message),
-      onError: (err) => toast.error(`AI: ${err.message}`),
-    })
+  const handleAICommit = () => {
+    const prompt = 'Veja as mudanças staged com git diff --cached, faça o commit com uma mensagem simples e descritiva. Só commitar, sem push.'
+    navigator.clipboard.writeText(prompt)
+    launchTerminal.mutate(
+      { projectId, type: 'claude' },
+      { onSuccess: () => toast.success('Claude aberto — cole o prompt') }
+    )
   }
 
   const handleCommit = () => {
@@ -68,15 +71,11 @@ export function CommitForm({ projectId, hasStagedChanges }: CommitFormProps) {
           variant="ghost"
           size="icon"
           className="h-9 w-9 shrink-0"
-          disabled={!hasStagedChanges || generateMsg.isPending}
-          onClick={handleGenerate}
-          title="Generate commit message with AI"
+          disabled={!hasStagedChanges}
+          onClick={handleAICommit}
+          title="Abrir Claude para commitar"
         >
-          {generateMsg.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Sparkles className="h-4 w-4" />
-          )}
+          <Sparkles className="h-4 w-4" />
         </Button>
       </div>
       <div className="flex gap-2">

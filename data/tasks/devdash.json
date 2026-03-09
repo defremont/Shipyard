@@ -1,0 +1,127 @@
+{
+  "tasks": [
+    {
+      "id": "tsk_dd_001",
+      "projectId": "devdash",
+      "title": "Confirmar antes de deletar tarefa",
+      "description": "Adicionar dialog de confirmacao ao clicar em deletar tarefa. Atualmente deleta direto sem confirmar, o que pode causar perda acidental de dados. Usar AlertDialog do shadcn/ui.",
+      "priority": "urgent",
+      "status": "in_progress",
+      "createdAt": "2026-03-08T10:00:00.000Z",
+      "updatedAt": "2026-03-09T14:00:00.000Z",
+      "order": 0,
+      "inboxAt": "2026-03-08T10:00:00.000Z",
+      "inProgressAt": "2026-03-09T14:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_002",
+      "projectId": "devdash",
+      "title": "Drag-and-drop nao reordena dentro da mesma coluna",
+      "description": "O kanban permite mover entre colunas, mas nao reordena tarefas dentro da mesma coluna. Implementar reorder via @dnd-kit/sortable para manter a ordem personalizada do usuario. A rota POST reorder ja existe no backend.",
+      "priority": "high",
+      "status": "in_progress",
+      "createdAt": "2026-03-08T11:00:00.000Z",
+      "updatedAt": "2026-03-09T13:00:00.000Z",
+      "order": 1,
+      "inboxAt": "2026-03-08T11:00:00.000Z",
+      "inProgressAt": "2026-03-09T13:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_003",
+      "projectId": "devdash",
+      "title": "Notificacao toast nas operacoes git",
+      "description": "Adicionar feedback visual com sonner toast quando operacoes git (push, pull, commit, stage) completam com sucesso ou erro. Sonner ja esta instalado mas nao esta sendo usado em todas as operacoes. Verificar useGit.ts e adicionar toast nos onSuccess/onError das mutations.",
+      "priority": "medium",
+      "status": "in_progress",
+      "createdAt": "2026-03-08T12:00:00.000Z",
+      "updatedAt": "2026-03-09T12:00:00.000Z",
+      "order": 2,
+      "inboxAt": "2026-03-08T12:00:00.000Z",
+      "inProgressAt": "2026-03-09T12:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_004",
+      "projectId": "devdash",
+      "title": "Filtro por prioridade e busca no kanban global (/tasks)",
+      "description": "Na pagina /tasks, adicionar filtros por prioridade (urgent/high/medium/low) e campo de busca para filtrar tarefas por titulo. Usar badges clicaveis como toggle filters acima do kanban.",
+      "priority": "high",
+      "status": "todo",
+      "createdAt": "2026-03-08T09:00:00.000Z",
+      "updatedAt": "2026-03-08T09:00:00.000Z",
+      "order": 3,
+      "inboxAt": "2026-03-08T09:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_005",
+      "projectId": "devdash",
+      "title": "Deteccao de tech stack retornando array vazio",
+      "description": "O techStack de varios projetos (incluindo devdash) mostra array vazio mesmo tendo package.json com react, vite, tailwind etc. Revisar projectDiscovery.ts - a funcao buildProject() precisa ler dependencies e devDependencies do package.json para detectar corretamente.",
+      "priority": "high",
+      "status": "todo",
+      "createdAt": "2026-03-09T08:00:00.000Z",
+      "updatedAt": "2026-03-09T08:00:00.000Z",
+      "order": 4,
+      "inboxAt": "2026-03-09T08:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_006",
+      "projectId": "devdash",
+      "title": "Contador de tarefas pendentes no ProjectCard",
+      "description": "Mostrar badge com numero de tarefas pendentes (todo + in_progress) em cada ProjectCard na dashboard. Precisa de um endpoint ou incluir contagem no GET /api/projects. Ajuda a visualizar rapidamente quais projetos tem trabalho pendente.",
+      "priority": "medium",
+      "status": "todo",
+      "createdAt": "2026-03-09T09:00:00.000Z",
+      "updatedAt": "2026-03-09T09:00:00.000Z",
+      "order": 5,
+      "inboxAt": "2026-03-09T09:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_007",
+      "projectId": "devdash",
+      "title": "Toggle de tema dark/light",
+      "description": "Implementar botao de toggle no header ou sidebar para alternar entre tema dark e light. As CSS variables ja existem no index.css (shadcn theme). Persistir preferencia no localStorage. Respeitar prefers-color-scheme do sistema como default.",
+      "priority": "medium",
+      "status": "todo",
+      "createdAt": "2026-03-09T10:00:00.000Z",
+      "updatedAt": "2026-03-09T10:00:00.000Z",
+      "order": 6,
+      "inboxAt": "2026-03-09T10:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_008",
+      "projectId": "devdash",
+      "title": "Atalhos de teclado para navegacao",
+      "description": "Implementar keyboard shortcuts: Ctrl+K para busca rapida (command palette), Ctrl+1/2/3 para trocar entre abas abertas, Escape para fechar dialog/modal. Criar hook useKeyboardShortcuts com registro centralizado.",
+      "priority": "low",
+      "status": "backlog",
+      "createdAt": "2026-03-09T10:30:00.000Z",
+      "updatedAt": "2026-03-09T10:30:00.000Z",
+      "order": 7,
+      "inboxAt": "2026-03-09T10:30:00.000Z"
+    },
+    {
+      "id": "tsk_dd_009",
+      "projectId": "devdash",
+      "title": "Sidebar responsiva com collapse em telas menores",
+      "description": "A sidebar nao colapsa em telas menores. Implementar sidebar colapsavel com botao hamburger para telas < 768px. Manter estado collapse/expand no localStorage. Considerar usar sheet do shadcn para mobile.",
+      "priority": "low",
+      "status": "backlog",
+      "createdAt": "2026-03-09T11:00:00.000Z",
+      "updatedAt": "2026-03-09T11:00:00.000Z",
+      "order": 8,
+      "inboxAt": "2026-03-09T11:00:00.000Z"
+    },
+    {
+      "id": "tsk_dd_010",
+      "projectId": "devdash",
+      "title": "Timestamps relativos nas tarefas",
+      "description": "Mostrar timestamps relativos ('ha 2 dias', 'ha 3h') no TaskItem usando date-fns formatDistanceToNow. Exibir createdAt como tooltip e updatedAt de forma sutil abaixo do titulo. Ajuda a entender a idade e atividade das tarefas.",
+      "priority": "low",
+      "status": "backlog",
+      "createdAt": "2026-03-09T11:30:00.000Z",
+      "updatedAt": "2026-03-09T11:30:00.000Z",
+      "order": 9,
+      "inboxAt": "2026-03-09T11:30:00.000Z"
+    }
+  ]
+}
