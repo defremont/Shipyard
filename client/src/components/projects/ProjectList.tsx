@@ -1,37 +1,44 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { Search, ArrowUpDown } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { ProjectCard } from './ProjectCard'
+import { ProjectCard, type TaskCounts } from './ProjectCard'
 import { cn } from '@/lib/utils'
 import type { Project } from '@/hooks/useProjects'
 
-type SortOption = 'name' | 'lastModified' | 'lastOpened' | 'category'
+type SortOption = 'name' | 'lastModified' | 'lastOpened' | 'category' | 'tasks'
 
 const sortLabels: Record<SortOption, string> = {
   name: 'A-Z',
   lastModified: 'Recent commit',
   lastOpened: 'Last opened',
   category: 'Category',
+  tasks: 'Tasks',
 }
 
 interface ProjectListProps {
   projects: Project[]
+  taskCounts?: Map<string, TaskCounts>
 }
 
-export function ProjectList({ projects }: ProjectListProps) {
+export function ProjectList({ projects, taskCounts }: ProjectListProps) {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
   const [sortBy, setSortBy] = useState<SortOption>('name')
+  const searchRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    searchRef.current?.focus()
+  }, [])
 
   const categories = useMemo(() => {
     const cats = new Set(projects.map(p => p.category))
     return Array.from(cats).sort()
   }, [projects])
 
-  const sortOptions: SortOption[] = ['name', 'lastModified', 'lastOpened', 'category']
+  const sortOptions: SortOption[] = ['name', 'lastModified', 'lastOpened', 'category', 'tasks']
 
   const cycleSortBy = () => {
     const idx = sortOptions.indexOf(sortBy)
@@ -77,11 +84,18 @@ export function ProjectList({ projects }: ProjectListProps) {
           if (cc !== 0) return cc
           return a.name.localeCompare(b.name)
         }
+        case 'tasks': {
+          const ta = taskCounts?.get(a.id)
+          const tb = taskCounts?.get(b.id)
+          const activeA = (ta?.inbox || 0) + (ta?.inProgress || 0)
+          const activeB = (tb?.inbox || 0) + (tb?.inProgress || 0)
+          return activeB - activeA // most active tasks first
+        }
         default:
           return a.name.localeCompare(b.name)
       }
     })
-  }, [projects, search, categoryFilter, showFavoritesOnly, sortBy])
+  }, [projects, search, categoryFilter, showFavoritesOnly, sortBy, taskCounts])
 
   return (
     <div className="space-y-4">
@@ -89,6 +103,7 @@ export function ProjectList({ projects }: ProjectListProps) {
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
+            ref={searchRef}
             placeholder="Search projects or tech..."
             value={search}
             onChange={e => setSearch(e.target.value)}
@@ -136,9 +151,13 @@ export function ProjectList({ projects }: ProjectListProps) {
         })}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
         {filtered.map(project => (
-          <ProjectCard key={project.id} project={project} />
+          <ProjectCard
+            key={project.id}
+            project={project}
+            taskCounts={taskCounts?.get(project.id)}
+          />
         ))}
       </div>
 

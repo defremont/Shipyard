@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
-import { LayoutDashboard, Star, FolderOpen, RefreshCw, Settings, ListTodo, Loader, Inbox, ClipboardList, PanelLeftClose, PanelLeft } from 'lucide-react'
+import { LayoutDashboard, Star, FolderOpen, RefreshCw, Settings, ClipboardList, PanelLeftClose, PanelLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -243,49 +243,6 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           )}
         </Link>
 
-        {/* Task counters */}
-        {(inboxCount > 0 || inProgressCount > 0) && (
-          <>
-            <div className="pt-4 pb-1 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Tasks
-            </div>
-            {inboxCount > 0 && (
-              <Link
-                to="/tasks"
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors',
-                  location.pathname === '/tasks'
-                    ? 'text-blue-500'
-                    : 'text-muted-foreground hover:bg-accent/50'
-                )}
-              >
-                <Inbox className="h-3.5 w-3.5 text-blue-500" />
-                <span className="flex-1">Inbox</span>
-                <span className="text-xs bg-blue-500/10 text-blue-500 px-1.5 py-0.5 rounded-full font-medium">
-                  {inboxCount}
-                </span>
-              </Link>
-            )}
-            {inProgressCount > 0 && (
-              <Link
-                to="/tasks"
-                className={cn(
-                  'flex items-center gap-2 px-3 py-1.5 rounded-md text-sm transition-colors',
-                  location.pathname === '/tasks'
-                    ? 'text-yellow-500'
-                    : 'text-muted-foreground hover:bg-accent/50'
-                )}
-              >
-                <Loader className="h-3.5 w-3.5 text-yellow-500" />
-                <span className="flex-1">In Progress</span>
-                <span className="text-xs bg-yellow-500/10 text-yellow-500 px-1.5 py-0.5 rounded-full font-medium">
-                  {inProgressCount}
-                </span>
-              </Link>
-            )}
-          </>
-        )}
-
         {/* Active projects (with in-progress tasks) */}
         {activeProjects.length > 0 && (
           <>
@@ -303,8 +260,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     : 'text-muted-foreground hover:bg-accent/50'
                 )}
               >
-                <Loader className="h-3.5 w-3.5 text-yellow-500" />
-                <span className="truncate">{p.name}</span>
+                <ProjectAvatar name={p.name} className="w-5 h-5 shrink-0" />
+                <span className="truncate flex-1">{p.name}</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-yellow-500 shrink-0" />
               </button>
             ))}
           </>
@@ -327,8 +285,9 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
                     : 'text-muted-foreground hover:bg-accent/50'
                 )}
               >
-                <Star className="h-3.5 w-3.5 fill-yellow-500 text-yellow-500" />
-                <span className="truncate">{p.name}</span>
+                <ProjectAvatar name={p.name} className="w-5 h-5 shrink-0" />
+                <span className="truncate flex-1">{p.name}</span>
+                <Star className="h-3 w-3 fill-yellow-500 text-yellow-500 shrink-0" />
               </button>
             ))}
           </>

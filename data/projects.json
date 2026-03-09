@@ -59,7 +59,7 @@
       "lastCommitMessage": "chore(release): 1.76.0",
       "gitRemoteUrl": "https://github.com/Xifix-Tecnologia/redes-locais-marketplace",
       "techStack": [],
-      "favorite": false
+      "favorite": true
     },
     {
       "id": "rede-influencers",
@@ -166,7 +166,7 @@
         "tailwind",
         "typescript"
       ],
-      "favorite": false
+      "favorite": true
     },
     {
       "id": "devdash",
@@ -176,12 +176,13 @@
       "isGitRepo": true,
       "gitBranch": "main",
       "gitDirty": true,
-      "lastCommitDate": "2026-03-09T19:35:24-03:00",
-      "lastCommitMessage": "Remove prompt_template field from CSV export/import",
+      "lastCommitDate": "2026-03-09T19:46:20-03:00",
+      "lastCommitMessage": "Update project paths and settings for Windows environment",
       "gitRemoteUrl": "https://github.com/defremont/vibedash",
       "techStack": [],
-      "favorite": false
+      "favorite": true,
+      "lastOpenedAt": "2026-03-09T23:14:31.629Z"
     }
   ],
-  "lastScannedAt": "2026-03-09T22:45:39.242Z"
+  "lastScannedAt": "2026-03-09T23:14:31.629Z"
 }

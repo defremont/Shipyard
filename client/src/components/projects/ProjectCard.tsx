@@ -1,4 +1,4 @@
-import { GitBranch, Star, Terminal, Code2, Play, Monitor, Clock, AlertCircle, FolderOpen } from 'lucide-react'
+import { GitBranch, Star, Terminal, Code2, Play, Monitor, Clock, FolderOpen, Inbox, Loader, CheckCircle2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -8,11 +8,20 @@ import { useLaunchTerminal, useLaunchVSCode, useOpenFolder, useUpdateProject, ty
 import { useTabs } from '@/hooks/useTabs'
 import { toast } from 'sonner'
 
-interface ProjectCardProps {
-  project: Project
+export interface TaskCounts {
+  inbox: number
+  inProgress: number
+  done: number
+  total: number
+  hasUrgent: boolean
 }
 
-export function ProjectCard({ project }: ProjectCardProps) {
+interface ProjectCardProps {
+  project: Project
+  taskCounts?: TaskCounts
+}
+
+export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
   const { openTab } = useTabs()
   const launchTerminal = useLaunchTerminal()
   const launchVSCode = useLaunchVSCode()
@@ -32,19 +41,35 @@ export function ProjectCard({ project }: ProjectCardProps) {
     updateProject.mutate({ id: project.id, favorite: !project.favorite })
   }
 
+  // Accent border: yellow if in_progress tasks, red if urgent in inbox
+  const accentBorder = taskCounts?.hasUrgent
+    ? 'border-l-red-500'
+    : taskCounts?.inProgress
+      ? 'border-l-yellow-500'
+      : 'border-l-transparent'
+
+  // Truncate path for display
+  const displayPath = project.path.length > 50
+    ? '...' + project.path.slice(-47)
+    : project.path
+
   return (
     <Card
-      className="cursor-pointer hover:border-primary/50 transition-colors group"
+      className={cn(
+        'cursor-pointer hover:border-primary/50 transition-colors group border-l-[3px]',
+        accentBorder
+      )}
       onClick={() => openTab(project.id)}
     >
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between mb-2">
+      <CardContent className="p-4 space-y-2.5">
+        {/* Name + favorite */}
+        <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
-              <h3 className="font-semibold text-sm truncate">{project.name}</h3>
+              <h3 className="font-semibold text-base truncate">{project.name}</h3>
               <button onClick={toggleFavorite} className="shrink-0">
                 <Star className={cn(
-                  'h-3.5 w-3.5 transition-colors',
+                  'h-4 w-4 transition-colors',
                   project.favorite
                     ? 'fill-yellow-500 text-yellow-500'
                     : 'text-muted-foreground/30 hover:text-yellow-500'
@@ -55,41 +80,86 @@ export function ProjectCard({ project }: ProjectCardProps) {
               <span className="text-xs text-muted-foreground">{project.category}/</span>
             )}
           </div>
-          {project.gitDirty && (
-            <AlertCircle className="h-3.5 w-3.5 text-yellow-500 shrink-0 mt-0.5" />
-          )}
         </div>
 
-        {project.isGitRepo && project.gitBranch && (
-          <div className="flex items-center gap-1.5 mb-2 text-xs text-muted-foreground">
-            <GitBranch className="h-3 w-3" />
-            <span className="truncate">{project.gitBranch}</span>
-          </div>
-        )}
+        {/* Path */}
+        <p className="text-[11px] text-muted-foreground/50 truncate" title={project.path}>
+          {displayPath}
+        </p>
 
-        {project.techStack.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-3">
-            {project.techStack.slice(0, 4).map(tech => (
-              <Badge key={tech} variant="secondary" className="text-[10px] px-1.5 py-0">
-                {tech}
-              </Badge>
-            ))}
-            {project.techStack.length > 4 && (
-              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                +{project.techStack.length - 4}
+        {/* Git info: branch + dirty */}
+        {project.isGitRepo && project.gitBranch && (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <GitBranch className="h-3 w-3 shrink-0" />
+            <span className="truncate">{project.gitBranch}</span>
+            {project.gitDirty && (
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-yellow-500/50 text-yellow-500">
+                uncommitted
               </Badge>
             )}
           </div>
         )}
 
+        {/* Last commit */}
         {project.lastCommitDate && (
-          <div className="flex items-center gap-1 text-[10px] text-muted-foreground mb-3">
-            <Clock className="h-3 w-3" />
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Clock className="h-3 w-3 shrink-0" />
             <span>{formatDistanceToNow(new Date(project.lastCommitDate), { addSuffix: true })}</span>
+            {project.lastCommitMessage && (
+              <>
+                <span className="text-muted-foreground/30">·</span>
+                <span className="truncate text-muted-foreground/70">
+                  {project.lastCommitMessage.length > 60
+                    ? project.lastCommitMessage.slice(0, 60) + '...'
+                    : project.lastCommitMessage}
+                </span>
+              </>
+            )}
           </div>
         )}
 
-        <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {/* Tech stack */}
+        {project.techStack.length > 0 && (
+          <div className="flex flex-wrap gap-1">
+            {project.techStack.slice(0, 5).map(tech => (
+              <Badge key={tech} variant="secondary" className="text-[10px] px-1.5 py-0">
+                {tech}
+              </Badge>
+            ))}
+            {project.techStack.length > 5 && (
+              <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                +{project.techStack.length - 5}
+              </Badge>
+            )}
+          </div>
+        )}
+
+        {/* Task counts */}
+        {taskCounts && taskCounts.total > 0 && (
+          <div className="flex items-center gap-3 text-[11px]">
+            {taskCounts.inbox > 0 && (
+              <span className="flex items-center gap-1 text-blue-500">
+                <Inbox className="h-3 w-3" />
+                {taskCounts.inbox}
+              </span>
+            )}
+            {taskCounts.inProgress > 0 && (
+              <span className="flex items-center gap-1 text-yellow-500">
+                <Loader className="h-3 w-3" />
+                {taskCounts.inProgress}
+              </span>
+            )}
+            {taskCounts.done > 0 && (
+              <span className="flex items-center gap-1 text-green-500">
+                <CheckCircle2 className="h-3 w-3" />
+                {taskCounts.done}
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Action buttons - always visible, with separator */}
+        <div className="flex items-center gap-1 pt-1 border-t border-border/50">
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={e => handleLaunch(e, 'claude')} title="Claude Code">
             <Terminal className="h-3.5 w-3.5" />
           </Button>
