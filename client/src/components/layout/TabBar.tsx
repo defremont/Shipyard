@@ -15,10 +15,10 @@ function ProjectTab({ tabId, project, isActive, onSwitch, onClose }: {
   const { data: gitStatus } = useGitStatus(project?.isGitRepo ? tabId : undefined)
   const label = project?.name || tabId
 
-  // Show dot only when out of sync with remote (unpushed or unpulled commits)
-  const isOutOfSync = gitStatus
-    ? ((gitStatus.ahead ?? 0) > 0 || (gitStatus.behind ?? 0) > 0)
-    : ((project?.gitAhead ?? 0) > 0 || (project?.gitBehind ?? 0) > 0)
+  // Show dot when project has staged or unstaged modifications
+  const hasLocalChanges = gitStatus
+    ? ((gitStatus.staged?.length ?? 0) > 0 || (gitStatus.modified?.length ?? 0) > 0 || (gitStatus.not_added?.length ?? 0) > 0)
+    : ((project?.gitStaged ?? 0) > 0 || (project?.gitUnstaged ?? 0) > 0 || (project?.gitUntracked ?? 0) > 0)
 
   return (
     <div
@@ -36,8 +36,8 @@ function ProjectTab({ tabId, project, isActive, onSwitch, onClose }: {
       >
         {label}
       </button>
-      {isOutOfSync && (
-        <span className="w-1.5 h-1.5 rounded-full bg-white/70 shrink-0" title="Out of sync with remote" />
+      {hasLocalChanges && (
+        <span className="w-1.5 h-1.5 rounded-full bg-white/70 shrink-0" title="Has uncommitted changes" />
       )}
       <button
         className={cn(
