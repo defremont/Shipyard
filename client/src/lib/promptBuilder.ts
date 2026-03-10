@@ -58,6 +58,98 @@ export function buildInProgressPrompt(
   return lines.join('\n')
 }
 
+export function buildColumnPrompt(
+  columnKey: 'inbox' | 'in_progress' | 'done',
+  tasks: Task[],
+  projectName: string,
+  projectPath: string,
+  projectId: string,
+  tasksDir: string,
+): string | null {
+  if (tasks.length === 0) return null
+
+  const sep = tasksDir.includes('\\') ? '\\' : '/'
+  const tasksFilePath = `${tasksDir}${sep}${projectId}.json`
+
+  const lines: string[] = []
+
+  const sorted = [...tasks].sort((a, b) => {
+    const po: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 }
+    return (po[a.priority] ?? 2) - (po[b.priority] ?? 2)
+  })
+
+  if (columnKey === 'inbox') {
+    lines.push(`# Inbox Tasks — ${projectName}`)
+    lines.push('')
+    lines.push(`Project path: ${projectPath}`)
+    lines.push(`Tasks file: ${tasksFilePath}`)
+    lines.push('')
+    lines.push(`${sorted.length} task${sorted.length > 1 ? 's' : ''} in the inbox:`)
+    lines.push('')
+    for (const t of sorted) {
+      lines.push(`- [${t.status === 'backlog' ? 'BACKLOG' : 'TODO'}] ${t.title} (${priorityLabel[t.priority]})${t.description ? ` — ${t.description}` : ''}`)
+    }
+    lines.push('')
+    lines.push('## Instructions')
+    lines.push('Review and organize these inbox tasks:')
+    lines.push('1. Read each task and understand its scope')
+    lines.push('2. Add or improve descriptions where they are missing or vague')
+    lines.push('3. Adjust priorities if needed based on impact and urgency')
+    lines.push('4. Break down large tasks into smaller, actionable ones if needed')
+    lines.push(`5. Update the tasks file (${tasksFilePath}) with your changes`)
+  } else if (columnKey === 'in_progress') {
+    lines.push(`# In Progress Tasks — ${projectName}`)
+    lines.push('')
+    lines.push(`Project path: ${projectPath}`)
+    lines.push(`Tasks file: ${tasksFilePath}`)
+    lines.push('')
+    lines.push(`You have ${sorted.length} task${sorted.length > 1 ? 's' : ''} to resolve:`)
+    lines.push('')
+    for (let i = 0; i < sorted.length; i++) {
+      const t = sorted[i]
+      lines.push(`## ${i + 1}. ${t.title} [${priorityLabel[t.priority]}]`)
+      if (t.description) { lines.push(''); lines.push(t.description) }
+      lines.push('')
+    }
+    lines.push('## Instructions')
+    lines.push('Resolve each task in order of priority listed above.')
+    lines.push('For each task:')
+    lines.push('1. Investigate the codebase to understand the context')
+    lines.push('2. Plan and implement the solution')
+    lines.push('3. Test that your changes work correctly')
+    lines.push(`4. Update the tasks file (${tasksFilePath}) to mark the task as done:`)
+    lines.push('   - Set "status": "done"')
+    lines.push('   - Set "doneAt" and "updatedAt" to the current ISO timestamp')
+    const ids = sorted.map(t => `"${t.id}"`).join(', ')
+    lines.push('')
+    lines.push(`Task IDs to update: ${ids}`)
+  } else {
+    lines.push(`# Done Tasks — ${projectName}`)
+    lines.push('')
+    lines.push(`Project path: ${projectPath}`)
+    lines.push(`Tasks file: ${tasksFilePath}`)
+    lines.push('')
+    lines.push(`${sorted.length} task${sorted.length > 1 ? 's' : ''} marked as done:`)
+    lines.push('')
+    for (let i = 0; i < sorted.length; i++) {
+      const t = sorted[i]
+      lines.push(`## ${i + 1}. ${t.title}`)
+      if (t.description) { lines.push(''); lines.push(t.description) }
+      lines.push('')
+    }
+    lines.push('## Instructions')
+    lines.push('Verify that each task above is truly complete:')
+    lines.push('1. Check the codebase for each task — is the feature/fix actually implemented?')
+    lines.push('2. Look for partial implementations, TODOs, or missing edge cases')
+    lines.push('3. If a task is NOT actually done, move it back to in_progress in the tasks file:')
+    lines.push(`   - File: ${tasksFilePath}`)
+    lines.push('   - Set "status": "in_progress", clear "doneAt", update "updatedAt"')
+    lines.push('4. If all tasks are properly done, confirm with a summary of what was verified')
+  }
+
+  return lines.join('\n')
+}
+
 export function buildTaskPrompt(
   task: Task,
   projectName: string | undefined,

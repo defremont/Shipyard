@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2, Download, Upload, FileSpreadsheet } from 'lucide-react'
+import { Plus, Inbox, Loader, CheckCircle2, Download, Upload, FileSpreadsheet, Copy } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -23,6 +23,9 @@ import { TaskViewer } from './TaskViewer'
 import { CsvReviewDialog } from './CsvReviewDialog'
 import { useTasks, useUpdateTask, useReorderTasks, useImportTasks, type Task } from '@/hooks/useTasks'
 import { tasksToCSV, parseCSV, diffTasks, type CsvDiff } from '@/lib/csv'
+import { buildColumnPrompt } from '@/lib/promptBuilder'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 
@@ -92,7 +95,7 @@ const itemsFirstCollision: CollisionDetection = (args) => {
   return closestCenter(args)
 }
 
-function DroppableColumn({ col, children, count, taskIds }: { col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[] }) {
+function DroppableColumn({ col, children, count, taskIds, onCopy }: { col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[]; onCopy?: () => void }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key })
   const Icon = col.icon
 
@@ -110,6 +113,20 @@ function DroppableColumn({ col, children, count, taskIds }: { col: ColumnConfig;
           {col.label}
         </h3>
         <span className="text-xs text-muted-foreground">({count})</span>
+        {onCopy && count > 0 && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button onClick={onCopy} className="ml-auto text-muted-foreground/40 hover:text-foreground transition-colors">
+                <Copy className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {col.key === 'inbox' ? 'Copy inbox tasks as prompt — organize and detail' :
+               col.key === 'in_progress' ? 'Copy in-progress tasks as prompt — resolve them' :
+               'Copy done tasks as prompt — verify completion'}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
       <div className="flex-1 p-2 space-y-2">
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
@@ -152,6 +169,7 @@ function SortableTaskItem({ task, projectName, projectPath, onEdit, onView }: { 
 
 export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId)
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings, staleTime: Infinity })
   const updateTask = useUpdateTask()
   const reorderTasks = useReorderTasks()
   const importTasks = useImportTasks()
@@ -276,6 +294,15 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
     return undefined
   }, [grouped])
 
+  const handleCopyColumn = useCallback((colKey: string) => {
+    if (!projectPath || !projectName) return
+    const colTasks = grouped[colKey] || []
+    const prompt = buildColumnPrompt(colKey as 'inbox' | 'in_progress' | 'done', colTasks, projectName, projectPath, projectId, settings?.tasksDir || '')
+    if (!prompt) { toast.info('No tasks in this column'); return }
+    navigator.clipboard.writeText(prompt)
+    toast.success('Copied to clipboard')
+  }, [grouped, projectName, projectPath, projectId, settings?.tasksDir])
+
   const handleDragStart = (event: DragStartEvent) => {
     setActiveTask(event.active.data.current?.task || null)
   }
@@ -393,7 +420,7 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
             const colTasks = grouped[col.key] || []
             const taskIds = colTasks.map(t => t.id)
             return (
-              <DroppableColumn key={col.key} col={col} count={colTasks.length} taskIds={taskIds}>
+              <DroppableColumn key={col.key} col={col} count={colTasks.length} taskIds={taskIds} onCopy={() => handleCopyColumn(col.key)}>
                 {colTasks.length > 0 ? (
                   colTasks.map(task => (
                     <SortableTaskItem

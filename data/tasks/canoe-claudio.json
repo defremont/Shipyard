@@ -1,6 +1,220 @@
 {
   "tasks": [
     {
+      "id": "17",
+      "title": "Bug: convite colaborador nao funciona direito",
+      "description": "2 causas-raiz identificadas: (1) NotificationBell esta dentro de div 'hidden md:flex' em Header.tsx:153, invisivel em telas < 768px — sininho nao renderiza no mobile. (2) useHostVessels() em useHostDashboardData.ts filtra apenas owner_id = profile.id, sem join com vessel_collaborators — mesmo aceitando convite, embarcacao NAO aparece em Minhas Embarcacoes. Fix: (a) mover NotificationBell para fora do container hidden ou replicar no menu mobile. (b) alterar useHostVessels para incluir vessels onde user e colaborador aceito.",
+      "status": "todo",
+      "priority": "high",
+      "tags": [
+        "bug",
+        "colaboradores",
+        "notificacoes"
+      ],
+      "order": 0,
+      "updatedAt": "2026-03-09T23:59:59.524Z",
+      "inProgressAt": "2026-03-09T23:59:58.156Z",
+      "inboxAt": "2026-03-09T23:59:59.524Z"
+    },
+    {
+      "id": "19",
+      "title": "Bug: erro na avaliacao",
+      "description": "Causa provavel: ReviewForm.tsx so valida rating !== 0. Nao valida se bookingId, reviewerId ou targetVesselId/targetUserId existem antes de chamar useCreateReview(). O hook useReviews.ts faz insert direto no Supabase sem validar params — se algum ID for undefined/null, Supabase retorna erro FK violation ou RLS. Fix: adicionar validacao de campos obrigatorios no ReviewForm antes do mutateAsync. Verificar tambem se o componente pai (Trips.tsx) passa corretamente bookingId e reviewerId.",
+      "status": "todo",
+      "priority": "high",
+      "tags": [
+        "bug",
+        "reviews"
+      ],
+      "order": 1,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "20",
+      "title": "Notificacao de reserva abrir detalhe (nao calendario)",
+      "description": "Confirmado: notificacao tipo new_booking navega para /host/calendar (definido no trigger de notificacao do banco). Deveria navegar para /host/booking/${booking_id}. Fix: alterar migration/trigger que cria notificacoes de new_booking para setar link = /host/booking/ || booking_id. Parte 2: exibir telefone de contato apos reserva — adicionar campo phone em HostBookingDetail e Trips (detalhe), visivel somente apos status confirmed.",
+      "status": "todo",
+      "priority": "high",
+      "tags": [
+        "notificacoes",
+        "reservas",
+        "contato"
+      ],
+      "order": 2,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "21",
+      "title": "Bug: editar embarcacao faltando campos e dando erro",
+      "description": "Investigado CreateVessel.tsx: campos allowsShared/allowsPrivate/sharedPrice/privatePrice EXISTEM no modo edicao e sao populados (linhas 163-193). Campos nao estao faltando. Possivel causa do erro: validacao de preco (linhas 268-274) roda mesmo quando showPricingSections=false, falhando com parseFloat de string vazia. Documentos de parceria (linhas 902-942) sao ocultados em edicao — se required no banco mas nao preenchidos, pode dar erro. Testar: editar embarcacao aprovada e verificar console/network para erro exato.",
+      "status": "todo",
+      "priority": "high",
+      "tags": [
+        "bug",
+        "embarcacoes",
+        "edicao"
+      ],
+      "order": 3,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "10",
+      "title": "QR Scanner: selecao de embarcacao + confirmar/cancelar passeio",
+      "description": "Progresso parcial: DashboardQRScanner.tsx JA tem validacao de dia (linhas 174-180) — se QR date != hoje, mostra AlertDialog pedindo confirmacao. O que FALTA: (1) Selecao de embarcacao — nao ha dropdown/lista de vessels do operador antes de escanear. DashboardQRScanner recebe vesselId como prop, precisa adicionar seletor. (2) Botao Confirmar Passeio que muda status booking para completed — so existe check-in. (3) Botao Cancelar Passeio com campo motivo e opcoes (Reagendar via date_change ou Reembolso via process-stripe-refund). Arquivos: DashboardQRScanner.tsx, QRCodeScanner.tsx, HostCheckIn.tsx.",
+      "status": "todo",
+      "priority": "high",
+      "tags": [
+        "qrcode",
+        "checkin",
+        "passeios"
+      ],
+      "inProgressAt": "2026-03-09T23:59:39.384Z",
+      "updatedAt": "2026-03-09T23:59:47.550Z",
+      "inboxAt": "2026-03-09T23:59:47.550Z",
+      "order": 4,
+      "doneAt": "2026-03-09T23:59:46.324Z"
+    },
+    {
+      "id": "23",
+      "title": "Trocar credenciais Stripe para modo Live no Railway",
+      "description": "A instancia no Railway ainda esta usando credenciais do Stripe em modo sandbox/test (chaves sk_test_ e pk_test_). Trocar para credenciais Live (sk_live_ e pk_live_) para processar pagamentos reais. Checklist: (1) Gerar chaves Live no dashboard do Stripe (API Keys). (2) Atualizar variaveis de ambiente no Railway: STRIPE_SECRET_KEY, VITE_STRIPE_PUBLISHABLE_KEY. (3) Atualizar secrets no Supabase (edge functions): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET. (4) Criar novos webhooks no Stripe apontando para as URLs de producao (stripe-webhook e stripe-connect-webhook) e atualizar os signing secrets. (5) Verificar se Stripe Connect esta ativo no modo Live. (6) Testar um pagamento real de ponta a ponta. CUIDADO: apos trocar, pagamentos serao reais — confirmar com o cliente antes de aplicar.",
+      "status": "todo",
+      "priority": "high",
+      "tags": [
+        "stripe",
+        "deploy",
+        "railway",
+        "producao"
+      ],
+      "order": 5,
+      "updatedAt": "2026-03-09T23:56:01.561Z",
+      "doneAt": "2026-03-09T23:55:54.122Z",
+      "inboxAt": "2026-03-09T23:56:01.561Z"
+    },
+    {
+      "id": "9",
+      "title": "Perfil do usuario ao clicar no nome",
+      "description": "VERIFICADO: Header.tsx ja tem navegacao para /profile/me em desktop (linha 188: onClick => navigate('/profile/me')) e mobile (linha 266). MyProfile.tsx funciona como pagina de perfil. Rota /profile/me registrada no App.tsx. Tarefa concluida.",
+      "status": "done",
+      "priority": "medium",
+      "tags": [
+        "perfil",
+        "navegacao"
+      ],
+      "order": 6,
+      "updatedAt": "2026-03-10T00:00:00.000Z",
+      "doneAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "12",
+      "title": "Melhorar fonte - mais clara de ler",
+      "description": "Fontes atuais: DM Serif Display (titulos h1-h6, bold, tracking-wider) e DM Sans (corpo, peso 500). Configuradas em tailwind.config.ts e importadas via Google Fonts em index.css. Opcoes: (1) Trocar DM Sans por Inter (mais legivel em telas). (2) Reduzir peso padrao DM Sans de 500 para 400/regular. (3) Aumentar font-size base. Decidir com o cliente.",
+      "status": "inbox",
+      "priority": "medium",
+      "tags": [
+        "ui",
+        "fonte"
+      ],
+      "order": 7,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "14",
+      "title": "Botao Denunciar abaixo de Falar com operador",
+      "description": "Nenhuma funcionalidade de denuncia existe no codebase. Implementar: (1) Botao Denunciar em VesselDetail.tsx abaixo do botao Falar com operador (linhas 545-569). (2) Dialog com selecao de motivo (conteudo inadequado, fraude, assedio, outro) + campo descricao. (3) Tabela reports no Supabase (reporter_id, vessel_id, reason, description, status, created_at). (4) Secao no AdminDashboard para listar/moderar denuncias. (5) RLS: usuario logado pode criar, admin pode ler/atualizar.",
+      "status": "inbox",
+      "priority": "medium",
+      "tags": [
+        "moderacao",
+        "vessel-detail"
+      ],
+      "order": 8,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "15",
+      "title": "Melhorar layout fotos web + swipe",
+      "description": "Galeria atual usa MosaicGallery (VesselDetail.tsx:533). No desktop, fotos ocupam muito espaco vertical. Sem suporte a swipe no mobile. Implementar: (1) Layout mosaico mais compacto no desktop (2 colunas, estilo Airbnb). (2) Swipe touch com framer-motion ou embla-carousel (framer-motion ja esta no projeto). (3) Indicador de posicao (dots/counter) no mobile. Arquivo principal: src/components/vessel/MosaicGallery.tsx.",
+      "status": "inbox",
+      "priority": "medium",
+      "tags": [
+        "ui",
+        "galeria",
+        "mobile"
+      ],
+      "order": 9,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "16",
+      "title": "Descricao da taxa em Datas e Precos",
+      "description": "Fee mode selector existe em CreateVessel.tsx:708-784 na secao de precos. Labels atuais sao curtos: 'Taxa visivel' / 'Taxa embutida'. Preview dinamico JA existe (linhas 749-783). Falta: (1) Mover seletor para pagina de Datas e Precos (HostAvailability) em vez de ficar no CreateVessel. (2) Adicionar texto explicativo completo sobre taxa da plataforma (12%, sem taxa em manuais, etc). (3) Exemplos numericos dinamicos baseados no preco atual.",
+      "status": "inbox",
+      "priority": "medium",
+      "tags": [
+        "ux",
+        "taxas",
+        "datas-precos"
+      ],
+      "order": 10,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "18",
+      "title": "Arredondar valores pro real de cima (sem centavos)",
+      "description": "Math.ceil JA usado em: BookingTypeToggle.tsx:177/219, VesselDetail.tsx:664/701, CreateVessel.tsx:761. Porem maioria dos precos usa toLocaleString com minimumFractionDigits:2 mostrando centavos. Falta aplicar Math.ceil em: (1) VesselCard nos cards do Navegar. (2) Resumo de preco no VesselDetail checkout (subtotal, taxa, total). (3) Trips.tsx (detalhes da reserva). (4) HostBookingDetail. (5) BookingCalendar (valores nos eventos). Aplicar Math.ceil antes de formatar e remover minimumFractionDigits:2.",
+      "status": "inbox",
+      "priority": "medium",
+      "tags": [
+        "ui",
+        "precos"
+      ],
+      "order": 11,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "22",
+      "title": "Perfil do operador no checkout/pagina de reserva",
+      "description": "Confirmado: VesselDetail.tsx NAO exibe perfil do operador na secao de booking. Botao Reservar agora vai direto pro Stripe checkout. TripDetail.tsx tem secao de operador mas e para trips compartilhadas. Implementar: (1) Buscar owner profile (foto, nome, bio) via vessel.owner_id. (2) Buscar colaboradores aceitos via vessel_collaborators. (3) Exibir card Operadores acima do botao Reservar com avatar + nome, clicavel para /host/:id. (4) SEM telefone (so apos reserva). Arquivos: VesselDetail.tsx, criar OperatorCard.tsx.",
+      "status": "inbox",
+      "priority": "medium",
+      "tags": [
+        "ux",
+        "perfil",
+        "checkout"
+      ],
+      "order": 12,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "13",
+      "title": "Mover icones voltar/favoritar/compartilhar pro card principal",
+      "description": "Icones atualmente em header fixo separado (VesselDetail.tsx:428-490): div z-50 bg-card/80 backdrop-blur-lg com ArrowLeft e Heart+Share2. Galeria MosaicGallery fica abaixo (linha 533). Mover icones para overlay sobre a primeira foto (position absolute, z-10, fundo semi-transparente). Similar ao Airbnb mobile.",
+      "status": "inbox",
+      "priority": "low",
+      "tags": [
+        "ui",
+        "vessel-detail"
+      ],
+      "order": 13,
+      "updatedAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "11",
+      "title": "Alteracao de data de reserva (cliente + operador)",
+      "description": "Implementado: useDateChange.ts com useRequestDateChange() e useRespondDateChange(). Cliente solicita em Trips.tsx, host responde (approve/reject/suggest). Validacoes: status da booking, duplicidade, data bloqueada, capacidade. Notificacao criada para host.",
+      "status": "done",
+      "priority": "high",
+      "tags": [
+        "reservas",
+        "datas"
+      ],
+      "order": 14,
+      "updatedAt": "2026-03-09T23:53:51.784Z",
+      "doneAt": "2026-03-09T23:53:51.784Z",
+      "inboxAt": "2026-03-09T23:53:49.780Z"
+    },
+    {
       "id": "1",
       "title": "Taxa 12% com dois modos (visible/included)",
       "description": "Taxa do Canoe de 12% com 2 modos: Taxa Visivel (valor + 12% pro cliente, detalhamento no checkout) e Taxa Embutida (valor cheio, 12% descontado do operador no repasse). Implementado com fee_mode visible/included no CreateVessel e calculo no Stripe checkout.",
@@ -9,18 +223,9 @@
       "tags": [
         "pagamento",
         "stripe"
-      ]
-    },
-    {
-      "id": "2",
-      "title": "Login Google como primeira opcao",
-      "description": "Botao ENTRAR COM O GOOGLE aparece primeiro na tela de login, seguido de 'ou continue com email' e campos de email/senha.",
-      "status": "done",
-      "priority": "medium",
-      "tags": [
-        "auth",
-        "ux"
-      ]
+      ],
+      "order": 15,
+      "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "3",
@@ -31,7 +236,9 @@
       "tags": [
         "chat",
         "reservas"
-      ]
+      ],
+      "order": 16,
+      "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "4",
@@ -42,18 +249,51 @@
       "tags": [
         "pagamento",
         "reservas-manuais"
-      ]
+      ],
+      "order": 17,
+      "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
-      "id": "5",
-      "title": "Link 'Ler avaliacoes' no anuncio",
-      "description": "Botao 'Ler todas avaliacoes' aparece ao lado da nota de avaliacao no VesselDetail. Clicavel com scroll suave ate a secao de reviews.",
+      "id": "7",
+      "title": "Painel Administrador",
+      "description": "AdminDashboard implementado com ProtectedRoute (requiredRole=admin). Funcoes: gerenciar reservas, aprovar embarcacoes, moderar reviews, gerenciar usuarios, configurar comissao.",
       "status": "done",
-      "priority": "low",
+      "priority": "high",
       "tags": [
-        "ux",
-        "reviews"
-      ]
+        "admin"
+      ],
+      "order": 18,
+      "updatedAt": "2026-03-09T23:53:44.377Z"
+    },
+    {
+      "id": "8",
+      "title": "Fluxo pos-aprovacao: datas bloqueadas por padrao",
+      "description": "Apos admin aprovar embarcacao, todas as datas vem bloqueadas. Operador libera datas e define precos em Datas e Precos. Embarcacao so aparece no Navegar quando tiver datas liberadas.",
+      "status": "done",
+      "priority": "high",
+      "tags": [
+        "embarcacoes",
+        "calendario",
+        "ux"
+      ],
+      "inProgressAt": "2026-03-09T22:51:19.649Z",
+      "updatedAt": "2026-03-09T23:53:44.377Z",
+      "inboxAt": "2026-03-09T22:51:22.044Z",
+      "doneAt": "2026-03-09T23:47:49.027Z",
+      "order": 19
+    },
+    {
+      "id": "2",
+      "title": "Login Google como primeira opcao",
+      "description": "Botao ENTRAR COM O GOOGLE aparece primeiro na tela de login, seguido de 'ou continue com email' e campos de email/senha.",
+      "status": "done",
+      "priority": "medium",
+      "tags": [
+        "auth",
+        "ux"
+      ],
+      "order": 20,
+      "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "6",
@@ -64,196 +304,22 @@
       "tags": [
         "qrcode",
         "checkin"
-      ]
+      ],
+      "order": 21,
+      "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
-      "id": "7",
-      "title": "Painel Administrador",
-      "description": "AdminDashboard implementado com ProtectedRoute (requiredRole=admin). Funcoes: gerenciar reservas, aprovar embarcacoes, moderar reviews, gerenciar usuarios, configurar comissao.",
+      "id": "5",
+      "title": "Link 'Ler avaliacoes' no anuncio",
+      "description": "Botao 'Ler todas avaliacoes' aparece ao lado da nota de avaliacao no VesselDetail. Clicavel com scroll suave ate a secao de reviews.",
       "status": "done",
-      "priority": "high",
-      "tags": [
-        "admin"
-      ]
-    },
-    {
-      "id": "8",
-      "title": "Fluxo pos-aprovacao: datas bloqueadas por padrao",
-      "description": "Apos admin aprovar embarcacao, todas as datas devem vir bloqueadas (cinza/nao clicavel). Operador libera datas e define precos em 'Datas e Precos'. Embarcacao so aparece no Navegar quando tiver datas liberadas. Impedir que va pro ar sem configuracao completa.",
-      "status": "todo",
-      "priority": "high",
-      "tags": [
-        "embarcacoes",
-        "calendario",
-        "ux"
-      ],
-      "inProgressAt": "2026-03-09T22:51:19.649Z",
-      "updatedAt": "2026-03-09T22:51:22.044Z",
-      "inboxAt": "2026-03-09T22:51:22.044Z"
-    },
-    {
-      "id": "9",
-      "title": "Perfil do usuario ao clicar no nome",
-      "description": "Quando usuario clica no proprio nome (onde mostra perfil logado), deve navegar para pagina de perfil. MyProfile e PublicProfile existem mas a navegacao ao clicar no nome precisa ser verificada/completada.",
-      "status": "pending",
-      "priority": "medium",
-      "tags": [
-        "perfil",
-        "navegacao"
-      ]
-    },
-    {
-      "id": "10",
-      "title": "QR Scanner: selecao de embarcacao + confirmar/cancelar passeio",
-      "description": "Scanner existe mas precisa: (1) Lista de embarcacoes do operador para selecionar qual embarque. (2) Validar se QR e do dia correto (msg de erro se for de outro dia). (3) Botao Confirmar Passeio liberado apenas no dia. (4) Botao Cancelar Passeio sempre disponivel com motivo + opcoes pro cliente: Reagendar ou Reembolso (Stripe refund imediato).",
-      "status": "todo",
-      "priority": "high",
-      "tags": [
-        "qrcode",
-        "checkin",
-        "passeios"
-      ],
-      "inProgressAt": "2026-03-09T16:18:19.667Z",
-      "updatedAt": "2026-03-09T16:18:21.360Z",
-      "inboxAt": "2026-03-09T16:18:21.360Z"
-    },
-    {
-      "id": "11",
-      "title": "Alteracao de data de reserva (cliente + operador)",
-      "description": "Host pode sugerir data alternativa (parcialmente implementado). Falta: (1) Cliente poder solicitar alteracao de data em Minhas Viagens. (2) Operador aceitar/recusar alteracao do cliente. (3) Operador sugerir alteracao pro cliente (ex: dia com mais passageiros). (4) Fluxo completo de aceite/recusa bilateral.",
-      "status": "pending",
-      "priority": "high",
-      "tags": [
-        "reservas",
-        "datas"
-      ]
-    },
-    {
-      "id": "12",
-      "title": "Melhorar fonte - mais clara de ler",
-      "description": "A fonte usada no Lovable era melhor e mais clara de ler. Investigar qual fonte era usada no Lovable e avaliar troca ou ajuste de peso/tamanho das fontes atuais (DM Serif Display + DM Sans).",
-      "status": "inbox",
-      "priority": "medium",
-      "tags": [
-        "ui",
-        "fonte"
-      ]
-    },
-    {
-      "id": "13",
-      "title": "Mover icones voltar/favoritar/compartilhar pro card principal",
-      "description": "No VesselDetail, a faixa com setinha de voltar (esquerda) e coracao+compartilhar (direita) esta em branco separada. Mover esses icones para dentro do mesmo quadro/card da foto para melhorar aspecto visual.",
-      "status": "inbox",
       "priority": "low",
       "tags": [
-        "ui",
-        "vessel-detail"
-      ]
-    },
-    {
-      "id": "14",
-      "title": "Botao Denunciar abaixo de Falar com operador",
-      "description": "Adicionar botao 'Denunciar' no VesselDetail, posicionado abaixo do botao 'Falar com operador'. Criar fluxo de denuncia (motivo, descricao) e armazenar para revisao do admin.",
-      "status": "inbox",
-      "priority": "medium",
-      "tags": [
-        "moderacao",
-        "vessel-detail"
-      ]
-    },
-    {
-      "id": "15",
-      "title": "Melhorar layout fotos web + swipe",
-      "description": "Fotos no VesselDetail web estao muito grandes, dificultando visualizacao. Implementar: (1) Galeria menor/mais compacta no desktop. (2) Suporte a swipe/deslizar com dedo no mobile. (3) Nao depender apenas de clique para navegar fotos.",
-      "status": "inbox",
-      "priority": "medium",
-      "tags": [
-        "ui",
-        "galeria",
-        "mobile"
-      ]
-    },
-    {
-      "id": "16",
-      "title": "Descricao da taxa em Datas e Precos",
-      "description": "Na secao onde operador escolhe taxa visivel/embutida (mover para Datas e Precos), adicionar texto: 'Taxa da plataforma - Para manter o funcionamento e evolucao da plataforma, o CANOE cobra uma taxa de 12% sobre reservas realizadas atraves do nosso sistema. Nao cobramos nenhuma taxa sobre reservas manuais registradas por voce. Como voce prefere mostrar o preco ao cliente?' Seguido das opcoes com exemplos.",
-      "status": "inbox",
-      "priority": "medium",
-      "tags": [
         "ux",
-        "taxas",
-        "datas-precos"
-      ]
-    },
-    {
-      "id": "17",
-      "title": "Bug: convite colaborador nao funciona direito",
-      "description": "Problemas reportados: (1) Convite enviado por email mas notificacao nao chega no mobile (sininho nao aparece no modo mobile). (2) Apos aceitar convite no web, embarcacao nao aparece em Minhas Embarcacoes do colaborador.",
-      "status": "inbox",
-      "priority": "high",
-      "tags": [
-        "bug",
-        "colaboradores",
-        "notificacoes"
-      ]
-    },
-    {
-      "id": "18",
-      "title": "Arredondar valores pro real de cima (sem centavos)",
-      "description": "Precos estao mostrando casa dos centavos. Arredondar todos os valores exibidos para o real de cima (Math.ceil). Aplicar em: cards do Navegar, VesselDetail, checkout, booking details.",
-      "status": "inbox",
-      "priority": "medium",
-      "tags": [
-        "ui",
-        "precos"
-      ]
-    },
-    {
-      "id": "19",
-      "title": "Bug: erro na avaliacao",
-      "description": "Avaliacao esta dando erro ao ser submetida. Investigar ReviewForm e VesselReviews para identificar o problema.",
-      "status": "inbox",
-      "priority": "high",
-      "tags": [
-        "bug",
         "reviews"
-      ]
-    },
-    {
-      "id": "20",
-      "title": "Notificacao de reserva abrir detalhe (nao calendario)",
-      "description": "Quando operador clica na notificacao de nova reserva, deve abrir o detalhamento da reserva (HostBookingDetail), nao o calendario. Apos reserva, exibir telefone de contato dos dois (operador pro cliente e cliente pro operador) nas informacoes.",
-      "status": "inbox",
-      "priority": "high",
-      "tags": [
-        "notificacoes",
-        "reservas",
-        "contato"
-      ]
-    },
-    {
-      "id": "21",
-      "title": "Bug: editar embarcacao faltando campos e dando erro",
-      "description": "Ao clicar Editar em Minhas Embarcacoes: (1) Faltam campos como tipo hibrido/privativo e outras opcoes. (2) Editar embarcacao da erro. Verificar CreateVessel no modo edicao (isEditing) e garantir todos os campos disponiveis.",
-      "status": "inbox",
-      "priority": "high",
-      "tags": [
-        "bug",
-        "embarcacoes",
-        "edicao"
-      ]
-    },
-    {
-      "id": "22",
-      "title": "Perfil do operador no checkout/pagina de reserva",
-      "description": "Apos botao Reservar, exibir quem esta operando o passeio (foto, nome da pessoa/empresa). Clicavel para ver perfil publico. Pode listar multiplos operadores (ex: 'Operadores: Claudio, Andressa'). SEM telefone antes da reserva (telefone so apos reserva efetuada). Referencia: AirBnB faz similar para credibilidade.",
-      "status": "inbox",
-      "priority": "medium",
-      "tags": [
-        "ux",
-        "perfil",
-        "checkout"
-      ]
+      ],
+      "order": 22,
+      "updatedAt": "2026-03-09T23:53:44.377Z"
     }
   ]
 }
