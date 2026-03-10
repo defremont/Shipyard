@@ -74,8 +74,8 @@
       "gitAhead": 0,
       "gitBehind": 0,
       "gitStaged": 12,
-      "gitUnstaged": 9,
-      "gitUntracked": 0,
+      "gitUnstaged": 10,
+      "gitUntracked": 1,
       "lastCommitDate": "2026-03-09T16:32:42-03:00",
       "lastCommitMessage": "chore(release): 1.79.3",
       "gitRemoteUrl": "https://github.com/Xifix-Tecnologia/redes-locais-marketplace",
@@ -238,14 +238,14 @@
       "category": "Code",
       "isGitRepo": true,
       "gitBranch": "main",
-      "gitDirty": true,
-      "gitAhead": 4,
+      "gitDirty": false,
+      "gitAhead": 0,
       "gitBehind": 0,
-      "gitStaged": 1,
-      "gitUnstaged": 2,
+      "gitStaged": 0,
+      "gitUnstaged": 0,
       "gitUntracked": 0,
-      "lastCommitDate": "2026-03-10T01:31:15-03:00",
-      "lastCommitMessage": "Change tab indicator to show local uncommitted changes instead of remote sync status",
+      "lastCommitDate": "2026-03-10T01:35:37-03:00",
+      "lastCommitMessage": "Fix projects.json being modified on every saveCache call",
       "gitRemoteUrl": "https://github.com/defremont/vibedash",
       "techStack": [
         "react",
@@ -258,5 +258,5 @@
       "lastOpenedAt": "2026-03-10T04:32:28.208Z"
     }
   ],
-  "lastScannedAt": "2026-03-10T04:34:57.775Z"
+  "lastScannedAt": "2026-03-10T04:37:06.267Z"
 }

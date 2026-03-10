@@ -73,6 +73,41 @@ function GitIndicators({ project }: { project: { gitAhead?: number; gitBehind?: 
   )
 }
 
+function CollapsedProjectItem({ project: p, location, openTab }: {
+  project: { id: string; name: string; gitDirty?: boolean; gitAhead?: number; gitBehind?: number; gitStaged?: number; gitUnstaged?: number; gitUntracked?: number }
+  location: { pathname: string }
+  openTab: (id: string) => void
+}) {
+  const gitInfo = []
+  if ((p.gitAhead ?? 0) > 0) gitInfo.push(`${p.gitAhead} unpushed`)
+  if ((p.gitBehind ?? 0) > 0) gitInfo.push(`${p.gitBehind} to pull`)
+  const changes = (p.gitStaged ?? 0) + (p.gitUnstaged ?? 0) + (p.gitUntracked ?? 0)
+  if (changes > 0) gitInfo.push(`${changes} changed`)
+  const hasGitPending = p.gitDirty || (p.gitAhead ?? 0) > 0 || (p.gitBehind ?? 0) > 0
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => openTab(p.id)}
+          className={cn(
+            'relative flex items-center justify-center w-8 h-8 rounded-md transition-colors',
+            location.pathname === `/project/${p.id}` ? 'ring-1 ring-primary' : 'hover:bg-accent/50'
+          )}
+        >
+          <ProjectAvatar name={p.name} className="w-7 h-7" />
+          {hasGitPending && (
+            <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-orange-400" />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="right">
+        {p.name}{gitInfo.length > 0 && ` (${gitInfo.join(', ')})`}
+      </TooltipContent>
+    </Tooltip>
+  )
+}
+
 interface SidebarProps {
   collapsed: boolean
   onToggle: () => void
@@ -110,6 +145,14 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
 
   const activeProjects = projects?.filter(p =>
     tasks?.some(t => t.projectId === p.id && (t.status === 'backlog' || t.status === 'todo'))
+  ) || []
+
+  // Projects with pending git changes (not already in active or favorites)
+  const activeIds = new Set(activeProjects.map(p => p.id))
+  const favoriteIds = new Set(favorites.map(p => p.id))
+  const gitPendingProjects = projects?.filter(p =>
+    !activeIds.has(p.id) && !favoriteIds.has(p.id) &&
+    (p.gitDirty || (p.gitAhead ?? 0) > 0 || (p.gitBehind ?? 0) > 0)
   ) || []
 
   // Collapsed sidebar - icons only
@@ -202,68 +245,21 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           {activeProjects.length > 0 && (
             <>
               <div className="w-6 border-t my-1" />
-              {activeProjects.map(p => {
-                const gitInfo = []
-                if ((p.gitAhead ?? 0) > 0) gitInfo.push(`${p.gitAhead} unpushed`)
-                if ((p.gitBehind ?? 0) > 0) gitInfo.push(`${p.gitBehind} to pull`)
-                const changes = (p.gitStaged ?? 0) + (p.gitUnstaged ?? 0) + (p.gitUntracked ?? 0)
-                if (changes > 0) gitInfo.push(`${changes} uncommitted`)
-                return (
-                  <Tooltip key={p.id}>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => openTab(p.id)}
-                        className={cn(
-                          'relative flex items-center justify-center w-8 h-8 rounded-md transition-colors',
-                          location.pathname === `/project/${p.id}` ? 'ring-1 ring-primary' : 'hover:bg-accent/50'
-                        )}
-                      >
-                        <ProjectAvatar name={p.name} className="w-7 h-7" />
-                        {((p.gitAhead ?? 0) > 0 || (p.gitBehind ?? 0) > 0 || (p.gitStaged ?? 0) > 0 || (p.gitUnstaged ?? 0) > 0) && (
-                          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-orange-400" />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {p.name}{gitInfo.length > 0 && ` (${gitInfo.join(', ')})`}
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              })}
+              {activeProjects.map(p => <CollapsedProjectItem key={p.id} project={p} location={location} openTab={openTab} />)}
             </>
           )}
 
           {favorites.length > 0 && (
             <>
               <div className="w-6 border-t my-1" />
-              {favorites.map(p => {
-                const gitInfo = []
-                if ((p.gitAhead ?? 0) > 0) gitInfo.push(`${p.gitAhead} unpushed`)
-                if ((p.gitBehind ?? 0) > 0) gitInfo.push(`${p.gitBehind} to pull`)
-                const changes = (p.gitStaged ?? 0) + (p.gitUnstaged ?? 0)
-                if (changes > 0) gitInfo.push(`${changes} uncommitted`)
-                return (
-                  <Tooltip key={p.id}>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => openTab(p.id)}
-                        className={cn(
-                          'relative flex items-center justify-center w-8 h-8 rounded-md transition-colors',
-                          location.pathname === `/project/${p.id}` ? 'ring-1 ring-primary' : 'hover:bg-accent/50'
-                        )}
-                      >
-                        <ProjectAvatar name={p.name} className="w-7 h-7" />
-                        {((p.gitAhead ?? 0) > 0 || (p.gitBehind ?? 0) > 0 || (p.gitStaged ?? 0) > 0 || (p.gitUnstaged ?? 0) > 0) && (
-                          <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-orange-400" />
-                        )}
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent side="right">
-                      {p.name}{gitInfo.length > 0 && ` (${gitInfo.join(', ')})`}
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              })}
+              {favorites.map(p => <CollapsedProjectItem key={p.id} project={p} location={location} openTab={openTab} />)}
+            </>
+          )}
+
+          {gitPendingProjects.length > 0 && (
+            <>
+              <div className="w-6 border-t my-1" />
+              {gitPendingProjects.map(p => <CollapsedProjectItem key={p.id} project={p} location={location} openTab={openTab} />)}
             </>
           )}
         </nav>
