@@ -3,14 +3,11 @@
     {
       "id": "17",
       "title": "Bug: convite colaborador nao funciona direito",
-      "description": "2 causas-raiz identificadas: (1) NotificationBell esta dentro de div 'hidden md:flex' em Header.tsx:153, invisivel em telas < 768px — sininho nao renderiza no mobile. (2) useHostVessels() em useHostDashboardData.ts filtra apenas owner_id = profile.id, sem join com vessel_collaborators — mesmo aceitando convite, embarcacao NAO aparece em Minhas Embarcacoes. Fix: (a) mover NotificationBell para fora do container hidden ou replicar no menu mobile. (b) alterar useHostVessels para incluir vessels onde user e colaborador aceito.",
+      "description": "O sistema de convite de colaboradores apresenta dois problemas reportados: (1) No mobile, o sininho de notificacoes nao aparece, entao o colaborador convidado nao recebe a notificacao para aceitar. (2) No web, a notificacao chega e o convite pode ser aceito, mas apos aceitar a embarcacao nao aparece em 'Minhas Embarcacoes' do colaborador.",
+      "promptTemplate": "2 causas-raiz identificadas:\n\n(1) NotificationBell esta dentro de div 'hidden md:flex' em Header.tsx:153, invisivel em telas < 768px — sininho nao renderiza no mobile.\n\n(2) useHostVessels() em useHostDashboardData.ts filtra apenas owner_id = profile.id, sem join com vessel_collaborators — mesmo aceitando convite, embarcacao NAO aparece em Minhas Embarcacoes.\n\nFix:\n(a) Mover NotificationBell para fora do container hidden ou replicar no menu mobile.\n(b) Alterar useHostVessels para incluir vessels onde user e colaborador aceito (join com vessel_collaborators WHERE status='accepted').",
       "status": "todo",
       "priority": "high",
-      "tags": [
-        "bug",
-        "colaboradores",
-        "notificacoes"
-      ],
+      "tags": ["bug", "colaboradores", "notificacoes"],
       "order": 0,
       "updatedAt": "2026-03-10T00:04:10.024Z",
       "inProgressAt": "2026-03-10T00:04:07.262Z",
@@ -19,55 +16,44 @@
     {
       "id": "19",
       "title": "Bug: erro na avaliacao",
-      "description": "Causa provavel: ReviewForm.tsx so valida rating !== 0. Nao valida se bookingId, reviewerId ou targetVesselId/targetUserId existem antes de chamar useCreateReview(). O hook useReviews.ts faz insert direto no Supabase sem validar params — se algum ID for undefined/null, Supabase retorna erro FK violation ou RLS. Fix: adicionar validacao de campos obrigatorios no ReviewForm antes do mutateAsync. Verificar tambem se o componente pai (Trips.tsx) passa corretamente bookingId e reviewerId.",
+      "description": "O sistema de avaliacoes esta dando erro quando o usuario tenta avaliar. O fluxo de avaliacao e acessado apos a conclusao de um passeio, em Minhas Viagens.",
+      "promptTemplate": "Causa provavel: ReviewForm.tsx so valida rating !== 0. Nao valida se bookingId, reviewerId ou targetVesselId/targetUserId existem antes de chamar useCreateReview(). O hook useReviews.ts faz insert direto no Supabase sem validar params — se algum ID for undefined/null, Supabase retorna erro FK violation ou RLS.\n\nFix: adicionar validacao de campos obrigatorios no ReviewForm antes do mutateAsync. Verificar tambem se o componente pai (Trips.tsx) passa corretamente bookingId e reviewerId.",
       "status": "todo",
       "priority": "high",
-      "tags": [
-        "bug",
-        "reviews"
-      ],
+      "tags": ["bug", "reviews"],
       "order": 1,
       "updatedAt": "2026-03-10T00:00:00.000Z"
     },
     {
       "id": "20",
-      "title": "Notificacao de reserva abrir detalhe (nao calendario)",
-      "description": "Confirmado: notificacao tipo new_booking navega para /host/calendar (definido no trigger de notificacao do banco). Deveria navegar para /host/booking/${booking_id}. Fix: alterar migration/trigger que cria notificacoes de new_booking para setar link = /host/booking/ || booking_id. Parte 2: exibir telefone de contato apos reserva — adicionar campo phone em HostBookingDetail e Trips (detalhe), visivel somente apos status confirmed.",
+      "title": "Notificacao de reserva abrir detalhe + telefone de contato",
+      "description": "Quando o operador recebe uma nova reserva e clica na notificacao, ela deve abrir o detalhamento daquela reserva especifica — nao o calendario geral. Alem disso, apos o cliente reservar, deve aparecer o telefone de contato dos dois lados: o operador ve o telefone do cliente e o cliente ve o telefone do operador, nas informacoes da reserva.",
+      "promptTemplate": "Confirmado: notificacao tipo new_booking navega para /host/calendar (definido no trigger de notificacao do banco). Deveria navegar para /host/booking/${booking_id}.\n\nFix:\n1. Alterar migration/trigger que cria notificacoes de new_booking para setar link = '/host/booking/' || booking_id.\n2. Exibir telefone de contato apos reserva — adicionar campo phone em HostBookingDetail e Trips (detalhe), visivel somente apos status confirmed.\n\nArquivos: trigger de notificacao no banco, HostBookingDetail.tsx, Trips.tsx.",
       "status": "todo",
       "priority": "high",
-      "tags": [
-        "notificacoes",
-        "reservas",
-        "contato"
-      ],
+      "tags": ["notificacoes", "reservas", "contato"],
       "order": 2,
       "updatedAt": "2026-03-10T00:00:00.000Z"
     },
     {
       "id": "21",
       "title": "Bug: editar embarcacao faltando campos e dando erro",
-      "description": "Investigado CreateVessel.tsx: campos allowsShared/allowsPrivate/sharedPrice/privatePrice EXISTEM no modo edicao e sao populados (linhas 163-193). Campos nao estao faltando. Possivel causa do erro: validacao de preco (linhas 268-274) roda mesmo quando showPricingSections=false, falhando com parseFloat de string vazia. Documentos de parceria (linhas 902-942) sao ocultados em edicao — se required no banco mas nao preenchidos, pode dar erro. Testar: editar embarcacao aprovada e verificar console/network para erro exato.",
+      "description": "Ao clicar em 'Editar' em Minhas Embarcacoes, a tela de edicao abre mas com campos faltando — por exemplo, nao mostra a opcao de mudar de hibrido pra privativo, entre outras funcoes. Alem disso, o botao de editar embarcacao esta dando erro ao tentar salvar.",
+      "promptTemplate": "Investigado CreateVessel.tsx: campos allowsShared/allowsPrivate/sharedPrice/privatePrice EXISTEM no modo edicao e sao populados (linhas 163-193). Campos nao estao faltando no codigo.\n\nPossiveis causas do erro:\n1. Validacao de preco (linhas 268-274) roda mesmo quando showPricingSections=false, falhando com parseFloat de string vazia.\n2. Documentos de parceria (linhas 902-942) sao ocultados em edicao — se required no banco mas nao preenchidos, pode dar erro de constraint.\n\nPara debugar: editar embarcacao aprovada e verificar console/network para erro exato. Checar se o modo edicao esta corretamente populando todos os campos do formulario.",
       "status": "todo",
       "priority": "high",
-      "tags": [
-        "bug",
-        "embarcacoes",
-        "edicao"
-      ],
+      "tags": ["bug", "embarcacoes", "edicao"],
       "order": 3,
       "updatedAt": "2026-03-10T00:00:00.000Z"
     },
     {
       "id": "10",
       "title": "QR Scanner: selecao de embarcacao + confirmar/cancelar passeio",
-      "description": "Progresso parcial: DashboardQRScanner.tsx JA tem validacao de dia (linhas 174-180) — se QR date != hoje, mostra AlertDialog pedindo confirmacao. O que FALTA: (1) Selecao de embarcacao — nao ha dropdown/lista de vessels do operador antes de escanear. DashboardQRScanner recebe vesselId como prop, precisa adicionar seletor. (2) Botao Confirmar Passeio que muda status booking para completed — so existe check-in. Apos confirmacao, BLOQUEAR novos passageiros (plataforma e manual). (3) Botao Cancelar Passeio com campo motivo e opcoes: Reagendar (mesmo vessel preferencial, mas opcao de escolher outro vessel) ou Reembolso imediato (process-stripe-refund). Arquivos: DashboardQRScanner.tsx, QRCodeScanner.tsx, HostCheckIn.tsx.",
+      "description": "O QR Code Scanner precisa de melhorias no fluxo completo: (1) Ao clicar no scanner, deve aparecer uma lista de qual embarcacao o operador quer selecionar (pode ter mais de uma). (2) O QR Code faz checkin dos usuarios daquele passeio naquele dia — se escanear um QR de passeio pra outro dia, deve mostrar mensagem informando. (3) Botao 'Confirmar Passeio' liberado no dia do passeio — apos confirmacao, nao permite mais adicionar passageiros (plataforma nem manual). (4) Botao 'Cancelar Passeio' sempre disponivel — ao cancelar, informa o motivo ao cliente e oferece 2 opcoes: Reagendar (preferencialmente na mesma embarcacao para outro dia, mas com opcao de escolher outra) ou Obter Reembolso (via Stripe, imediato).",
+      "promptTemplate": "Progresso parcial: DashboardQRScanner.tsx JA tem validacao de dia (linhas 174-180) — se QR date != hoje, mostra AlertDialog pedindo confirmacao.\n\nO que FALTA implementar:\n1. Selecao de embarcacao — nao ha dropdown/lista de vessels do operador antes de escanear. DashboardQRScanner recebe vesselId como prop, precisa adicionar seletor.\n2. Botao 'Confirmar Passeio' que muda status booking para completed — so existe check-in atualmente. Apos confirmacao, BLOQUEAR novos passageiros (plataforma e manual).\n3. Botao 'Cancelar Passeio' com campo motivo e opcoes pro cliente:\n   - Reagendar (mesmo vessel preferencial, mas opcao de escolher outro vessel)\n   - Reembolso imediato (process-stripe-refund)\n\nArquivos: DashboardQRScanner.tsx, QRCodeScanner.tsx, HostCheckIn.tsx.",
       "status": "todo",
       "priority": "high",
-      "tags": [
-        "qrcode",
-        "checkin",
-        "passeios"
-      ],
+      "tags": ["qrcode", "checkin", "passeios"],
       "inProgressAt": "2026-03-09T23:59:39.384Z",
       "updatedAt": "2026-03-09T23:59:47.550Z",
       "inboxAt": "2026-03-09T23:59:47.550Z",
@@ -77,44 +63,24 @@
     {
       "id": "23",
       "title": "Trocar credenciais Stripe para modo Live no Railway",
-      "description": "A instancia no Railway ainda esta usando credenciais do Stripe em modo sandbox/test (chaves sk_test_ e pk_test_). Trocar para credenciais Live (sk_live_ e pk_live_) para processar pagamentos reais. Checklist: (1) Gerar chaves Live no dashboard do Stripe (API Keys). (2) Atualizar variaveis de ambiente no Railway: STRIPE_SECRET_KEY, VITE_STRIPE_PUBLISHABLE_KEY. (3) Atualizar secrets no Supabase (edge functions): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET. (4) Criar novos webhooks no Stripe apontando para as URLs de producao (stripe-webhook e stripe-connect-webhook) e atualizar os signing secrets. (5) Verificar se Stripe Connect esta ativo no modo Live. (6) Testar um pagamento real de ponta a ponta. CUIDADO: apos trocar, pagamentos serao reais — confirmar com o cliente antes de aplicar.",
+      "description": "A plataforma ainda esta usando credenciais Stripe em modo sandbox/test. Para processar pagamentos reais e ir para producao, e necessario trocar todas as chaves e webhooks para o modo Live do Stripe.",
+      "promptTemplate": "Checklist de troca:\n1. Gerar chaves Live no dashboard do Stripe (API Keys) — substituir sk_test_ e pk_test_ por sk_live_ e pk_live_.\n2. Atualizar variaveis de ambiente no Railway: STRIPE_SECRET_KEY, VITE_STRIPE_PUBLISHABLE_KEY.\n3. Atualizar secrets no Supabase (edge functions): STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET.\n4. Criar novos webhooks no Stripe apontando para as URLs de producao (stripe-webhook e stripe-connect-webhook) e atualizar os signing secrets.\n5. Verificar se Stripe Connect esta ativo no modo Live.\n6. Testar um pagamento real de ponta a ponta.\n\nCUIDADO: apos trocar, pagamentos serao reais — confirmar com o cliente antes de aplicar.",
       "status": "todo",
       "priority": "high",
-      "tags": [
-        "stripe",
-        "deploy",
-        "railway",
-        "producao"
-      ],
+      "tags": ["stripe", "deploy", "railway", "producao"],
       "order": 5,
       "updatedAt": "2026-03-09T23:56:01.561Z",
       "doneAt": "2026-03-09T23:55:54.122Z",
       "inboxAt": "2026-03-09T23:56:01.561Z"
     },
     {
-      "id": "9",
-      "title": "Perfil do usuario ao clicar no nome",
-      "description": "VERIFICADO: Header.tsx ja tem navegacao para /profile/me em desktop (linha 188: onClick => navigate('/profile/me')) e mobile (linha 266). MyProfile.tsx funciona como pagina de perfil. Rota /profile/me registrada no App.tsx. Tarefa concluida.",
-      "status": "done",
-      "priority": "medium",
-      "tags": [
-        "perfil",
-        "navegacao"
-      ],
-      "order": 6,
-      "updatedAt": "2026-03-10T00:00:00.000Z",
-      "doneAt": "2026-03-10T00:00:00.000Z"
-    },
-    {
       "id": "12",
       "title": "Melhorar fonte - mais clara de ler",
-      "description": "Fontes atuais: DM Serif Display (titulos h1-h6, bold, tracking-wider) e DM Sans (corpo, peso 500). Configuradas em tailwind.config.ts e importadas via Google Fonts em index.css. Opcoes: (1) Trocar DM Sans por Inter (mais legivel em telas). (2) Reduzir peso padrao DM Sans de 500 para 400/regular. (3) Aumentar font-size base. Decidir com o cliente.",
+      "description": "A fonte que estava sendo usada no Lovable estava melhor e mais clara de ler. Apos a migracao para fora do Lovable, a fonte ficou diferente e menos legivel, mesmo sendo tecnicamente a mesma familia tipografica.",
+      "promptTemplate": "Fontes atuais: DM Serif Display (titulos h1-h6, bold, tracking-wider) e DM Sans (corpo, peso 500). Configuradas em tailwind.config.ts e importadas via Google Fonts em index.css.\n\nNota do dev: A fonte e exatamente a mesma, mas ficou diferente fora do Lovable. Possivel causa: o Lovable aplicava estilos adicionais (peso, letter-spacing, anti-aliasing) que nao foram replicados.\n\nOpcoes:\n1. Trocar DM Sans por Inter (mais legivel em telas).\n2. Reduzir peso padrao DM Sans de 500 para 400/regular.\n3. Aumentar font-size base.\n4. Verificar se -webkit-font-smoothing: antialiased esta aplicado.\n\nDecidir com o cliente qual abordagem seguir.",
       "status": "todo",
       "priority": "medium",
-      "tags": [
-        "ui",
-        "fonte"
-      ],
+      "tags": ["ui", "fonte"],
       "order": 7,
       "updatedAt": "2026-03-10T00:10:27.410Z",
       "inboxAt": "2026-03-10T00:10:27.410Z"
@@ -122,13 +88,11 @@
     {
       "id": "14",
       "title": "Botao Denunciar abaixo de Falar com operador",
-      "description": "Nenhuma funcionalidade de denuncia existe no codebase. Implementar: (1) Botao Denunciar em VesselDetail.tsx abaixo do botao Falar com operador (linhas 545-569). (2) Dialog com selecao de motivo (conteudo inadequado, fraude, assedio, outro) + campo descricao. (3) Tabela reports no Supabase (reporter_id, vessel_id, reason, description, status, created_at). (4) Secao no AdminDashboard para listar/moderar denuncias. (5) RLS: usuario logado pode criar, admin pode ler/atualizar.",
+      "description": "Adicionar um botao de 'Denunciar' abaixo do botao 'Falar com operador' na pagina de detalhe da embarcacao. O objetivo e permitir que usuarios reportem anuncios com conteudo inadequado, fraude ou outros problemas.",
+      "promptTemplate": "Nenhuma funcionalidade de denuncia existe no codebase atualmente.\n\nImplementar:\n1. Botao 'Denunciar' em VesselDetail.tsx abaixo do botao 'Falar com operador' (linhas 545-569).\n2. Dialog com selecao de motivo (conteudo inadequado, fraude, assedio, outro) + campo descricao.\n3. Tabela 'reports' no Supabase (reporter_id, vessel_id, reason, description, status, created_at).\n4. Secao no AdminDashboard para listar/moderar denuncias.\n5. RLS: usuario logado pode criar report, admin pode ler/atualizar status.",
       "status": "todo",
       "priority": "medium",
-      "tags": [
-        "moderacao",
-        "vessel-detail"
-      ],
+      "tags": ["moderacao", "vessel-detail"],
       "order": 8,
       "updatedAt": "2026-03-10T00:10:27.410Z",
       "inboxAt": "2026-03-10T00:10:27.410Z"
@@ -136,14 +100,11 @@
     {
       "id": "15",
       "title": "Melhorar layout fotos web + swipe",
-      "description": "Galeria atual usa MosaicGallery (VesselDetail.tsx:533). No desktop, fotos ocupam muito espaco vertical. Sem suporte a swipe no mobile. Implementar: (1) Layout mosaico mais compacto no desktop (2 colunas, estilo Airbnb). (2) Swipe touch com framer-motion ou embla-carousel (framer-motion ja esta no projeto). (3) Indicador de posicao (dots/counter) no mobile. Arquivo principal: src/components/vessel/MosaicGallery.tsx.",
+      "description": "O layout das fotos na versao web esta muito grande e dificulta a visualizacao. Alem disso, nao e possivel deslizar as fotos com os dedos no mobile — so clicando. Idealmente, deveria ser possivel deslizar as fotos para os lados com swipe.",
+      "promptTemplate": "Galeria atual usa MosaicGallery (VesselDetail.tsx:533). No desktop, fotos ocupam muito espaco vertical. Sem suporte a swipe no mobile.\n\nImplementar:\n1. Layout mosaico mais compacto no desktop (2 colunas, estilo Airbnb).\n2. Swipe touch com framer-motion ou embla-carousel (framer-motion ja esta no projeto como dependencia).\n3. Indicador de posicao (dots/counter) no mobile.\n\nArquivo principal: src/components/vessel/MosaicGallery.tsx.",
       "status": "todo",
       "priority": "medium",
-      "tags": [
-        "ui",
-        "galeria",
-        "mobile"
-      ],
+      "tags": ["ui", "galeria", "mobile"],
       "order": 9,
       "updatedAt": "2026-03-10T00:10:27.410Z",
       "inboxAt": "2026-03-10T00:10:27.410Z"
@@ -151,14 +112,11 @@
     {
       "id": "16",
       "title": "Descricao da taxa em Datas e Precos",
-      "description": "Fee mode selector existe em CreateVessel.tsx:708-784 na secao de precos. Labels atuais sao curtos: 'Taxa visivel' / 'Taxa embutida'. Preview dinamico JA existe (linhas 749-783). Falta: (1) Mover seletor para pagina de Datas e Precos (HostAvailability) em vez de ficar no CreateVessel. (2) Adicionar texto explicativo completo sobre taxa da plataforma (12%, sem taxa em manuais, etc). (3) Exemplos numericos dinamicos baseados no preco atual.",
+      "description": "Na parte onde o operador escolhe o modo de taxa (visivel ou embutida), acrescentar uma descricao explicativa: 'Taxa da plataforma — Para manter o funcionamento e evolucao da plataforma, o CANOE cobra uma taxa de 12% sobre reservas realizadas atraves do nosso sistema. Nao cobramos nenhuma taxa sobre reservas manuais registradas por voce. Como voce prefere mostrar o preco ao cliente?' Seguido das opcoes com exemplos. Mover esse seletor para a tela de Datas e Precos.",
+      "promptTemplate": "Fee mode selector atualmente existe em CreateVessel.tsx:708-784 na secao de precos. Labels atuais sao curtos: 'Taxa visivel' / 'Taxa embutida'. Preview dinamico JA existe (linhas 749-783).\n\nO que falta:\n1. Mover seletor para pagina de Datas e Precos (HostAvailability) em vez de ficar no CreateVessel.\n2. Adicionar texto explicativo completo sobre taxa da plataforma (12%, sem taxa em manuais, etc.) conforme descricao.\n3. Exemplos numericos dinamicos baseados no preco atual configurado.\n\nArquivos: CreateVessel.tsx (remover dali), HostAvailability.tsx (adicionar la).",
       "status": "todo",
       "priority": "medium",
-      "tags": [
-        "ux",
-        "taxas",
-        "datas-precos"
-      ],
+      "tags": ["ux", "taxas", "datas-precos"],
       "order": 10,
       "updatedAt": "2026-03-10T00:10:27.410Z",
       "inboxAt": "2026-03-10T00:10:27.410Z"
@@ -166,13 +124,11 @@
     {
       "id": "18",
       "title": "Arredondar valores pro real de cima (sem centavos)",
-      "description": "Math.ceil JA usado em: BookingTypeToggle.tsx:177/219, VesselDetail.tsx:664/701, CreateVessel.tsx:761. Porem maioria dos precos usa toLocaleString com minimumFractionDigits:2 mostrando centavos. Falta aplicar Math.ceil em: (1) VesselCard nos cards do Navegar. (2) Resumo de preco no VesselDetail checkout (subtotal, taxa, total). (3) Trips.tsx (detalhes da reserva). (4) HostBookingDetail. (5) BookingCalendar (valores nos eventos). Aplicar Math.ceil antes de formatar e remover minimumFractionDigits:2.",
+      "description": "Todos os valores monetarios exibidos no sistema devem ser arredondados para o real de cima, sem mostrar a casa dos centavos. Exemplo: R$ 223,44 deve aparecer como R$ 224.",
+      "promptTemplate": "Math.ceil JA e usado em alguns lugares: BookingTypeToggle.tsx:177/219, VesselDetail.tsx:664/701, CreateVessel.tsx:761.\n\nPorem a maioria dos precos usa toLocaleString com minimumFractionDigits:2, mostrando centavos.\n\nFalta aplicar Math.ceil + remover centavos em:\n1. VesselCard nos cards do Navegar.\n2. Resumo de preco no VesselDetail checkout (subtotal, taxa, total).\n3. Trips.tsx (detalhes da reserva do cliente).\n4. HostBookingDetail (detalhes da reserva pro operador).\n5. BookingCalendar (valores nos eventos do calendario).\n\nAplicar Math.ceil antes de formatar e remover minimumFractionDigits:2 de todas as formatacoes.",
       "status": "todo",
       "priority": "medium",
-      "tags": [
-        "ui",
-        "precos"
-      ],
+      "tags": ["ui", "precos"],
       "order": 11,
       "updatedAt": "2026-03-10T00:10:27.410Z",
       "inboxAt": "2026-03-10T00:10:27.410Z"
@@ -180,14 +136,11 @@
     {
       "id": "22",
       "title": "Perfil do operador no checkout/pagina de reserva",
-      "description": "Confirmado: VesselDetail.tsx NAO exibe perfil do operador na secao de booking. Botao Reservar agora vai direto pro Stripe checkout. TripDetail.tsx tem secao de operador mas e para trips compartilhadas. Implementar: (1) Buscar owner profile (foto, nome, bio) via vessel.owner_id. (2) Buscar colaboradores aceitos via vessel_collaborators. (3) Exibir card Operadores acima do botao Reservar com avatar + nome, clicavel para /host/:id. (4) SEM telefone (so apos reserva). Arquivos: VesselDetail.tsx, criar OperatorCard.tsx.",
+      "description": "Para dar mais credibilidade ao usuario que esta reservando, exibir quem e o operador daquele passeio na pagina de reserva, abaixo do botao 'Reservar'. Mostrar foto e nome do operador (pessoa ou empresa), clicavel para ver o perfil. Se houver colaboradores, listar tambem (ex: 'Operadores: Claudio, Andressa, Maria'). SEM telefones — telefones somente apos a reserva efetuada. Inspirado no modelo do Airbnb.",
+      "promptTemplate": "Confirmado: VesselDetail.tsx NAO exibe perfil do operador na secao de booking atualmente. Botao 'Reservar agora' vai direto pro Stripe checkout. TripDetail.tsx tem secao de operador mas e para trips compartilhadas.\n\nImplementar:\n1. Buscar owner profile (foto, nome, bio) via vessel.owner_id.\n2. Buscar colaboradores aceitos via vessel_collaborators.\n3. Exibir card 'Operadores' acima do botao Reservar com avatar + nome, clicavel para /host/:id.\n4. SEM telefone antes da reserva (so apos reserva efetuada).\n\nArquivos: VesselDetail.tsx, criar OperatorCard.tsx.",
       "status": "todo",
       "priority": "medium",
-      "tags": [
-        "ux",
-        "perfil",
-        "checkout"
-      ],
+      "tags": ["ux", "perfil", "checkout"],
       "order": 12,
       "updatedAt": "2026-03-10T00:10:27.410Z",
       "inboxAt": "2026-03-10T00:10:27.410Z"
@@ -195,13 +148,11 @@
     {
       "id": "13",
       "title": "Mover icones voltar/favoritar/compartilhar pro card principal",
-      "description": "Icones atualmente em header fixo separado (VesselDetail.tsx:428-490): div z-50 bg-card/80 backdrop-blur-lg com ArrowLeft e Heart+Share2. Galeria MosaicGallery fica abaixo (linha 533). Mover icones para overlay sobre a primeira foto (position absolute, z-10, fundo semi-transparente). Similar ao Airbnb mobile.",
+      "description": "Na pagina de detalhe da embarcacao, ha uma faixa em branco onde do lado esquerdo tem somente a setinha pra voltar e do lado direito tem um coracao para favoritar e o compartilhar. Mover esses icones para dentro do mesmo quadro/card da foto principal, melhorando o aspecto visual e eliminando a faixa vazia.",
+      "promptTemplate": "Icones atualmente em header fixo separado (VesselDetail.tsx:428-490): div z-50 bg-card/80 backdrop-blur-lg com ArrowLeft e Heart+Share2. Galeria MosaicGallery fica abaixo (linha 533).\n\nFix: mover icones para overlay sobre a primeira foto (position absolute, z-10, fundo semi-transparente). Similar ao layout mobile do Airbnb.\n\nArquivo: VesselDetail.tsx.",
       "status": "todo",
       "priority": "low",
-      "tags": [
-        "ui",
-        "vessel-detail"
-      ],
+      "tags": ["ui", "vessel-detail"],
       "order": 13,
       "updatedAt": "2026-03-10T00:10:27.410Z",
       "inboxAt": "2026-03-10T00:10:27.410Z"
@@ -209,13 +160,11 @@
     {
       "id": "11",
       "title": "Alteracao de data de reserva (cliente + operador)",
-      "description": "Implementado: useDateChange.ts com useRequestDateChange() e useRespondDateChange(). Cliente solicita em Trips.tsx, host responde (approve/reject/suggest). Validacoes: status da booking, duplicidade, data bloqueada, capacidade. Notificacao criada para host.",
+      "description": "O cliente precisa poder solicitar alteracao de data da reserva em 'Minhas Viagens'. O operador pode aceitar, recusar ou sugerir outra data — por exemplo, se tiver poucas pessoas no dia X mas um passeio quase cheio no dia Y, faz sentido sugerir a troca. O cliente tambem pode cancelar a reserva. Fluxo bidirecional de negociacao de datas.",
+      "promptTemplate": "Implementado: useDateChange.ts com useRequestDateChange() e useRespondDateChange(). Cliente solicita em Trips.tsx, host responde (approve/reject/suggest). Validacoes: status da booking, duplicidade, data bloqueada, capacidade. Notificacao criada para host.",
       "status": "done",
       "priority": "high",
-      "tags": [
-        "reservas",
-        "datas"
-      ],
+      "tags": ["reservas", "datas"],
       "order": 14,
       "updatedAt": "2026-03-09T23:53:51.784Z",
       "doneAt": "2026-03-09T23:53:51.784Z",
@@ -224,65 +173,55 @@
     {
       "id": "1",
       "title": "Taxa 12% com dois modos (visible/included)",
-      "description": "Taxa do Canoe de 12% com 2 modos: Taxa Visivel (valor + 12% pro cliente, detalhamento no checkout) e Taxa Embutida (valor cheio, 12% descontado do operador no repasse). Implementado com fee_mode visible/included no CreateVessel e calculo no Stripe checkout.",
+      "description": "Taxa do Canoe de 12% com 2 modos de exibicao que o operador escolhe: (1) Taxa Visivel — o preco exibido ao cliente inclui os 12% por cima (ex: operador define R$200, cliente ve R$224). No checkout, botao 'Detalhar pagamento' mostra a separacao. Repasse integral ao operador, Stripe retém sua taxa, resto e do Canoe. (2) Taxa Embutida — o preco exibido e o valor cheio (ex: R$300). No repasse, 12% e descontado do operador. No checkout aparece 'Taxas e impostos ja incluidos'.",
+      "promptTemplate": "Implementado com fee_mode visible/included no CreateVessel e calculo no Stripe checkout. Usa destination charges com application_fee_amount.\n\nFormula: fee_mode=visible → cliente paga valor + 12%. fee_mode=included → operador recebe valor - 12%. Em ambos os casos, Stripe cobra sua taxa sobre o total e o Canoe fica com o restante da application_fee.",
       "status": "done",
       "priority": "high",
-      "tags": [
-        "pagamento",
-        "stripe"
-      ],
+      "tags": ["pagamento", "stripe"],
       "order": 15,
       "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "3",
       "title": "Chat com gating de reserva ativa",
-      "description": "Chat funciona apenas com reserva ativa (pending/confirmed). Auto-fecha apos viagem concluida. Auto-reabre com nova booking. Modo read-only quando conversa fechada.",
+      "description": "O chat entre cliente e operador so funciona quando existe uma reserva ativa (pending ou confirmed). O objetivo e evitar que clientes falem com operadores antes de reservar. Apos a viagem ser concluida, a conversa fecha automaticamente. Se o cliente fizer uma nova reserva, a conversa reabre.",
+      "promptTemplate": "Implementado: tabela conversations com vessel_id + user_id + host_id + closed_at. RLS exige booking ativo para criar conversa. Trigger fecha conversa quando todas as bookings do vessel+user sao completed. Trigger reabre conversa quando nova booking e criada. Frontend: botao 'Falar com operador' so aparece se useHasActiveBooking retorna true. ChatWindow: modo read-only com banner 'Conversa encerrada' quando closed_at preenchido. Migration: 20260307000006_conversation_booking_gate.sql.",
       "status": "done",
       "priority": "high",
-      "tags": [
-        "chat",
-        "reservas"
-      ],
+      "tags": ["chat", "reservas"],
       "order": 16,
       "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "4",
       "title": "Pagamento parcial em reservas manuais",
-      "description": "Reservas manuais suportam pagamento parcial. Status: Pago, Parcial, Aguardando link, Nao pago. Operador pode confirmar pagamentos externos com valor e metodo (Pix, Dinheiro, Cartao, Transferencia).",
+      "description": "Incluir pagamento parcial nas reservas manuais. Com isso o operador podera ver quanto falta receber de cada pessoa por reserva manual, controlando pagamentos externos (Pix, dinheiro, cartao, transferencia).",
+      "promptTemplate": "Implementado: reservas manuais suportam pagamento parcial. Status possiveis: Pago, Parcial, Aguardando link, Nao pago. Operador pode confirmar pagamentos externos com valor e metodo (Pix, Dinheiro, Cartao, Transferencia). Saldo restante exibido no detalhe da reserva.",
       "status": "done",
       "priority": "high",
-      "tags": [
-        "pagamento",
-        "reservas-manuais"
-      ],
+      "tags": ["pagamento", "reservas-manuais"],
       "order": 17,
       "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "7",
       "title": "Painel Administrador",
-      "description": "AdminDashboard implementado com ProtectedRoute (requiredRole=admin). Funcoes: gerenciar reservas, aprovar embarcacoes, moderar reviews, gerenciar usuarios, configurar comissao.",
+      "description": "O administrador Canoe precisa de acesso ao painel para gerenciar a plataforma: aprovar/suspender embarcacoes, moderar avaliacoes, gerenciar usuarios e configurar a comissao da plataforma.",
+      "promptTemplate": "Implementado: AdminDashboard com ProtectedRoute (requiredRole=admin). Funcoes: gerenciar reservas, aprovar embarcacoes, moderar reviews, gerenciar usuarios, configurar comissao via tabela platform_settings.",
       "status": "done",
       "priority": "high",
-      "tags": [
-        "admin"
-      ],
+      "tags": ["admin"],
       "order": 18,
       "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "8",
       "title": "Fluxo pos-aprovacao: datas bloqueadas por padrao",
-      "description": "Apos admin aprovar embarcacao, todas as datas vem bloqueadas. Operador libera datas e define precos em Datas e Precos. Embarcacao so aparece no Navegar quando tiver datas liberadas.",
+      "description": "Sobre o cadastro da embarcacao: o operador adiciona a embarcacao, passa pela analise do administrador Canoe. Apos a aprovacao, os calendarios vem todos com as datas fechadas/bloqueadas. O operador entao define precos e disponibilidades no botao 'Datas e Precos', liberando dias especificos para exibicao no Navegar. Melhor mostrar bloqueado/cinza nao clicavel para evitar o risco de ir pro ar sem o operador ter certeza da configuracao.",
+      "promptTemplate": "Implementado: apos admin aprovar embarcacao, todas as datas vem bloqueadas. Operador libera datas e define precos em 'Datas e Precos'. Embarcacao so aparece no Navegar quando tiver datas liberadas com preco configurado. A aprovacao do admin NAO publica diretamente — apenas muda o status para o operador indicando que foi aprovada.",
       "status": "done",
       "priority": "high",
-      "tags": [
-        "embarcacoes",
-        "calendario",
-        "ux"
-      ],
+      "tags": ["embarcacoes", "calendario", "ux"],
       "inProgressAt": "2026-03-09T22:51:19.649Z",
       "updatedAt": "2026-03-09T23:53:44.377Z",
       "inboxAt": "2026-03-09T22:51:22.044Z",
@@ -292,39 +231,45 @@
     {
       "id": "2",
       "title": "Login Google como primeira opcao",
-      "description": "Botao ENTRAR COM O GOOGLE aparece primeiro na tela de login, seguido de 'ou continue com email' e campos de email/senha.",
+      "description": "No login do usuario, mostrar 'ENTRAR COM O GOOGLE' como primeira opcao para facilitar o acesso. Abaixo, os campos de email/senha como alternativa.",
+      "promptTemplate": "Implementado: botao 'ENTRAR COM O GOOGLE' aparece primeiro na tela de login, seguido de separador 'ou continue com email' e campos de email/senha.",
       "status": "done",
       "priority": "medium",
-      "tags": [
-        "auth",
-        "ux"
-      ],
+      "tags": ["auth", "ux"],
       "order": 20,
       "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
-      "id": "6",
-      "title": "QR Code Scanner basico",
-      "description": "QRCodeScanner implementado com Html5Qrcode. Valida checkin via edge function validate-qr-checkin. Integrado na pagina HostCheckIn.",
+      "id": "9",
+      "title": "Perfil do usuario ao clicar no nome",
+      "description": "Quando a pessoa clica no nome dela onde mostra qual perfil esta logado, deve entrar no perfil dela. Cada pessoa tem um perfil que pode ser acessado a partir do login com Google ou email.",
+      "promptTemplate": "VERIFICADO: Header.tsx ja tem navegacao para /profile/me em desktop (linha 188: onClick => navigate('/profile/me')) e mobile (linha 266). MyProfile.tsx funciona como pagina de perfil. Rota /profile/me registrada no App.tsx.\n\nNota: as vezes demora um pouco para atualizar a versao (cache do service worker).",
       "status": "done",
       "priority": "medium",
-      "tags": [
-        "qrcode",
-        "checkin"
-      ],
+      "tags": ["perfil", "navegacao"],
+      "order": 6,
+      "updatedAt": "2026-03-10T00:00:00.000Z",
+      "doneAt": "2026-03-10T00:00:00.000Z"
+    },
+    {
+      "id": "6",
+      "title": "QR Code Scanner basico",
+      "description": "Implementar scanner de QR Code para que o operador possa fazer checkin dos passageiros no dia do passeio.",
+      "promptTemplate": "Implementado: QRCodeScanner com Html5Qrcode. Valida checkin via edge function validate-qr-checkin. Integrado na pagina HostCheckIn.",
+      "status": "done",
+      "priority": "medium",
+      "tags": ["qrcode", "checkin"],
       "order": 21,
       "updatedAt": "2026-03-09T23:53:44.377Z"
     },
     {
       "id": "5",
       "title": "Link 'Ler avaliacoes' no anuncio",
-      "description": "Botao 'Ler todas avaliacoes' aparece ao lado da nota de avaliacao no VesselDetail. Clicavel com scroll suave ate a secao de reviews.",
+      "description": "Aparecer 'Ler avaliacoes' do lado da nota de avaliacao no anuncio da embarcacao. Clicavel, levando o usuario ate a secao de avaliacoes.",
+      "promptTemplate": "Implementado: botao 'Ler todas avaliacoes' ao lado da nota de avaliacao no VesselDetail. Clicavel com scroll suave ate a secao de reviews.",
       "status": "done",
       "priority": "low",
-      "tags": [
-        "ux",
-        "reviews"
-      ],
+      "tags": ["ux", "reviews"],
       "order": 22,
       "updatedAt": "2026-03-09T23:53:44.377Z"
     }

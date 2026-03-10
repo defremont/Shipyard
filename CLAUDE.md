@@ -314,6 +314,18 @@ O `terminalLauncher.ts` detecta o OS via `os.platform()` e usa comandos nativos:
 
 **Zero modulos nativos** - nenhum node-pty ou binding C++.
 
+## Padrao de Tarefas (description vs promptTemplate)
+
+Ao criar ou importar tarefas (via CSV, texto ou manualmente), seguir esta separacao:
+
+- **description**: Entendimento geral da tarefa. Descreve O QUE precisa ser feito do ponto de vista do usuario/produto. Linguagem clara, sem referencias a codigo. Baseado nos documentos/requisitos fornecidos pelo cliente. Qualquer pessoa deve entender a tarefa lendo apenas este campo.
+- **promptTemplate**: Analise tecnica detalhada. Contem: detalhes do erro/bug, causas identificadas, arquivos e linhas relevantes, possiveis solucoes, checklist de implementacao. Este campo e destinado ao desenvolvedor/Claude que vai executar a tarefa.
+
+Quando o usuario fornecer um texto ou CSV com novas tarefas:
+1. Extrair a descricao original do cliente para o campo `description` (melhorar redacao mantendo a essencia)
+2. Fazer analise tecnica do codebase e colocar no campo `promptTemplate` (causas, arquivos, solucoes)
+3. Se a tarefa ja estiver concluida (done), o `promptTemplate` contem o resumo da implementacao
+
 ## Regras para Contribuicao
 
 1. **SEMPRE atualize este CLAUDE.md** quando adicionar/remover funcionalidades, rotas, componentes ou mudar arquitetura

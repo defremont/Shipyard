@@ -200,7 +200,8 @@
       "lastCommitMessage": "chore(proposals): added 99freelas proposal templates",
       "gitRemoteUrl": "https://github.com/defremont/freelas",
       "techStack": [],
-      "favorite": false
+      "favorite": false,
+      "lastOpenedAt": "2026-03-10T02:06:52.866Z"
     },
     {
       "id": "canoe-claudio",
@@ -254,5 +255,5 @@
       "lastOpenedAt": "2026-03-10T01:50:37.142Z"
     }
   ],
-  "lastScannedAt": "2026-03-10T01:50:37.142Z"
+  "lastScannedAt": "2026-03-10T02:06:52.866Z"
 }
