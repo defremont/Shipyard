@@ -1,11 +1,11 @@
-import { GitBranch, Star, Terminal, Code2, Play, Monitor, Clock, FolderOpen, Inbox, Loader, CheckCircle2, ArrowUp, ArrowDown, FilePlus2, FileEdit } from 'lucide-react'
+import { GitBranch, Star, Terminal, Play, Monitor, Clock, FolderOpen, Inbox, Loader, CheckCircle2, ArrowUp, ArrowDown, FilePlus2, FileEdit } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { useLaunchTerminal, useLaunchVSCode, useOpenFolder, useUpdateProject, type Project } from '@/hooks/useProjects'
+import { useLaunchTerminal, useOpenFolder, useUpdateProject, type Project } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
 import { toast } from 'sonner'
 
@@ -25,7 +25,6 @@ interface ProjectCardProps {
 export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
   const { openTab } = useTabs()
   const launchTerminal = useLaunchTerminal()
-  const launchVSCode = useLaunchVSCode()
   const openFolder = useOpenFolder()
   const updateProject = useUpdateProject()
 
@@ -229,22 +228,6 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
               </Button>
             </TooltipTrigger>
             <TooltipContent>Open terminal in project directory</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
-                onClick={e => {
-                  e.stopPropagation()
-                  launchVSCode.mutate(project.id, { onSuccess: () => toast.success('Opened VS Code') })
-                }}
-              >
-                <Code2 className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Open in VS Code</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

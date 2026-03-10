@@ -62,12 +62,6 @@ export function useLaunchTerminal() {
   })
 }
 
-export function useLaunchVSCode() {
-  return useMutation({
-    mutationFn: (projectId: string) => api.launchVSCode(projectId),
-  })
-}
-
 export function useOpenFolder() {
   return useMutation({
     mutationFn: (projectId: string) => api.openFolder(projectId),

@@ -5,7 +5,23 @@ import { platform } from 'os';
 
 export type TerminalType = 'claude' | 'claude-yolo' | 'dev' | 'shell';
 
-const isLinux = platform() === 'linux';
+const os = platform();
+
+const typeLabel: Record<TerminalType, string> = {
+  claude: 'Claude',
+  'claude-yolo': 'Claude',
+  dev: 'Dev',
+  shell: 'Shell',
+};
+
+function buildTitle(projectName: string, type: TerminalType): string {
+  const label = typeLabel[type];
+  const maxLen = 18;
+  const short = projectName.length > maxLen
+    ? projectName.slice(0, maxLen - 3) + '...'
+    : projectName;
+  return `[${short}] ${label}`;
+}
 
 async function detectDevCommand(projectPath: string): Promise<string | null> {
   try {
@@ -25,8 +41,8 @@ function spawnDetached(cmd: string, args: string[], useShell = false) {
   }).unref();
 }
 
+// Linux: gnome-terminal with --title
 function launchLinuxTerminal(projectPath: string, title: string, command?: string) {
-  // Try gnome-terminal first, fall back to x-terminal-emulator
   const args = ['--title', title, '--working-directory', projectPath];
   if (command) {
     args.push('--', 'bash', '-c', `${command}; exec bash`);
@@ -34,65 +50,69 @@ function launchLinuxTerminal(projectPath: string, title: string, command?: strin
   spawnDetached('gnome-terminal', args);
 }
 
-export async function launchTerminal(projectPath: string, type: TerminalType): Promise<void> {
-  if (isLinux) {
-    switch (type) {
-      case 'claude':
-        launchLinuxTerminal(projectPath, 'Claude Code', 'claude');
-        break;
-      case 'claude-yolo':
-        launchLinuxTerminal(projectPath, 'Claude Code', 'claude --dangerously-skip-permissions');
-        break;
-      case 'dev': {
-        const devCmd = await detectDevCommand(projectPath);
-        if (devCmd) {
-          launchLinuxTerminal(projectPath, 'Dev Server', devCmd);
-        } else {
-          launchLinuxTerminal(projectPath, 'Dev Server');
-        }
-        break;
-      }
-      case 'shell':
-        launchLinuxTerminal(projectPath, 'Shell');
-        break;
-    }
-    return;
+// macOS: osascript to open Terminal.app with title and command
+function launchMacTerminal(projectPath: string, title: string, command?: string) {
+  const escapedTitle = title.replace(/"/g, '\\"');
+  const escapedPath = projectPath.replace(/"/g, '\\"');
+  const cdCmd = `cd "${escapedPath}"`;
+  const titleCmd = `printf '\\\\e]0;${escapedTitle}\\\\a'`;
+  const fullCmd = command
+    ? `${cdCmd} && ${titleCmd} && ${command}`
+    : `${cdCmd} && ${titleCmd}`;
+
+  const script = `tell application "Terminal"
+  activate
+  do script "${fullCmd.replace(/"/g, '\\"')}"
+end tell`;
+
+  spawnDetached('osascript', ['-e', script]);
+}
+
+// Windows: wt.exe with --title
+function launchWindowsTerminal(projectPath: string, title: string, command?: string) {
+  const args: string[] = ['-w', '0', 'nt', '-d', projectPath, '--title', title];
+  if (command) {
+    args.push('cmd.exe', '/k', command);
   }
-
-  // Windows: wt.exe + cmd.exe
-  const args: string[] = ['-w', '0', 'nt', '-d', projectPath];
-
-  switch (type) {
-    case 'claude':
-      args.push('--title', 'Claude Code', 'cmd.exe', '/k', 'set CLAUDECODE= && claude');
-      break;
-    case 'claude-yolo':
-      args.push('--title', 'Claude Code', 'cmd.exe', '/k', 'set CLAUDECODE= && claude --dangerously-skip-permissions');
-      break;
-    case 'dev': {
-      const devCmd = await detectDevCommand(projectPath);
-      if (devCmd) {
-        args.push('--title', 'Dev Server', 'cmd.exe', '/k', devCmd);
-      } else {
-        args.push('--title', 'Dev Server');
-      }
-      break;
-    }
-    case 'shell':
-      args.push('--title', 'Shell');
-      break;
-  }
-
   spawnDetached('wt.exe', args);
 }
 
-export async function launchVSCode(projectPath: string): Promise<void> {
-  spawnDetached('code', [projectPath], true);
+export async function launchTerminal(projectPath: string, type: TerminalType, projectName?: string): Promise<void> {
+  const title = projectName ? buildTitle(projectName, type) : typeLabel[type];
+
+  let command: string | undefined;
+  switch (type) {
+    case 'claude':
+      command = 'claude';
+      break;
+    case 'claude-yolo':
+      command = 'claude --dangerously-skip-permissions';
+      break;
+    case 'dev':
+      command = (await detectDevCommand(projectPath)) || undefined;
+      break;
+    case 'shell':
+      command = undefined;
+      break;
+  }
+
+  if (os === 'linux') {
+    launchLinuxTerminal(projectPath, title, command);
+  } else if (os === 'darwin') {
+    launchMacTerminal(projectPath, title, command);
+  } else {
+    // Windows: prefix claude commands with env clear
+    if (type === 'claude') command = 'set CLAUDECODE= && claude';
+    else if (type === 'claude-yolo') command = 'set CLAUDECODE= && claude --dangerously-skip-permissions';
+    launchWindowsTerminal(projectPath, title, command);
+  }
 }
 
 export async function openFolder(projectPath: string): Promise<void> {
-  if (isLinux) {
+  if (os === 'linux') {
     spawnDetached('xdg-open', [projectPath]);
+  } else if (os === 'darwin') {
+    spawnDetached('open', [projectPath]);
   } else {
     spawnDetached('explorer.exe', [projectPath]);
   }

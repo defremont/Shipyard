@@ -66,7 +66,7 @@ vibedash/
 │   │   │   │   ├── CommitForm.tsx     # Input de mensagem + commit
 │   │   │   │   └── GitLog.tsx         # Ultimos commits
 │   │   │   └── terminals/
-│   │   │       └── TerminalLauncher.tsx  # Botoes: Claude, Dev Server, Shell
+│   │   │       └── TerminalLauncher.tsx  # Botoes: Claude, Dev Server, Shell, Open Folder
 │   │   ├── hooks/
 │   │   │   ├── useProjects.ts     # CRUD projetos + launchers
 │   │   │   ├── useTasks.ts        # CRUD tarefas + reorder (invalida cache global e por projeto)
@@ -89,13 +89,13 @@ vibedash/
 │   │   │   ├── projects.ts        # GET/PATCH + POST scan/add/remove
 │   │   │   ├── tasks.ts           # CRUD + GET /api/tasks/all + POST reorder
 │   │   │   ├── git.ts             # status, diff, stage, unstage, commit, push, pull, log, branches
-│   │   │   ├── terminals.ts       # POST launch (gnome-terminal/wt.exe), vscode, folder
+│   │   │   ├── terminals.ts       # POST launch (gnome-terminal/wt.exe/Terminal.app), folder
 │   │   │   └── settings.ts       # GET settings + POST /api/browse (filesystem navigation)
 │   │   ├── services/
 │   │   │   ├── projectDiscovery.ts  # Selecao manual de projetos (scan + add/remove)
 │   │   │   ├── gitService.ts        # Wrapper simple-git, GIT_TERMINAL_PROMPT=0
 │   │   │   ├── taskStore.ts         # CRUD JSON com timestamps de status
-│   │   │   ├── terminalLauncher.ts  # Multiplataforma: gnome-terminal (Linux) / wt.exe (Windows)
+│   │   │   ├── terminalLauncher.ts  # Multiplataforma: gnome-terminal (Linux) / Terminal.app (macOS) / wt.exe (Windows)
 │   │   │   └── settingsStore.ts     # data/settings.json com selectedProjects[]
 │   │   └── types/
 │   │       └── index.ts           # Project, Task, Settings, ProjectsCache, TasksFile
@@ -194,9 +194,8 @@ interface Settings {
 - `GET /api/projects/:id/git/branches` - Branches
 
 ### Terminais
-- `POST /api/terminals/launch` - Abre terminal nativo { projectId, type } (gnome-terminal no Linux, wt.exe no Windows)
-- `POST /api/terminals/vscode` - Abre VS Code { projectId }
-- `POST /api/terminals/folder` - Abre file manager { projectId } (xdg-open no Linux, explorer.exe no Windows)
+- `POST /api/terminals/launch` - Abre terminal nativo { projectId, type } com titulo `[project] Type`
+- `POST /api/terminals/folder` - Abre file manager { projectId }
 
 ### Sistema
 - `GET /api/settings` - Configuracoes
@@ -242,7 +241,7 @@ interface Settings {
 - **Direita (1/4 sidebar)**: Claude Context + Quick Launch + Git Panel
   - **Claude section**: "Open Claude + Copy Context" (copia contexto e abre terminal) e "Copy Tasks Context"
   - O contexto copiado inclui: project path, tasks file path, lista de tarefas atuais
-  - **Quick Launch**: Claude Code, Dev Server, Shell, VS Code, Open Folder
+  - **Quick Launch**: Claude Code, Dev Server, Shell, Open Folder
   - **Git Panel**: staged/unstaged retrateis, stage all, unstage all, commit, push, pull, log
   - Staged vem minimizado por padrao
 - Sem Header duplicado — TabBar mostra nome do projeto + botao fechar
@@ -282,13 +281,15 @@ interface Settings {
 ### Terminais (multiplataforma)
 O `terminalLauncher.ts` detecta o OS via `os.platform()` e usa comandos nativos:
 
-| Acao | Linux (Ubuntu/GNOME) | Windows |
-|------|---------------------|---------|
-| Abrir terminal | `gnome-terminal --working-directory` | `wt.exe` + `cmd.exe /k` |
-| Abrir VS Code | `code` (via shell) | `code` (via shell) |
-| Abrir pasta | `xdg-open` | `explorer.exe` |
+| Acao | Linux (Ubuntu/GNOME) | macOS | Windows |
+|------|---------------------|-------|---------|
+| Abrir terminal | `gnome-terminal --title --working-directory` | `osascript` (Terminal.app) | `wt.exe --title` + `cmd.exe /k` |
+| Abrir pasta | `xdg-open` | `open` | `explorer.exe` |
 
+- Titulos dos terminais seguem o padrao `[projectName] Type` (ex: `[canoe claudio] Claude`, `[devdash] Dev`)
+- Nomes de projeto maiores que 18 chars sao truncados: `[canoe-clau...] Shell`
 - No Linux, comandos executados no terminal usam `bash -c "cmd; exec bash"` para manter a aba aberta
+- No macOS, usa osascript com `printf '\e]0;Title\a'` para definir titulo
 - No Windows, usa `cmd.exe /k` (NAO bash, para evitar trigger do WSL)
 
 ### Cache e Invalidacao
@@ -332,6 +333,31 @@ Quando o usuario fornecer um texto ou CSV com novas tarefas:
 2. Fazer analise tecnica do codebase e colocar no campo `prompt` (causas, arquivos, solucoes)
 3. Se a tarefa ja estiver concluida (done), o `prompt` contem o resumo da implementacao
 
+## Timestamps de Status (inboxAt, inProgressAt, doneAt)
+
+Cada tarefa rastreia QUANDO entrou em cada etapa do kanban. Os timestamps sao **cascading**: etapas posteriores implicam que as anteriores ja aconteceram.
+
+- `inboxAt`: quando entrou no inbox (backlog/todo)
+- `inProgressAt`: quando moveu para in_progress
+- `doneAt`: quando foi concluida
+
+### Regras de cascata ao criar/importar tarefas:
+- Status `todo`/`backlog` → define `inboxAt`
+- Status `in_progress` → define `inboxAt` + `inProgressAt`
+- Status `done` → define `inboxAt` + `inProgressAt` + `doneAt`
+
+### Ao mover tarefas entre colunas:
+- Preenche o timestamp da nova etapa E qualquer anterior que esteja faltando
+- Ex: mover direto de inbox para done → define `inProgressAt` + `doneAt` (preserva `inboxAt` existente)
+
+### Para IA/Claude que modifica tarefas diretamente no JSON:
+- **NUNCA** remova ou resete os campos `inboxAt`, `inProgressAt`, `doneAt` ao editar tarefas
+- Ao mudar status, adicione o timestamp da nova etapa sem apagar os anteriores
+- Ao criar tarefas novas, defina os timestamps cascading conforme o status inicial
+- Formato: ISO 8601 string (`new Date().toISOString()`)
+
+Implementado em `taskStore.ts` via `buildCascadingTimestamps()`.
+
 ## Regras para Contribuicao
 
 1. **SEMPRE atualize este CLAUDE.md** quando adicionar/remover funcionalidades, rotas, componentes ou mudar arquitetura
@@ -340,7 +366,7 @@ Quando o usuario fornecer um texto ou CSV com novas tarefas:
 4. Se criar novo componente, adicione na arvore de estrutura
 5. Se mudar modelo de dados, atualize "Modelos de Dados"
 6. Dados persistem em JSON - nao introduza banco de dados sem discutir
-7. Terminais: no Windows usam cmd.exe (nao bash, causa erro WSL); no Linux usam gnome-terminal + bash
+7. Terminais: Windows usa wt.exe + cmd.exe (nao bash, causa erro WSL); Linux usa gnome-terminal + bash; macOS usa osascript + Terminal.app
 8. Todas mutations de tarefas devem invalidar `['tasks', 'all']` alem do cache do projeto
 9. Novos hooks devem seguir o padrao de `useTasks.ts` (react-query + api wrapper)
 10. Componentes UI usam shadcn/ui - rodar `npx shadcn@latest add <component>` se precisar de novo

@@ -70,11 +70,11 @@
       "category": "xifix",
       "isGitRepo": true,
       "gitBranch": "staging",
-      "gitDirty": false,
+      "gitDirty": true,
       "gitAhead": 0,
       "gitBehind": 0,
-      "gitStaged": 0,
-      "gitUnstaged": 0,
+      "gitStaged": 6,
+      "gitUnstaged": 4,
       "gitUntracked": 0,
       "lastCommitDate": "2026-03-09T16:32:42-03:00",
       "lastCommitMessage": "chore(release): 1.79.3",
@@ -212,14 +212,14 @@
       "category": "freelas",
       "isGitRepo": true,
       "gitBranch": "main",
-      "gitDirty": true,
+      "gitDirty": false,
       "gitAhead": 0,
       "gitBehind": 0,
-      "gitStaged": 1,
+      "gitStaged": 0,
       "gitUnstaged": 0,
       "gitUntracked": 0,
-      "lastCommitDate": "2026-03-08T11:48:41-03:00",
-      "lastCommitMessage": "feat(header): added desktop navigation with unread badge",
+      "lastCommitDate": "2026-03-10T00:37:35-03:00",
+      "lastCommitMessage": "fix: mobile notification bell, review form validation, and vessel editing improvements",
       "gitRemoteUrl": "https://github.com/oficialcanoe/canoe",
       "techStack": [
         "react",
@@ -241,11 +241,11 @@
       "gitDirty": true,
       "gitAhead": 1,
       "gitBehind": 0,
-      "gitStaged": 0,
-      "gitUnstaged": 19,
-      "gitUntracked": 1,
-      "lastCommitDate": "2026-03-09T23:18:33-03:00",
-      "lastCommitMessage": "Separate task description from promptTemplate and document the pattern",
+      "gitStaged": 11,
+      "gitUnstaged": 12,
+      "gitUntracked": 0,
+      "lastCommitDate": "2026-03-10T00:55:30-03:00",
+      "lastCommitMessage": "Add external link editor, sidebar git indicators, and UI refinements",
       "gitRemoteUrl": "https://github.com/defremont/vibedash",
       "techStack": [
         "react",
@@ -255,8 +255,8 @@
         "fastify"
       ],
       "favorite": true,
-      "lastOpenedAt": "2026-03-10T02:18:57.780Z"
+      "lastOpenedAt": "2026-03-10T04:05:00.547Z"
     }
   ],
-  "lastScannedAt": "2026-03-10T03:36:36.444Z"
+  "lastScannedAt": "2026-03-10T04:07:50.504Z"
 }

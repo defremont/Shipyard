@@ -64,6 +64,21 @@ export async function getTask(projectId: string, taskId: string): Promise<Task |
   return tasks.find(t => t.id === taskId);
 }
 
+// Build cascading timestamps: later stages imply earlier ones happened too
+function buildCascadingTimestamps(status: Task['status'], now: string, existing?: { inboxAt?: string; inProgressAt?: string; doneAt?: string }) {
+  const ts: { inboxAt?: string; inProgressAt?: string; doneAt?: string } = {}
+  if (status === 'backlog' || status === 'todo' || status === 'in_progress' || status === 'done') {
+    ts.inboxAt = existing?.inboxAt || now
+  }
+  if (status === 'in_progress' || status === 'done') {
+    ts.inProgressAt = existing?.inProgressAt || now
+  }
+  if (status === 'done') {
+    ts.doneAt = existing?.doneAt || now
+  }
+  return ts
+}
+
 export async function createTask(projectId: string, data: Omit<Task, 'id' | 'projectId' | 'createdAt' | 'updatedAt' | 'order' | 'inboxAt' | 'inProgressAt' | 'doneAt'>): Promise<Task> {
   const tasks = await readTasks(projectId);
   const now = new Date().toISOString();
@@ -76,9 +91,7 @@ export async function createTask(projectId: string, data: Omit<Task, 'id' | 'pro
     createdAt: now,
     updatedAt: now,
     order: tasks.length,
-    inboxAt: (status === 'backlog' || status === 'todo') ? now : undefined,
-    inProgressAt: status === 'in_progress' ? now : undefined,
-    doneAt: status === 'done' ? now : undefined,
+    ...buildCascadingTimestamps(status, now),
   };
   tasks.push(task);
   await writeTasks(projectId, tasks);
@@ -94,14 +107,18 @@ export async function updateTask(projectId: string, taskId: string, data: Partia
   const oldStatus = tasks[idx].status;
   const newStatus = data.status;
 
-  // Track status change timestamps
+  // Track status change timestamps (cascading: later stages fill in missing earlier ones)
   const statusTimestamps: Partial<Task> = {};
   if (newStatus && newStatus !== oldStatus) {
+    const existing = tasks[idx];
     if (newStatus === 'backlog' || newStatus === 'todo') {
       statusTimestamps.inboxAt = now;
     } else if (newStatus === 'in_progress') {
+      if (!existing.inboxAt) statusTimestamps.inboxAt = now;
       statusTimestamps.inProgressAt = now;
     } else if (newStatus === 'done') {
+      if (!existing.inboxAt) statusTimestamps.inboxAt = now;
+      if (!existing.inProgressAt) statusTimestamps.inProgressAt = now;
       statusTimestamps.doneAt = now;
     }
   }
@@ -130,20 +147,19 @@ export async function importTasks(projectId: string, importedTasks: Partial<Task
   const created: Task[] = [];
 
   for (const t of importedTasks) {
+    const status = (t.status as Task['status']) || 'todo';
     created.push({
       title: t.title || 'Untitled',
       description: t.description || '',
       priority: (t.priority as Task['priority']) || 'medium',
-      status: (t.status as Task['status']) || 'todo',
+      status,
       prompt: t.prompt,
       id: nanoid(10),
       projectId,
       createdAt: t.createdAt || now,
       updatedAt: now,
       order: existing.length + created.length,
-      inboxAt: t.inboxAt,
-      inProgressAt: t.inProgressAt,
-      doneAt: t.doneAt,
+      ...buildCascadingTimestamps(status, now, { inboxAt: t.inboxAt, inProgressAt: t.inProgressAt, doneAt: t.doneAt }),
     });
   }
 
@@ -172,13 +188,21 @@ export async function applyCsvChanges(
   for (const upd of changes.update) {
     const idx = tasks.findIndex(t => t.id === upd.id);
     if (idx !== -1) {
-      const oldStatus = tasks[idx].status;
+      const existing = tasks[idx];
+      const oldStatus = existing.status;
       const newStatus = upd.status;
       const statusTimestamps: Partial<Task> = {};
       if (newStatus && newStatus !== oldStatus) {
-        if (newStatus === 'backlog' || newStatus === 'todo') statusTimestamps.inboxAt = now;
-        else if (newStatus === 'in_progress') statusTimestamps.inProgressAt = now;
-        else if (newStatus === 'done') statusTimestamps.doneAt = now;
+        if (newStatus === 'backlog' || newStatus === 'todo') {
+          statusTimestamps.inboxAt = now;
+        } else if (newStatus === 'in_progress') {
+          if (!existing.inboxAt) statusTimestamps.inboxAt = now;
+          statusTimestamps.inProgressAt = now;
+        } else if (newStatus === 'done') {
+          if (!existing.inboxAt) statusTimestamps.inboxAt = now;
+          if (!existing.inProgressAt) statusTimestamps.inProgressAt = now;
+          statusTimestamps.doneAt = now;
+        }
       }
       tasks[idx] = { ...tasks[idx], ...upd, ...statusTimestamps, updatedAt: now };
       updatedCount++;
@@ -199,9 +223,7 @@ export async function applyCsvChanges(
       createdAt: now,
       updatedAt: now,
       order: tasks.length,
-      inboxAt: (status === 'backlog' || status === 'todo') ? now : undefined,
-      inProgressAt: status === 'in_progress' ? now : undefined,
-      doneAt: status === 'done' ? now : undefined,
+      ...buildCascadingTimestamps(status, now),
     });
   }
 

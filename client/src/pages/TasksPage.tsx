@@ -120,9 +120,9 @@ function SortableGlobalTaskItem({ task, project, onEdit, onView }: {
     >
       <TaskItem
         task={task}
-        projectName={project?.name}
+        projectName={project?.name || task.projectId}
         projectPath={project?.path}
-        showProjectBadge={!!project}
+        showProjectBadge
         projectLink={project ? `/project/${project.id}` : undefined}
         onEdit={onEdit}
         onView={onView}

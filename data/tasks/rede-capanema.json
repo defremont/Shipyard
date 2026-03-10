@@ -36,10 +36,10 @@
       "id": "FIX-order-dates-nav",
       "projectId": "rede-capanema",
       "createdAt": "2026-03-09T22:00:00.000Z",
-      "updatedAt": "2026-03-09T19:28:55.589Z",
+      "updatedAt": "2026-03-10T03:55:48.962Z",
       "order": 3,
-      "inboxAt": "2026-03-09T19:28:55.589Z",
-      "inProgressAt": "2026-03-09T19:28:49.129Z"
+      "inboxAt": "2026-03-10T03:55:48.962Z",
+      "inProgressAt": "2026-03-10T03:55:41.990Z"
     },
     {
       "title": "Email de notificacao ao aprovar vendedor",

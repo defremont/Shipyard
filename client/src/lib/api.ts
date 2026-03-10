@@ -52,7 +52,6 @@ export const api = {
 
   // Terminals
   launchTerminal: (projectId: string, type: string) => request('/terminals/launch', { method: 'POST', body: JSON.stringify({ projectId, type }) }),
-  launchVSCode: (projectId: string) => request('/terminals/vscode', { method: 'POST', body: JSON.stringify({ projectId }) }),
   openFolder: (projectId: string) => request('/terminals/folder', { method: 'POST', body: JSON.stringify({ projectId }) }),
 
   // Project management

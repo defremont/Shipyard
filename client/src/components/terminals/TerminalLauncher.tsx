@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Terminal, Play, Monitor, Code2, FolderOpen, Copy, Sparkles } from 'lucide-react'
+import { Terminal, Play, Monitor, FolderOpen, Copy, Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useLaunchTerminal, useLaunchVSCode, useOpenFolder } from '@/hooks/useProjects'
+import { useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
 import { useTasks, type Task } from '@/hooks/useTasks'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
@@ -51,13 +51,13 @@ function buildClaudeContext(projectName: string, projectPath: string, projectId:
 
   lines.push('')
   lines.push('You can read and update the tasks JSON file directly to organize, add, or update tasks.')
+  lines.push('IMPORTANT: Each task has timestamp fields (inboxAt, inProgressAt, doneAt) tracking when it entered each stage. NEVER remove or reset these. When changing status, add the new timestamp without erasing previous ones.')
 
   return lines.join('\n')
 }
 
 export function TerminalLauncher({ projectId, projectPath, projectName }: TerminalLauncherProps) {
   const launchTerminal = useLaunchTerminal()
-  const launchVSCode = useLaunchVSCode()
   const openFolder = useOpenFolder()
   const { data: tasks } = useTasks(projectId)
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings, staleTime: Infinity })
@@ -190,21 +190,6 @@ export function TerminalLauncher({ projectId, projectPath, projectName }: Termin
               </Button>
             </TooltipTrigger>
             <TooltipContent side="left">Opens a terminal in the project directory</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                className="w-full justify-start gap-2 h-8 text-xs"
-                onClick={() => launchVSCode.mutate(projectId, {
-                  onSuccess: () => toast.success('Opened VS Code'),
-                })}
-              >
-                <Code2 className="h-3.5 w-3.5" />
-                VS Code
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="left">Opens the project in Visual Studio Code</TooltipContent>
           </Tooltip>
           <Tooltip>
             <TooltipTrigger asChild>

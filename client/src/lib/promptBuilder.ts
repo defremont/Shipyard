@@ -61,6 +61,7 @@ export function buildInProgressPrompt(
   lines.push(`4. Update the tasks file (${tasksFilePath}) to mark the task as done:`)
   lines.push(`   - Set "status": "done"`)
   lines.push(`   - Set "doneAt" and "updatedAt" to the current ISO timestamp`)
+  lines.push(`   - PRESERVE existing "inboxAt" and "inProgressAt" timestamps — never remove them`)
 
   const ids = inProgress.map(t => `"${t.id}"`).join(', ')
   lines.push('')
@@ -109,6 +110,7 @@ export function buildColumnPrompt(
     lines.push('3. Adjust priorities if needed based on impact and urgency')
     lines.push('4. Break down large tasks into smaller, actionable ones if needed')
     lines.push(`5. Update the tasks file (${tasksFilePath}) with your changes`)
+    lines.push('6. PRESERVE all existing timestamp fields (inboxAt, inProgressAt, doneAt) — never remove them')
   } else if (columnKey === 'in_progress') {
     lines.push(`# In Progress Tasks — ${projectName}`)
     lines.push('')
@@ -129,6 +131,7 @@ export function buildColumnPrompt(
     lines.push(`4. Update the tasks file (${tasksFilePath}) to mark the task as done:`)
     lines.push('   - Set "status": "done"')
     lines.push('   - Set "doneAt" and "updatedAt" to the current ISO timestamp')
+    lines.push('   - PRESERVE existing "inboxAt" and "inProgressAt" timestamps — never remove them')
     const ids = sorted.map(t => `"${t.id}"`).join(', ')
     lines.push('')
     lines.push(`Task IDs to update: ${ids}`)
@@ -149,7 +152,8 @@ export function buildColumnPrompt(
     lines.push('2. Look for partial implementations, TODOs, or missing edge cases')
     lines.push('3. If a task is NOT actually done, move it back to in_progress in the tasks file:')
     lines.push(`   - File: ${tasksFilePath}`)
-    lines.push('   - Set "status": "in_progress", clear "doneAt", update "updatedAt"')
+    lines.push('   - Set "status": "in_progress", set "inProgressAt" to current timestamp, clear "doneAt", update "updatedAt"')
+    lines.push('   - PRESERVE existing "inboxAt" timestamp — never remove it')
     lines.push('4. If all tasks are properly done, confirm with a summary of what was verified')
   }
 
@@ -198,6 +202,7 @@ export function buildTaskPrompt(
     lines.push(`     - "status": "done"`)
     lines.push(`     - "doneAt": "<current ISO timestamp>"`)
     lines.push(`     - "updatedAt": "<current ISO timestamp>"`)
+    lines.push(`     - PRESERVE existing "inboxAt" and "inProgressAt" — never remove them`)
   }
 
   return lines.join('\n')
