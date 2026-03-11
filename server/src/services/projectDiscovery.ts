@@ -2,8 +2,8 @@ import { readdir, readFile, stat, access, writeFile, mkdir } from 'fs/promises';
 import { join, basename, resolve } from 'path';
 import type { Project, ProjectsCache } from '../types/index.js';
 import { getSettings, saveSettings } from './settingsStore.js';
+import { DATA_DIR } from './dataDir.js';
 
-const DATA_DIR = resolve(import.meta.dirname, '../../../data');
 const CACHE_FILE = join(DATA_DIR, 'projects.json');
 
 const PROJECT_MARKERS = ['package.json', '.git', 'CLAUDE.md', 'Cargo.toml', 'go.mod', 'requirements.txt', 'pyproject.toml'];

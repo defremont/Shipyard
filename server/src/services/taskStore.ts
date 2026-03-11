@@ -1,9 +1,9 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import { nanoid } from 'nanoid';
 import type { Task, TasksFile } from '../types/index.js';
+import { DATA_DIR } from './dataDir.js';
 
-const DATA_DIR = resolve(import.meta.dirname, '../../../data');
 export const TASKS_DIR = join(DATA_DIR, 'tasks');
 
 async function ensureTasksDir(): Promise<void> {

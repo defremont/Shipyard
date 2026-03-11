@@ -20,6 +20,12 @@ Desktop.ini
 *.swo
 *~
 
+# Electron build output
+release/
+
+# Playwright
+.playwright-mcp/
+
 # Environment
 .env
 .env.local

@@ -2,15 +2,34 @@
   "name": "devdash",
   "version": "1.0.0",
   "private": true,
+  "main": "electron/dist/main.js",
   "scripts": {
     "dev": "concurrently -n server,client -c blue,green \"pnpm --filter devdash-server dev\" \"pnpm --filter devdash-client dev\"",
-    "build": "pnpm --filter devdash-client build",
-    "start": "pnpm --filter devdash-server start"
+    "dev:electron": "concurrently -n electron,client -c cyan,green \"pnpm electron:dev\" \"pnpm --filter devdash-client dev\"",
+    "build": "pnpm --filter devdash-client build && pnpm --filter devdash-server build && pnpm electron:build",
+    "start": "pnpm --filter devdash-server start",
+    "electron:build": "cd electron && npx tsc",
+    "electron:dev": "cd electron && npx tsc && cross-env VITE_DEV_SERVER=http://localhost:5421 electron ../electron/dist/main.js",
+    "electron:start": "electron .",
+    "dist": "pnpm build && electron-builder --config electron-builder.yml",
+    "dist:win": "pnpm build && electron-builder --win --config electron-builder.yml",
+    "dist:mac": "pnpm build && electron-builder --mac --config electron-builder.yml",
+    "dist:linux": "pnpm build && electron-builder --linux --config electron-builder.yml"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["@swc/core", "esbuild", "node-pty"]
+    "onlyBuiltDependencies": [
+      "@swc/core",
+      "esbuild",
+      "node-pty",
+      "electron",
+      "electron-winstaller"
+    ]
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^35.0.1",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.3"
   }
 }

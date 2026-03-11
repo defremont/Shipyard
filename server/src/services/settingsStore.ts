@@ -1,8 +1,8 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
-import { join, resolve } from 'path';
+import { join } from 'path';
 import type { Settings } from '../types/index.js';
+import { DATA_DIR } from './dataDir.js';
 
-const DATA_DIR = resolve(import.meta.dirname, '../../../data');
 const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 
 const DEFAULT_SETTINGS: Settings = {

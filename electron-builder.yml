@@ -1,0 +1,86 @@
+appId: com.devdash.app
+productName: DevDash
+copyright: Copyright © 2026
+
+directories:
+  output: release
+  buildResources: assets
+
+files:
+  - electron/dist/**/*
+  - server/src/**/*
+  - server/package.json
+  - client/dist/**/*
+  - data/**/*
+  - "!data/tasks/**"
+  - "!data/projects.json"
+  - node_modules/**/*
+  - package.json
+
+extraResources:
+  - from: assets/icon.png
+    to: icon.png
+
+asar: true
+compression: maximum
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.ico
+  artifactName: "${productName}-Setup-${version}.${ext}"
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: DevDash
+  uninstallDisplayName: DevDash
+
+mac:
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+  icon: assets/icon.icns
+  category: public.app-category.developer-tools
+  artifactName: "${productName}-${version}-${arch}.${ext}"
+
+dmg:
+  title: DevDash
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  icon: assets/icon.png
+  category: Development
+  artifactName: "${productName}-${version}.${ext}"
+  desktop:
+    Name: DevDash
+    Comment: Local Development Dashboard
+    Categories: Development;IDE;
+    StartupWMClass: devdash
+
+appImage:
+  license: LICENSE
+
+deb:
+  depends:
+    - libgtk-3-0
+    - libnotify4
+    - libnss3
+    - libxss1
+    - libxtst6
+    - xdg-utils
