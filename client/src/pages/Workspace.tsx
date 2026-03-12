@@ -1,50 +1,23 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { TaskBoard } from '@/components/tasks/TaskBoard'
 import { GitPanel } from '@/components/git/GitPanel'
 import { TerminalLauncher } from '@/components/terminals/TerminalLauncher'
 import { ChatPanel } from '@/components/claude/ChatPanel'
 import { useProjects, useUpdateProject } from '@/hooks/useProjects'
-import { ExternalLinkEditor } from '@/components/projects/ExternalLinkEditor'
 import { Badge } from '@/components/ui/badge'
-import { Input } from '@/components/ui/input'
-import { GitBranch, Star, ExternalLink, Pencil, Check, X } from 'lucide-react'
+import { GitBranch, Star, ExternalLink, Link2, Settings } from 'lucide-react'
 import { FileExplorer } from '@/components/files/FileExplorer'
-import { ProjectDetailsPanel } from '@/components/projects/ProjectDetailsPanel'
+import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog'
 import { cn } from '@/lib/utils'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 
 export function Workspace() {
   const { projectId } = useParams<{ projectId: string }>()
   const { data: projects } = useProjects()
   const updateProject = useUpdateProject()
   const project = projects?.find(p => p.id === projectId)
-
-  const [isRenaming, setIsRenaming] = useState(false)
-  const [renameValue, setRenameValue] = useState('')
-  const renameInputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (isRenaming && renameInputRef.current) {
-      renameInputRef.current.focus()
-      renameInputRef.current.select()
-    }
-  }, [isRenaming])
-
-  const startRename = () => {
-    if (!project) return
-    setRenameValue(project.name)
-    setIsRenaming(true)
-  }
-
-  const confirmRename = () => {
-    if (!project || !renameValue.trim()) return
-    updateProject.mutate({ id: project.id, name: renameValue.trim() })
-    setIsRenaming(false)
-  }
-
-  const cancelRename = () => {
-    setIsRenaming(false)
-  }
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   if (!project) {
     return (
@@ -72,35 +45,7 @@ export function Workspace() {
                   : 'text-muted-foreground/30 hover:text-yellow-500'
               )} />
             </button>
-            {isRenaming ? (
-              <div className="flex items-center gap-1 shrink-0">
-                <Input
-                  ref={renameInputRef}
-                  value={renameValue}
-                  onChange={e => setRenameValue(e.target.value)}
-                  onKeyDown={e => {
-                    if (e.key === 'Enter') confirmRename()
-                    if (e.key === 'Escape') cancelRename()
-                  }}
-                  className="h-6 text-xs w-40"
-                />
-                <button onClick={confirmRename} className="text-green-500 hover:text-green-400 p-0.5">
-                  <Check className="h-3.5 w-3.5" />
-                </button>
-                <button onClick={cancelRename} className="text-muted-foreground hover:text-foreground p-0.5">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={startRename}
-                className="flex items-center gap-1 text-xs font-medium text-foreground hover:text-primary transition-colors shrink-0 group"
-                title="Click to rename project"
-              >
-                {project.name}
-                <Pencil className="h-3 w-3 text-muted-foreground/0 group-hover:text-muted-foreground transition-colors" />
-              </button>
-            )}
+            <span className="text-xs font-medium text-foreground shrink-0">{project.name}</span>
             <span className="text-muted-foreground/30">·</span>
             <p className="text-xs text-muted-foreground truncate">{project.path}</p>
             {project.isGitRepo && project.gitBranch && (
@@ -111,17 +56,42 @@ export function Workspace() {
               </Badge>
             )}
             {project.gitRemoteUrl && (
-              <a
-                href={project.gitRemoteUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="shrink-0 text-muted-foreground/40 hover:text-foreground transition-colors"
-                title="Open repository"
-              >
-                <ExternalLink className="h-3.5 w-3.5" />
-              </a>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <a
+                    href={project.gitRemoteUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-muted-foreground/40 hover:text-foreground transition-colors"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent>Open repository</TooltipContent>
+              </Tooltip>
             )}
-            <ExternalLinkEditor project={project} />
+            {project.externalLink && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <a
+                    href={project.externalLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="shrink-0 text-blue-500/60 hover:text-blue-400 transition-colors"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                  </a>
+                </TooltipTrigger>
+                <TooltipContent>{project.externalLink}</TooltipContent>
+              </Tooltip>
+            )}
+            <button
+              onClick={() => setSettingsOpen(true)}
+              className="shrink-0 text-muted-foreground/30 hover:text-foreground transition-colors ml-auto"
+              title="Project settings"
+            >
+              <Settings className="h-3.5 w-3.5" />
+            </button>
           </div>
           <TaskBoard projectId={project.id} projectName={project.name} projectPath={project.path} />
         </div>
@@ -130,7 +100,6 @@ export function Workspace() {
         <div className="w-72 xl:w-80 border-l overflow-y-auto p-4 space-y-6 shrink-0 bg-card/50 scrollbar-dark">
           <TerminalLauncher projectId={project.id} projectPath={project.path} projectName={project.name} />
           <ChatPanel projectId={project.id} />
-          <ProjectDetailsPanel project={project} />
           <FileExplorer projectId={project.id} projectPath={project.path} />
           {project.isGitRepo && (
             <GitPanel projectId={project.id} />
@@ -138,6 +107,7 @@ export function Workspace() {
         </div>
       </div>
 
+      <ProjectSettingsDialog project={project} open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   )
 }

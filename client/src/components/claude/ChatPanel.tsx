@@ -83,7 +83,9 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
     setMessages([])
   }
 
-  if (!status?.configured) {
+  const aiAvailable = status?.configured || status?.cliAvailable
+
+  if (!aiAvailable) {
     return (
       <div>
         <div className="flex items-center justify-between">
@@ -113,7 +115,8 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
           Claude AI
         </button>
         <div className="flex items-center gap-1">
-          <div className="h-1.5 w-1.5 rounded-full bg-green-500" title="Connected" />
+          <span className="text-[9px] font-medium text-muted-foreground/60">{status?.configured ? 'API' : 'CLI'}</span>
+          <div className="h-1.5 w-1.5 rounded-full bg-green-500" title={status?.configured ? 'API connected' : 'CLI available'} />
           {messages.length > 0 && (
             <button onClick={clearChat} className="text-muted-foreground hover:text-foreground p-0.5" title="Clear chat">
               <Trash2 className="h-3 w-3" />

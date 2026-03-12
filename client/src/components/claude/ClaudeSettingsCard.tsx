@@ -4,11 +4,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useClaudeStatus } from '@/hooks/useClaude'
 import { ClaudeConfigDialog } from './ClaudeConfigDialog'
-import { Sparkles, Settings, Check } from 'lucide-react'
+import { Sparkles, Settings, Check, Terminal } from 'lucide-react'
 
 export function ClaudeSettingsCard() {
   const { data: status } = useClaudeStatus()
   const [configOpen, setConfigOpen] = useState(false)
+
+  const hasAny = status?.configured || status?.cliAvailable
 
   return (
     <Card>
@@ -16,48 +18,77 @@ export function ClaudeSettingsCard() {
         <CardTitle className="text-base flex items-center gap-2">
           <Sparkles className="h-4 w-4" />
           Claude AI
-          {status?.configured && (
+          {status?.cliAvailable && (
             <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-green-600">
+              <Terminal className="h-2.5 w-2.5 mr-0.5" />
+              CLI
+            </Badge>
+          )}
+          {status?.configured && (
+            <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-blue-600">
               <Check className="h-2.5 w-2.5 mr-0.5" />
-              Active
+              API
             </Badge>
           )}
         </CardTitle>
         <CardDescription>
-          Connect your Anthropic API key to enable AI-powered features: chat assistant, task analysis, and task summarization.
+          AI features use your Claude CLI subscription (free) first, with API key as optional fallback for streaming chat.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {status?.configured ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
-              <div>
-                <p className="text-sm font-medium">API Key configured</p>
-                <p className="text-xs text-muted-foreground">Model: {status.model || 'Default'}</p>
-              </div>
-              <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)} className="gap-1.5">
-                <Settings className="h-3.5 w-3.5" />
-                Configure
-              </Button>
-            </div>
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p>Available features:</p>
-              <ul className="list-disc list-inside space-y-0.5 ml-1">
-                <li>Chat panel in workspace sidebar</li>
-                <li>"AI Analyze" button in task editor</li>
-                <li>Project-aware context in all interactions</li>
-              </ul>
-            </div>
-          </div>
-        ) : (
-          <div className="text-center py-4 space-y-3">
-            <p className="text-sm text-muted-foreground">No API key configured</p>
-            <Button onClick={() => setConfigOpen(true)} className="gap-1.5">
-              <Sparkles className="h-4 w-4" />
-              Setup Claude AI
-            </Button>
+        {/* CLI status */}
+        <div className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
+          <div>
+            <p className="text-sm font-medium">Claude CLI</p>
             <p className="text-xs text-muted-foreground">
-              Requires an Anthropic API key. Pay-per-use billing.
+              {status?.cliAvailable
+                ? 'Detected — uses your monthly subscription'
+                : 'Not found — install Claude Code CLI for free AI features'}
+            </p>
+          </div>
+          <div className={`h-2 w-2 rounded-full ${status?.cliAvailable ? 'bg-green-500' : 'bg-muted-foreground/30'}`} />
+        </div>
+
+        {/* API status */}
+        <div className="flex items-center justify-between bg-muted/30 rounded-lg p-3">
+          <div>
+            <p className="text-sm font-medium">API Key {!status?.configured && <span className="text-muted-foreground font-normal">(optional)</span>}</p>
+            <p className="text-xs text-muted-foreground">
+              {status?.configured
+                ? `Model: ${status.model || 'Default'} — enables streaming chat`
+                : 'Optional pay-per-use fallback for streaming chat'}
+            </p>
+          </div>
+          {status?.configured ? (
+            <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)} className="gap-1 h-7 text-xs">
+              <Settings className="h-3 w-3" />
+              Edit
+            </Button>
+          ) : (
+            <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)} className="gap-1 h-7 text-xs">
+              Setup
+            </Button>
+          )}
+        </div>
+
+        {/* Feature list */}
+        {hasAny && (
+          <div className="text-xs text-muted-foreground space-y-1">
+            <p>Available features:</p>
+            <ul className="list-disc list-inside space-y-0.5 ml-1">
+              <li>Chat panel in workspace sidebar {status?.configured ? '(streaming)' : '(single-turn via CLI)'}</li>
+              <li>1-click commit message generation</li>
+              <li>AI Analyze in task editor</li>
+              <li>Bulk import with AI organization</li>
+              <li>Project-aware context in all interactions</li>
+            </ul>
+          </div>
+        )}
+
+        {!hasAny && (
+          <div className="text-center py-2">
+            <p className="text-xs text-muted-foreground">
+              Install the Claude Code CLI (<code className="bg-muted px-1 rounded">claude</code>) for free AI features, or add an API key below.
             </p>
           </div>
         )}

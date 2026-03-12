@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Trash2, FolderOpen, Loader2, Copy } from 'lucide-react'
+import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Trash2, FolderOpen, Loader2, Copy, FolderTree } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -207,7 +207,10 @@ export function FileExplorer({ projectId, projectPath }: FileExplorerProps) {
         className="flex items-center justify-between w-full group"
         onClick={() => setSectionOpen(!sectionOpen)}
       >
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Files</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+          <FolderTree className="h-3.5 w-3.5" />
+          Files
+        </h2>
         <div className="flex items-center gap-1">
           {sectionOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
         </div>

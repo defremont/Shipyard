@@ -14,7 +14,7 @@ export function TaskAnalysisButton({ projectId, taskId, title, onResult }: TaskA
   const { data: status } = useClaudeStatus()
   const analyze = useAnalyzeTask()
 
-  if (!status?.configured) return null
+  if (!status?.configured && !status?.cliAvailable) return null
 
   const handleAnalyze = async () => {
     if (!title.trim()) {

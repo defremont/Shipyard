@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Play, Monitor, FolderOpen, Copy, Sparkles, ExternalLink } from 'lucide-react'
+import { Play, Monitor, FolderOpen, Copy, Sparkles, ExternalLink, Rocket } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
@@ -108,6 +108,7 @@ export function TerminalLauncher({ projectId, projectPath, projectName }: Termin
   return (
     <div className="space-y-2">
       <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+        <Rocket className="h-3.5 w-3.5" />
         Launcher
         {mcpActive && (
           <span className="text-[9px] font-medium bg-green-500/15 text-green-400 px-1.5 py-0.5 rounded-full normal-case tracking-normal">

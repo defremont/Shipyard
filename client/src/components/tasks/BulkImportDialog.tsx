@@ -135,7 +135,7 @@ export function BulkImportDialog({ projectId, open, onOpenChange }: BulkImportDi
               disabled={state === 'analyzing'}
             />
             <div className="flex items-center gap-2">
-              {claudeStatus?.configured && (
+              {(claudeStatus?.configured || claudeStatus?.cliAvailable) && (
                 <Button
                   size="sm"
                   className="gap-1.5 text-xs"
