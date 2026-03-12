@@ -55,7 +55,8 @@ export const googleSheetsProvider: SyncProvider = {
     const url = config.settings.url
     if (!url) return { success: false, message: 'No URL configured' }
 
-    const payload = tasksToSheetPayload(tasks)
+    const syncOpts = { includePrompt: config.settings.syncPrompt !== false }
+    const payload = tasksToSheetPayload(tasks, syncOpts)
     const result = await api.syncProxy(url, 'POST', payload)
     if (result.error) throw new Error(result.error)
 
@@ -67,13 +68,14 @@ export const googleSheetsProvider: SyncProvider = {
     const url = config.settings.url
     if (!url) throw new Error('No URL configured')
 
+    const syncOpts = { includePrompt: config.settings.syncPrompt !== false }
     const result = await api.syncProxy(url, 'GET')
     if (result.error) throw new Error(result.error)
 
     const data = result.data as { tasks: Array<Record<string, string>> }
     if (!data.tasks) throw new Error('No tasks data in response')
 
-    const rows = sheetRowsToTasks(data.tasks)
+    const rows = sheetRowsToTasks(data.tasks, syncOpts)
     return { tasks: rows as Partial<Task>[] }
   },
 
@@ -81,15 +83,17 @@ export const googleSheetsProvider: SyncProvider = {
     const url = config.settings.url
     if (!url) return { success: false, message: 'No URL configured' }
 
+    const syncOpts = { includePrompt: config.settings.syncPrompt !== false }
+
     // Fetch sheet data
     const result = await api.syncProxy(url, 'GET')
     if (result.error) throw new Error(result.error)
 
     const data = result.data as { tasks?: Array<Record<string, string>> }
-    const sheetRows = data.tasks ? sheetRowsToTasks(data.tasks) : []
+    const sheetRows = data.tasks ? sheetRowsToTasks(data.tasks, syncOpts) : []
 
     // Merge
-    const { merged, localChanged, sheetChanged } = mergeTasks(localTasks, sheetRows)
+    const { merged, localChanged, sheetChanged } = mergeTasks(localTasks, sheetRows, syncOpts)
 
     if (!localChanged && !sheetChanged) {
       return { success: true, message: 'Already in sync' }
@@ -97,7 +101,7 @@ export const googleSheetsProvider: SyncProvider = {
 
     // Push merged to sheet if local had changes
     if (sheetChanged) {
-      const payload = tasksToSheetPayload(merged as any)
+      const payload = tasksToSheetPayload(merged as any, syncOpts)
       await api.syncProxy(url, 'POST', payload)
     }
 

@@ -29,7 +29,7 @@ export function readProviderConfig(projectId: string, providerId: ProviderId): P
             providerId: 'google-sheets',
             projectId,
             enabled: true,
-            settings: { url: old.url, autoSync: old.autoSync ?? false },
+            settings: { url: old.url, autoSync: old.autoSync ?? false, syncPrompt: old.syncPrompt !== false },
             lastSyncAt: old.lastSyncAt ?? null,
             lastSyncStatus: old.lastSyncStatus ?? null,
             lastSyncError: old.lastSyncError ?? null,
@@ -55,6 +55,7 @@ export function writeProviderConfig(projectId: string, providerId: ProviderId, c
     localStorage.setItem(LEGACY_SHEETS_KEY(projectId), JSON.stringify({
       url: config.settings.url,
       autoSync: config.settings.autoSync ?? false,
+      syncPrompt: config.settings.syncPrompt !== false,
       lastSyncAt: config.lastSyncAt,
       lastSyncStatus: config.lastSyncStatus,
       lastSyncError: config.lastSyncError,

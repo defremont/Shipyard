@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { sheetRowsToTasks, tasksToSheetPayload, mergeTasks, diffSheetWithLocal, type SheetDiff, type SheetSyncOptions } from '@/lib/sheetsAdapter'
 import { getLastPushAt as getAutoSyncLastPushAt } from '@/lib/sync/autoSync'
+import { writeProviderConfig, readProviderConfig } from '@/lib/sync/configStore'
 import type { Task } from './useTasks'
 import { toast } from 'sonner'
 
@@ -62,6 +63,19 @@ export function useSyncConfig(projectId: string) {
   const save = useCallback((newConfig: SyncConfig) => {
     writeConfig(projectId, newConfig)
     setConfig(newConfig)
+    // Keep provider config in sync so autoSync reads the latest settings
+    const existing = readProviderConfig(projectId, 'google-sheets')
+    if (existing || newConfig.url) {
+      writeProviderConfig(projectId, 'google-sheets', {
+        providerId: 'google-sheets',
+        projectId,
+        enabled: !!newConfig.url,
+        settings: { url: newConfig.url, autoSync: newConfig.autoSync, syncPrompt: newConfig.syncPrompt },
+        lastSyncAt: newConfig.lastSyncAt,
+        lastSyncStatus: newConfig.lastSyncStatus,
+        lastSyncError: newConfig.lastSyncError,
+      })
+    }
   }, [projectId])
 
   const clear = useCallback(() => {
