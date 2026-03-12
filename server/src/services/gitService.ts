@@ -109,15 +109,33 @@ export async function discardFile(projectPath: string, file: string, type: 'stag
 
 export async function discardAll(projectPath: string, section: 'staged' | 'unstaged'): Promise<void> {
   const git = getGit(projectPath);
+  const status = await git.status();
   if (section === 'staged') {
-    try {
-      await git.checkout(['HEAD', '--', '.']);
-    } catch {
-      // Initial commit (no HEAD) — just unstage
-      try { await git.reset(['HEAD']); } catch { /* ignore */ }
+    // Mirror discardFile logic for each staged file (handles new files not in HEAD)
+    for (const file of status.staged) {
+      try {
+        await git.checkout(['HEAD', '--', file]);
+      } catch {
+        // New file not in HEAD — just unstage (leaves as untracked)
+        try { await git.reset(['HEAD', '--', file]); } catch { /* ignore */ }
+      }
     }
   } else {
-    await git.checkout(['--', '.']);
+    // Restore all tracked modified/deleted files
+    try { await git.checkout(['--', '.']); } catch { /* nothing to restore */ }
+    // Delete untracked files (mirrors discardFile for type='untracked')
+    for (const file of status.not_added) {
+      const fullPath = path.resolve(projectPath, file);
+      if (!fullPath.startsWith(path.resolve(projectPath))) continue;
+      try {
+        const stat = await fsp.stat(fullPath);
+        if (stat.isDirectory()) {
+          await fsp.rm(fullPath, { recursive: true });
+        } else {
+          await fsp.unlink(fullPath);
+        }
+      } catch { /* ignore */ }
+    }
   }
 }
 
