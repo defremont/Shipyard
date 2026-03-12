@@ -140,6 +140,41 @@ export async function analyzeTask(
   }
 }
 
+export async function bulkOrganizeTasks(
+  config: ClaudeConfig,
+  projectContext: string,
+  rawText: string,
+): Promise<Array<{ title: string; description: string; prompt: string; priority: string; status: string }>> {
+  const client = createClient(config);
+
+  const response = await client.messages.create({
+    model: config.model,
+    max_tokens: config.maxTokens,
+    system: `You are a senior developer organizing tasks for a project. ${projectContext}
+
+Parse the raw text below into structured tasks. The text may be a list (one per line), CSV, bullet points, or free-form notes.
+
+For each task, generate:
+- title: Clean, concise task title
+- description: User-facing explanation of what needs to be done
+- prompt: Technical analysis with implementation details, relevant files, possible approaches
+- priority: "urgent", "high", "medium", or "low" (infer from context)
+- status: "todo" (default), "in_progress", or "done" (if the text implies it's already resolved)
+
+Respond ONLY with valid JSON array, no markdown fences. Example:
+[{"title":"...","description":"...","prompt":"...","priority":"medium","status":"todo"}]`,
+    messages: [{ role: 'user', content: rawText }],
+  });
+
+  const text = response.content[0].type === 'text' ? response.content[0].text : '[]';
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function summarizeTasks(
   config: ClaudeConfig,
   projectName: string,

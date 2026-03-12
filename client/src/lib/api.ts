@@ -46,7 +46,7 @@ export const api = {
 
   // Git
   getGitStatus: (projectId: string) => request<any>(`/projects/${projectId}/git/status`),
-  getGitDiff: (projectId: string, file?: string) => request<{ diff: string }>(`/projects/${projectId}/git/diff${file ? `?file=${encodeURIComponent(file)}` : ''}`),
+  getGitDiff: (projectId: string, file?: string, staged = false) => request<{ diff: string }>(`/projects/${projectId}/git/diff?${file ? `file=${encodeURIComponent(file)}&` : ''}staged=${staged}`),
   stageFile: (projectId: string, file: string) => request(`/projects/${projectId}/git/stage`, { method: 'POST', body: JSON.stringify({ file }) }),
   stageAll: (projectId: string) => request(`/projects/${projectId}/git/stage-all`, { method: 'POST' }),
   unstageFile: (projectId: string, file: string) => request(`/projects/${projectId}/git/unstage`, { method: 'POST', body: JSON.stringify({ file }) }),
@@ -100,6 +100,10 @@ export const api = {
     request<{ ok: boolean; error?: string }>('/claude/config/test', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   analyzeTask: (projectId: string, title: string, taskId?: string) =>
     request<{ description: string; prompt: string }>('/claude/analyze-task', { method: 'POST', body: JSON.stringify({ projectId, title, taskId }) }),
+  bulkOrganizeTasks: (projectId: string, rawText: string) =>
+    request<{ tasks: Array<{ title: string; description: string; prompt: string; priority: string; status: string }> }>(
+      '/claude/bulk-organize', { method: 'POST', body: JSON.stringify({ projectId, rawText }) }
+    ),
   summarizeTasks: (projectId: string) =>
     request<{ summary: string }>('/claude/summarize', { method: 'POST', body: JSON.stringify({ projectId }) }),
 

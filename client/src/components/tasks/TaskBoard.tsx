@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown } from 'lucide-react'
+import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown, Import } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -21,6 +21,7 @@ import { TaskItem } from './TaskItem'
 import { TaskEditor } from './TaskEditor'
 import { TaskViewer } from './TaskViewer'
 import { CsvReviewDialog } from './CsvReviewDialog'
+import { BulkImportDialog } from './BulkImportDialog'
 import { SheetSyncPanel } from './SheetSyncPanel'
 import { SyncPanelExports } from '@/components/sync/SyncPanel'
 import { useTasks, useUpdateTask, useReorderTasks, useCreateTask, type Task } from '@/hooks/useTasks'
@@ -277,6 +278,7 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
     (localStorage.getItem(`shipyard:sort:${projectId}`) as SortOption) || 'priority'
   )
   const [addingInColumn, setAddingInColumn] = useState<string | null>(null)
+  const [bulkImportOpen, setBulkImportOpen] = useState(false)
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -469,6 +471,15 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
             </TooltipTrigger>
             <TooltipContent>Sort tasks within columns</TooltipContent>
           </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={() => setBulkImportOpen(true)}>
+                <Import className="h-3.5 w-3.5" />
+                Import
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Paste text or list — AI organizes into tasks</TooltipContent>
+          </Tooltip>
           <Button size="sm" className="h-7 gap-1 text-xs" onClick={handleNew}>
             <Plus className="h-3.5 w-3.5" />
             New Task
@@ -538,6 +549,12 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
         task={editingTask}
         open={editorOpen}
         onOpenChange={setEditorOpen}
+      />
+
+      <BulkImportDialog
+        projectId={projectId}
+        open={bulkImportOpen}
+        onOpenChange={setBulkImportOpen}
       />
 
       {csvDiff && (

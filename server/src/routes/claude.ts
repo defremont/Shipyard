@@ -123,6 +123,25 @@ export async function claudeRoutes(app: FastifyInstance) {
     return result;
   });
 
+  // Bulk organize tasks from raw text
+  app.post<{
+    Body: { projectId: string; rawText: string }
+  }>('/api/claude/bulk-organize', async (request, reply) => {
+    const config = await claudeService.loadClaudeConfig();
+    if (!config) {
+      return reply.status(400).send({ error: 'Claude API key not configured' });
+    }
+
+    const { projectId, rawText } = request.body;
+    if (!rawText?.trim()) {
+      return reply.status(400).send({ error: 'No text provided' });
+    }
+
+    const context = await buildProjectContext(projectId);
+    const tasks = await claudeService.bulkOrganizeTasks(config, context, rawText);
+    return { tasks };
+  });
+
   // Summarize project tasks
   app.post<{
     Body: { projectId: string }

@@ -10,10 +10,10 @@ export function useGitStatus(projectId: string | undefined) {
   })
 }
 
-export function useGitDiff(projectId: string | undefined, file?: string) {
+export function useGitDiff(projectId: string | undefined, file?: string, staged = false) {
   return useQuery({
-    queryKey: ['git-diff', projectId, file],
-    queryFn: () => api.getGitDiff(projectId!, file),
+    queryKey: ['git-diff', projectId, file, staged],
+    queryFn: () => api.getGitDiff(projectId!, file, staged),
     enabled: !!projectId,
   })
 }

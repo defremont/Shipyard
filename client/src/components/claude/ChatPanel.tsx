@@ -85,18 +85,15 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
 
   if (!status?.configured) {
     return (
-      <div className="space-y-2">
+      <div>
         <div className="flex items-center justify-between">
           <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
             <Sparkles className="h-3.5 w-3.5" />
             Claude AI
           </h3>
-        </div>
-        <div className="bg-muted/30 rounded-lg p-3 text-center space-y-2">
-          <p className="text-xs text-muted-foreground">Configure your API key to enable AI features</p>
-          <Button size="sm" variant="outline" onClick={() => setConfigOpen(true)} className="gap-1.5 text-xs">
+          <Button size="sm" variant="ghost" className="h-6 text-[10px] gap-1 text-muted-foreground" onClick={() => setConfigOpen(true)}>
             <Settings className="h-3 w-3" />
-            Configure
+            Setup
           </Button>
         </div>
         <ClaudeConfigDialog open={configOpen} onOpenChange={setConfigOpen} />

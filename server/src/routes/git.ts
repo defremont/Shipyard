@@ -35,14 +35,15 @@ export async function gitRoutes(app: FastifyInstance) {
     }
   );
 
-  app.get<{ Params: { projectId: string }; Querystring: { file?: string } }>(
+  app.get<{ Params: { projectId: string }; Querystring: { file?: string; staged?: string } }>(
     '/api/projects/:projectId/git/diff',
     async (request, reply) => {
       const path = await getProjectPath(request.params.projectId);
       if (!path) return reply.status(404).send({ error: 'Project not found' });
 
       try {
-        const diff = await gitService.getDiff(path, request.query.file);
+        const staged = request.query.staged === 'true';
+        const diff = await gitService.getDiff(path, request.query.file, staged);
         return { diff };
       } catch (err: any) {
         return reply.status(500).send({ error: err.message });

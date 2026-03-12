@@ -19,7 +19,7 @@ export function FileChange({ projectId, file, status, staged }: FileChangeProps)
   const stageFile = useStageFile()
   const unstageFile = useUnstageFile()
   const discardFile = useDiscardFile()
-  const { data: diffData } = useGitDiff(showDiff ? projectId : undefined, file)
+  const { data: diffData } = useGitDiff(showDiff ? projectId : undefined, file, staged)
 
   const statusColors: Record<string, string> = {
     M: 'text-yellow-500',

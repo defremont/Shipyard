@@ -112,7 +112,9 @@ export function mergeTasks(localTasks: Task[], sheetRows: SheetRow[], options?: 
   sheetChanged: boolean
 } {
   const localMap = new Map(localTasks.map(t => [t.id, t]))
-  const sheetMap = new Map(sheetRows.filter(r => r.id).map(r => [r.id, r]))
+  const sheetWithId = sheetRows.filter(r => r.id)
+  const sheetWithoutId = sheetRows.filter(r => !r.id)
+  const sheetMap = new Map(sheetWithId.map(r => [r.id, r]))
   const allIds = new Set([...localMap.keys(), ...sheetMap.keys()])
 
   const merged: SheetRow[] = []
@@ -154,6 +156,12 @@ export function mergeTasks(localTasks: Task[], sheetRows: SheetRow[], options?: 
       merged.push(sheet)
       localChanged = true
     }
+  }
+
+  // Sheet rows without id are new tasks added directly in the spreadsheet
+  for (const row of sheetWithoutId) {
+    merged.push(row)
+    localChanged = true
   }
 
   return { merged, localChanged, sheetChanged }
