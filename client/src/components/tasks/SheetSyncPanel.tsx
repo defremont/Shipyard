@@ -76,18 +76,22 @@ function doPost(e) {
 
 function setupDashboard() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  getDataSheet();
+  var dataSheet = getDataSheet();
   var dash = ss.getSheetByName(DASH_SHEET);
   if (dash) {
     dash.clear(); dash.clearConditionalFormatRules();
     var b = dash.getBandings(); for(var i=0;i<b.length;i++) b[i].remove();
   } else { dash = ss.insertSheet(DASH_SHEET, 0); }
 
-  // QUERY pulls Title, Description, Priority, Status, Details from Data
-  dash.getRange('A1').setFormula(
-    '=QUERY('+DATA_SHEET+'!A:G,"SELECT B,C,D,E,F WHERE B<>\\'\\' LABEL B \\'Title\\',C \\'Description\\',D \\'Priority\\',E \\'Status\\',F \\'Details\\'",1)'
-  );
-  SpreadsheetApp.flush();
+  // Copy data directly (no QUERY formula — works in all locales)
+  var src = dataSheet.getDataRange().getValues();
+  var rows = [['Title','Description','Priority','Status','Details']];
+  for (var i=1; i<src.length; i++) {
+    if (!String(src[i][1]).trim()) continue;
+    rows.push([src[i][1], src[i][2], src[i][3], src[i][4], src[i][5]]);
+  }
+  var n = rows.length;
+  dash.getRange(1,1,n,5).setValues(rows);
 
   // Header
   dash.getRange('A1:E1').setFontWeight('bold').setFontColor('#ffffff')
@@ -98,42 +102,45 @@ function setupDashboard() {
   dash.setColumnWidth(1,280); dash.setColumnWidth(2,360);
   dash.setColumnWidth(3,100); dash.setColumnWidth(4,120); dash.setColumnWidth(5,360);
 
-  // Data area
-  dash.getRange('A2:E500').setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
-    .setVerticalAlignment('top').setFontSize(10);
+  if (n > 1) {
+    // Data area
+    dash.getRange(2,1,n-1,5).setWrapStrategy(SpreadsheetApp.WrapStrategy.WRAP)
+      .setVerticalAlignment('top').setFontSize(10);
 
-  // Conditional formatting
-  var pCol = dash.getRange('C2:C500'), sCol = dash.getRange('D2:D500');
-  var rules = [];
-  var pColors = [
-    ['urgent','#fecaca','#991b1b',true], ['high','#fed7aa','#9a3412',true],
-    ['medium','#dbeafe','#1e40af',false], ['low','#f3f4f6','#6b7280',false]
-  ];
-  for (var i=0;i<pColors.length;i++) {
+    // Conditional formatting
+    var pCol = dash.getRange('C2:C'+n), sCol = dash.getRange('D2:D'+n);
+    var rules = [];
+    var pColors = [
+      ['urgent','#fecaca','#991b1b',true], ['high','#fed7aa','#9a3412',true],
+      ['medium','#dbeafe','#1e40af',false], ['low','#f3f4f6','#6b7280',false]
+    ];
+    for (var i=0;i<pColors.length;i++) {
+      rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo(pColors[i][0]).setBackground(pColors[i][1])
+        .setFontColor(pColors[i][2]).setBold(pColors[i][3])
+        .setRanges([pCol]).build());
+    }
+    var sColors = [
+      ['todo','#dbeafe','#1e40af'], ['backlog','#e0e7ff','#4338ca'],
+      ['in_progress','#fef3c7','#92400e'], ['done','#d1fae5','#065f46']
+    ];
+    for (var i=0;i<sColors.length;i++) {
+      rules.push(SpreadsheetApp.newConditionalFormatRule()
+        .whenTextEqualTo(sColors[i][0]).setBackground(sColors[i][1])
+        .setFontColor(sColors[i][2]).setRanges([sCol]).build());
+    }
     rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo(pColors[i][0]).setBackground(pColors[i][1])
-      .setFontColor(pColors[i][2]).setBold(pColors[i][3])
-      .setRanges([pCol]).build());
+      .whenFormulaSatisfied('=AND(ISEVEN(ROW()),$A2<>"")')
+      .setBackground('#f8fafc').setRanges([dash.getRange('A2:E'+n)]).build());
+    dash.setConditionalFormatRules(rules);
   }
-  var sColors = [
-    ['todo','#dbeafe','#1e40af'], ['backlog','#e0e7ff','#4338ca'],
-    ['in_progress','#fef3c7','#92400e'], ['done','#d1fae5','#065f46']
-  ];
-  for (var i=0;i<sColors.length;i++) {
-    rules.push(SpreadsheetApp.newConditionalFormatRule()
-      .whenTextEqualTo(sColors[i][0]).setBackground(sColors[i][1])
-      .setFontColor(sColors[i][2]).setRanges([sCol]).build());
-  }
-  // Alternating row color (even rows with data)
-  rules.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=AND(ISEVEN(ROW()),$A2<>"")')
-    .setBackground('#f8fafc').setRanges([dash.getRange('A2:E500')]).build());
-  dash.setConditionalFormatRules(rules);
 
-  // Clean up extra columns
+  // Clean up extra cols/rows
   if (dash.getMaxColumns()>5) dash.deleteColumns(6, dash.getMaxColumns()-5);
+  var maxR = dash.getMaxRows();
+  if (maxR > n) dash.deleteRows(n+1, maxR-n);
   ss.setActiveSheet(dash);
-  return resp({ ok:true, message:'Dashboard created' });
+  return resp({ ok:true, message:'Dashboard refreshed ('+(n-1)+' tasks)' });
 }
 
 function onEdit(e) {
@@ -455,7 +462,7 @@ function SetupContent({
           </ol>
           <p className="text-[10px] text-muted-foreground/70">
             After deploying, do a Push, then click the <strong>paintbrush</strong> button to create the formatted Dashboard.
-            The Dashboard uses a QUERY formula — all your custom formatting (colors, wrapping, widths) survives sync.
+            Click paintbrush again after each Push to refresh the Dashboard view.
           </p>
           <div className="relative">
             <pre className="text-[10px] bg-background rounded p-2 overflow-auto max-h-36 border font-mono">
