@@ -329,6 +329,16 @@ UI components are built with [shadcn/ui](https://ui.shadcn.com/). To add a new c
 npx shadcn@latest add <component>
 ```
 
+## Star History
+
+<a href="https://www.star-history.com/?repos=defremont%2FShipyard&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=defremont/Shipyard&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=defremont/Shipyard&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=defremont/Shipyard&type=date&legend=top-left" />
+ </picture>
+</a>
+
 ## License
 
 [Apache License 2.0](LICENSE)
