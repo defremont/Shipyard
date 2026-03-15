@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="client/public/favicon.svg" width="80" height="80" alt="Shipyard" />
+  <img src="assets/icon.png" width="120" height="120" alt="Shipyard" />
 </p>
 
 <h1 align="center">Shipyard</h1>
