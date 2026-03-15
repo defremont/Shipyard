@@ -1,6 +1,6 @@
 appId: com.shipyard.dev
 productName: Shipyard
-copyright: Copyright © 2026
+copyright: Copyright © 2026 Shipyard Contributors. Apache-2.0
 
 directories:
   output: release

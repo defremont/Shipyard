@@ -9,11 +9,12 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/defremont/Shipyard/releases/latest"><img src="https://img.shields.io/github/v/release/defremont/Shipyard?style=flat-square&label=download" alt="Download" /></a>
   <a href="https://github.com/defremont/Shipyard"><img src="https://img.shields.io/github/stars/defremont/Shipyard?style=flat-square" alt="Stars" /></a>
   <img src="https://img.shields.io/badge/react-18-61dafb?style=flat-square&logo=react&logoColor=white" alt="React 18" />
   <img src="https://img.shields.io/badge/fastify-5-000000?style=flat-square&logo=fastify&logoColor=white" alt="Fastify 5" />
   <img src="https://img.shields.io/badge/typescript-5-3178c6?style=flat-square&logo=typescript&logoColor=white" alt="TypeScript 5" />
-  <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="MIT License" />
+  <img src="https://img.shields.io/badge/license-Apache%202.0-green?style=flat-square" alt="Apache 2.0 License" />
 </p>
 
 ---
@@ -52,6 +53,19 @@
 **Multi-tab Workspace** -- Open multiple projects simultaneously in tabs, switch instantly between them.
 
 **Command Palette** -- `Ctrl+K` to quickly search and jump to any project, task, or action.
+
+## Download
+
+Pre-built desktop installers are available on the [Releases](https://github.com/defremont/Shipyard/releases/latest) page:
+
+| Platform | File |
+|----------|------|
+| Windows | `Shipyard-Setup-x.x.x.exe` |
+| macOS (Apple Silicon) | `Shipyard-x.x.x-arm64.dmg` |
+| macOS (Intel) | `Shipyard-x.x.x-x64.dmg` |
+| Linux | `Shipyard-x.x.x.AppImage` or `.deb` |
+
+Or run from source:
 
 ## Quick Start
 
@@ -311,4 +325,4 @@ npx shadcn@latest add <component>
 
 ## License
 
-[MIT](LICENSE)
+[Apache License 2.0](LICENSE)

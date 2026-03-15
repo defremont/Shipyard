@@ -35,14 +35,26 @@ jobs:
           node-version: 20
           cache: pnpm
 
-      - name: Install dependencies
-        run: pnpm install
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y dpkg fakeroot rpm
+
+      - name: Install dependencies (skip native modules)
+        run: pnpm install --ignore-scripts
+        env:
+          npm_config_optional: false
 
       - name: Build and package
         run: ${{ matrix.cmd }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_IDENTITY_AUTO_DISCOVERY: false
+          DEBUG: electron-builder
+
+      - name: List release artifacts
+        if: always()
+        shell: bash
+        run: ls -lah release/ 2>/dev/null || echo "No release directory"
 
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
