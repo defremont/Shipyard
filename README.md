@@ -20,6 +20,12 @@
 ---
 
 <p align="center">
+  <a href="https://github.com/defremont/Shipyard/releases/latest"><img src="https://img.shields.io/badge/Windows-.exe-0078D4?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" /></a>&nbsp;
+  <a href="https://github.com/defremont/Shipyard/releases/latest"><img src="https://img.shields.io/badge/macOS-.dmg-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" /></a>&nbsp;
+  <a href="https://github.com/defremont/Shipyard/releases/latest"><img src="https://img.shields.io/badge/Linux-.AppImage | .deb-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" /></a>
+</p>
+
+<p align="center">
   <img src="assets/screenshot.jpg" alt="Shipyard — workspace with kanban board, terminal, and git panel" width="100%" />
 </p>
 
