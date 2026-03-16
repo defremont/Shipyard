@@ -1,5 +1,5 @@
-import { useState, useCallback, useMemo, useRef } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown, Import, LayoutGrid, List, Sparkles } from 'lucide-react'
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown, Import, LayoutGrid, List, Sparkles, ChevronDown, CheckCheck, Eye, EyeOff } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -34,6 +34,9 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+
+const INITIAL_VISIBLE = 15
+const LOAD_MORE_COUNT = 15
 
 type SortOption = 'priority' | 'newest' | 'oldest' | 'updated'
 const SORT_OPTIONS: { key: SortOption; label: string }[] = [
@@ -165,9 +168,10 @@ const itemsFirstCollision: CollisionDetection = (args) => {
   return closestCenter(args)
 }
 
-function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, onAddingChange, isAdding }: {
+function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, onAddingChange, isAdding, hiddenCount, onShowMore }: {
   col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[]
   onCopy?: () => void; projectId?: string; onAddingChange?: (adding: boolean) => void; isAdding?: boolean
+  hiddenCount?: number; onShowMore?: () => void
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key })
   const Icon = col.icon
@@ -228,6 +232,15 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, onA
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
           {children}
         </SortableContext>
+        {hiddenCount != null && hiddenCount > 0 && onShowMore && (
+          <button
+            onClick={onShowMore}
+            className="w-full flex items-center justify-center gap-1 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors"
+          >
+            <ChevronDown className="h-3 w-3" />
+            Show {hiddenCount} more
+          </button>
+        )}
       </div>
     </div>
   )
@@ -283,9 +296,23 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
   )
   const [addingInColumn, setAddingInColumn] = useState<string | null>(null)
   const [bulkImportOpen, setBulkImportOpen] = useState(false)
+  const [doneReadAt, setDoneReadAt] = useState<string | null>(() =>
+    localStorage.getItem(`shipyard:done-read:${projectId}`)
+  )
+  const [showReadDone, setShowReadDone] = useState(false)
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>(() =>
     (localStorage.getItem('shipyard:view:' + projectId) as 'kanban' | 'list') || 'kanban'
   )
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({
+    inbox: INITIAL_VISIBLE,
+    in_progress: INITIAL_VISIBLE,
+    done: INITIAL_VISIBLE,
+  })
+
+  // Reset visible counts when project changes
+  useEffect(() => {
+    setVisibleCounts({ inbox: INITIAL_VISIBLE, in_progress: INITIAL_VISIBLE, done: INITIAL_VISIBLE })
+  }, [projectId])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -371,12 +398,42 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
     return result
   }, [tasks, sortBy])
 
+  // Split done tasks into unread and read based on doneReadAt timestamp
+  const { unreadDone, readDone } = useMemo(() => {
+    const allDone = grouped.done || []
+    if (!doneReadAt) return { unreadDone: allDone, readDone: [] as Task[] }
+    const cutoff = new Date(doneReadAt).getTime()
+    const unread: Task[] = []
+    const read: Task[] = []
+    for (const task of allDone) {
+      const doneTime = task.doneAt ? new Date(task.doneAt).getTime() : 0
+      if (doneTime <= cutoff) read.push(task)
+      else unread.push(task)
+    }
+    return { unreadDone: unread, readDone: read }
+  }, [grouped.done, doneReadAt])
+
+  const handleMarkAllRead = useCallback(() => {
+    const now = new Date().toISOString()
+    localStorage.setItem(`shipyard:done-read:${projectId}`, now)
+    setDoneReadAt(now)
+    setShowReadDone(false)
+    toast.success(`Marked ${unreadDone.length} tasks as read`)
+  }, [projectId, unreadDone.length])
+
   const findColumnForTask = useCallback((taskId: string): string | undefined => {
     for (const [key, colTasks] of Object.entries(grouped)) {
       if (colTasks.some(t => t.id === taskId)) return key
     }
     return undefined
   }, [grouped])
+
+  const handleShowMore = useCallback((colKey: string) => {
+    setVisibleCounts(prev => ({
+      ...prev,
+      [colKey]: (prev[colKey] || INITIAL_VISIBLE) + LOAD_MORE_COUNT,
+    }))
+  }, [])
 
   const handleCopyColumn = useCallback((colKey: string) => {
     if (!projectPath || !projectName) return
@@ -544,8 +601,18 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
         >
           <div className="grid grid-cols-3 gap-3">
             {columns.map(col => {
+              const isDoneCol = col.key === 'done'
               const colTasks = grouped[col.key] || []
-              const taskIds = colTasks.map(t => t.id)
+              // For done column: show unread tasks, optionally show read tasks
+              const visibleUnread = isDoneCol ? unreadDone : colTasks
+              const limit = visibleCounts[col.key] || INITIAL_VISIBLE
+              const visibleTasks = isDoneCol ? visibleUnread : colTasks.slice(0, limit)
+              const hiddenCount = isDoneCol ? 0 : colTasks.length - visibleTasks.length
+              // Include read done task IDs in SortableContext so DnD works when expanded
+              const allVisibleTasks = isDoneCol && showReadDone
+                ? [...visibleTasks, ...readDone]
+                : visibleTasks
+              const taskIds = allVisibleTasks.map(t => t.id)
               return (
                 <DroppableColumn
                   key={col.key} col={col} count={colTasks.length} taskIds={taskIds}
@@ -553,23 +620,85 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
                   projectId={projectId}
                   isAdding={addingInColumn === col.key}
                   onAddingChange={(adding) => setAddingInColumn(adding ? col.key : null)}
+                  hiddenCount={hiddenCount}
+                  onShowMore={() => handleShowMore(col.key)}
+                  headerExtra={isDoneCol && unreadDone.length > 0 ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          onClick={handleMarkAllRead}
+                          className="text-muted-foreground/40 hover:text-green-500 transition-colors"
+                        >
+                          <CheckCheck className="h-3.5 w-3.5" />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent>Mark all as read</TooltipContent>
+                    </Tooltip>
+                  ) : undefined}
                 >
-                  {colTasks.length > 0 ? (
-                    colTasks.map(task => (
-                      <SortableTaskItem
-                        key={task.id}
-                        task={task}
-                        projectName={projectName}
-                        projectPath={projectPath}
-                        onEdit={handleEdit}
-                        onView={handleView}
-                        onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
-                      />
-                    ))
+                  {allVisibleTasks.length > 0 ? (
+                    <>
+                      {visibleTasks.map(task => (
+                        <SortableTaskItem
+                          key={task.id}
+                          task={task}
+                          projectName={projectName}
+                          projectPath={projectPath}
+                          onEdit={handleEdit}
+                          onView={handleView}
+                          onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
+                        />
+                      ))}
+                      {isDoneCol && readDone.length > 0 && (
+                        <button
+                          onClick={() => setShowReadDone(!showReadDone)}
+                          className="w-full flex items-center justify-center gap-1.5 py-1.5 text-xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/30 rounded transition-colors"
+                        >
+                          {showReadDone ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                          {showReadDone ? 'Hide' : 'Show'} {readDone.length} read
+                        </button>
+                      )}
+                      {isDoneCol && showReadDone && readDone.map(task => (
+                        <div key={task.id} className="opacity-40">
+                          <SortableTaskItem
+                            task={task}
+                            projectName={projectName}
+                            projectPath={projectPath}
+                            onEdit={handleEdit}
+                            onView={handleView}
+                            onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
+                          />
+                        </div>
+                      ))}
+                    </>
                   ) : (
-                    <div className="text-xs text-muted-foreground/50 py-6 text-center">
-                      Drop tasks here
-                    </div>
+                    <>
+                      {isDoneCol && readDone.length > 0 ? (
+                        <button
+                          onClick={() => setShowReadDone(!showReadDone)}
+                          className="w-full flex items-center justify-center gap-1.5 py-6 text-xs text-muted-foreground/50 hover:text-muted-foreground hover:bg-accent/30 rounded transition-colors"
+                        >
+                          {showReadDone ? <EyeOff className="h-3 w-3" /> : <Eye className="h-3 w-3" />}
+                          {showReadDone ? 'Hide' : 'Show'} {readDone.length} read
+                        </button>
+                      ) : (
+                        <div className="text-xs text-muted-foreground/50 py-6 text-center">
+                          Drop tasks here
+                        </div>
+                      )}
+                      {isDoneCol && showReadDone && readDone.map(task => (
+                        <div key={task.id} className="opacity-40">
+                          <SortableTaskItem
+                            task={task}
+                            projectName={projectName}
+                            projectPath={projectPath}
+                            onEdit={handleEdit}
+                            onView={handleView}
+                            onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
+                          />
+                        </div>
+                      ))}
+                    </>
                   )}
                 </DroppableColumn>
               )

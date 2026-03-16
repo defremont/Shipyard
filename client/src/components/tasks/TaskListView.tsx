@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { ChevronDown, ChevronRight, Circle, Check, AlertTriangle, ArrowUp, ArrowDown, Minus, Pencil, Trash2, Copy, CopyPlus } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
@@ -175,8 +175,12 @@ function TaskRow({ task, projectName, projectPath, showProjectBadge, projectMap,
   )
 }
 
+const LIST_INITIAL_VISIBLE = 20
+const LIST_LOAD_MORE = 20
+
 export function TaskListView({ tasks, projectName, projectPath, showProjectBadge, projectMap, onEdit, onView }: TaskListViewProps) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({})
 
   const sections = useMemo(() => {
     return statusSections.map(section => ({
@@ -195,45 +199,66 @@ export function TaskListView({ tasks, projectName, projectPath, showProjectBadge
     })
   }
 
+  const handleShowMore = useCallback((key: string) => {
+    setVisibleCounts(prev => ({
+      ...prev,
+      [key]: (prev[key] || LIST_INITIAL_VISIBLE) + LIST_LOAD_MORE,
+    }))
+  }, [])
+
   return (
     <div className="space-y-2">
-      {sections.map(section => (
-        <div key={section.key} className="rounded-lg border bg-card">
-          <button
-            onClick={() => toggleSection(section.key)}
-            className="flex items-center gap-2 w-full px-3 py-2 hover:bg-accent/30 transition-colors rounded-t-lg"
-          >
-            {collapsed.has(section.key) ? (
-              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+      {sections.map(section => {
+        const limit = visibleCounts[section.key] || LIST_INITIAL_VISIBLE
+        const visibleTasks = section.tasks.slice(0, limit)
+        const hiddenCount = section.tasks.length - visibleTasks.length
+        return (
+          <div key={section.key} className="rounded-lg border bg-card">
+            <button
+              onClick={() => toggleSection(section.key)}
+              className="flex items-center gap-2 w-full px-3 py-2 hover:bg-accent/30 transition-colors rounded-t-lg"
+            >
+              {collapsed.has(section.key) ? (
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              <span className={cn('text-xs font-semibold uppercase tracking-wider', section.color)}>
+                {section.label}
+              </span>
+              <span className="text-xs text-muted-foreground">({section.tasks.length})</span>
+            </button>
+            {!collapsed.has(section.key) && section.tasks.length > 0 && (
+              <div className="pb-1">
+                {visibleTasks.map(task => (
+                  <TaskRow
+                    key={task.id}
+                    task={task}
+                    projectName={projectName}
+                    projectPath={projectPath}
+                    showProjectBadge={showProjectBadge}
+                    projectMap={projectMap}
+                    onEdit={onEdit}
+                    onView={onView}
+                  />
+                ))}
+                {hiddenCount > 0 && (
+                  <button
+                    onClick={() => handleShowMore(section.key)}
+                    className="w-full flex items-center justify-center gap-1 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors"
+                  >
+                    <ChevronDown className="h-3 w-3" />
+                    Show {hiddenCount} more
+                  </button>
+                )}
+              </div>
             )}
-            <span className={cn('text-xs font-semibold uppercase tracking-wider', section.color)}>
-              {section.label}
-            </span>
-            <span className="text-xs text-muted-foreground">({section.tasks.length})</span>
-          </button>
-          {!collapsed.has(section.key) && section.tasks.length > 0 && (
-            <div className="pb-1">
-              {section.tasks.map(task => (
-                <TaskRow
-                  key={task.id}
-                  task={task}
-                  projectName={projectName}
-                  projectPath={projectPath}
-                  showProjectBadge={showProjectBadge}
-                  projectMap={projectMap}
-                  onEdit={onEdit}
-                  onView={onView}
-                />
-              ))}
-            </div>
-          )}
-          {!collapsed.has(section.key) && section.tasks.length === 0 && (
-            <div className="text-xs text-muted-foreground/50 py-3 text-center">No tasks</div>
-          )}
-        </div>
-      ))}
+            {!collapsed.has(section.key) && section.tasks.length === 0 && (
+              <div className="text-xs text-muted-foreground/50 py-3 text-center">No tasks</div>
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

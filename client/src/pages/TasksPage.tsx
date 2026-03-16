@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react'
-import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Search, ArrowUpDown, LayoutGrid, List } from 'lucide-react'
+import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Search, ArrowUpDown, LayoutGrid, List, ChevronDown } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -45,6 +45,8 @@ const columns: ColumnConfig[] = [
 ]
 
 const COLUMN_KEYS = new Set(columns.map(c => c.key))
+const INITIAL_VISIBLE = 15
+const LOAD_MORE_COUNT = 15
 
 // Custom collision detection: prioritize sortable items over column containers
 const itemsFirstCollision: CollisionDetection = (args) => {
@@ -97,7 +99,10 @@ const priorities: { key: Priority; icon: React.ElementType; color: string; label
   { key: 'low', icon: ArrowDown, color: 'text-muted-foreground border-muted-foreground/50 bg-muted', label: 'Low' },
 ]
 
-function DroppableColumn({ col, children, count, taskIds }: { col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[] }) {
+function DroppableColumn({ col, children, count, taskIds, hiddenCount, onShowMore }: {
+  col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[]
+  hiddenCount?: number; onShowMore?: () => void
+}) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key })
   const Icon = col.icon
 
@@ -120,6 +125,15 @@ function DroppableColumn({ col, children, count, taskIds }: { col: ColumnConfig;
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
           {children}
         </SortableContext>
+        {hiddenCount != null && hiddenCount > 0 && onShowMore && (
+          <button
+            onClick={onShowMore}
+            className="w-full flex items-center justify-center gap-1 py-1.5 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/50 rounded transition-colors"
+          >
+            <ChevronDown className="h-3 w-3" />
+            Show {hiddenCount} more
+          </button>
+        )}
       </div>
     </div>
   )
@@ -181,6 +195,18 @@ export function TasksPage() {
   const [viewMode, setViewMode] = useState<'kanban' | 'list'>(() =>
     (localStorage.getItem('shipyard:view:global') as 'kanban' | 'list') || 'kanban'
   )
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({
+    inbox: INITIAL_VISIBLE,
+    in_progress: INITIAL_VISIBLE,
+    done: INITIAL_VISIBLE,
+  })
+
+  const handleShowMore = useCallback((colKey: string) => {
+    setVisibleCounts(prev => ({
+      ...prev,
+      [colKey]: (prev[colKey] || INITIAL_VISIBLE) + LOAD_MORE_COUNT,
+    }))
+  }, [])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -374,11 +400,18 @@ export function TasksPage() {
             <div className="grid grid-cols-3 gap-4 h-full">
               {columns.map(col => {
                 const colTasks = grouped[col.key] || []
-                const taskIds = colTasks.map(t => t.id)
+                const limit = visibleCounts[col.key] || INITIAL_VISIBLE
+                const visibleTasks = colTasks.slice(0, limit)
+                const hiddenCount = colTasks.length - visibleTasks.length
+                const taskIds = visibleTasks.map(t => t.id)
                 return (
-                  <DroppableColumn key={col.key} col={col} count={colTasks.length} taskIds={taskIds}>
-                    {colTasks.length > 0 ? (
-                      colTasks.map(task => (
+                  <DroppableColumn
+                    key={col.key} col={col} count={colTasks.length} taskIds={taskIds}
+                    hiddenCount={hiddenCount}
+                    onShowMore={() => handleShowMore(col.key)}
+                  >
+                    {visibleTasks.length > 0 ? (
+                      visibleTasks.map(task => (
                         <SortableGlobalTaskItem
                           key={task.id}
                           task={task}
