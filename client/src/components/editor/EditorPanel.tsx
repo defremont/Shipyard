@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react'
-import { FileCode, Loader2 } from 'lucide-react'
+import { FileCode, Loader2, Eye, Code } from 'lucide-react'
 import { toast } from 'sonner'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { EditorTabBar } from './EditorTabBar'
 import { CodeMirrorEditor } from './CodeMirrorEditor'
 import { useFileContent, useSaveFile } from '@/hooks/useFiles'
 import type { EditorTab } from '@/hooks/useEditorTabs'
+
+const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx'])
 
 interface EditorPanelProps {
   projectId: string
@@ -57,7 +61,23 @@ export function EditorPanel({
 }: EditorPanelProps) {
   const saveFile = useSaveFile()
   const [confirmClose, setConfirmClose] = useState<string | null>(null)
+  const [previewPaths, setPreviewPaths] = useState<Set<string>>(new Set())
   const activeTab = tabs.find(t => t.path === activeTabPath)
+  const isMarkdown = activeTab ? MARKDOWN_EXTENSIONS.has(activeTab.extension) : false
+  const isPreview = activeTab ? previewPaths.has(activeTab.path) : false
+
+  const togglePreview = useCallback(() => {
+    if (!activeTab) return
+    setPreviewPaths(prev => {
+      const next = new Set(prev)
+      if (next.has(activeTab.path)) {
+        next.delete(activeTab.path)
+      } else {
+        next.add(activeTab.path)
+      }
+      return next
+    })
+  }, [activeTab])
 
   const handleSave = useCallback(() => {
     if (!activeTab || !activeTab.isDirty) return
@@ -115,25 +135,57 @@ export function EditorPanel({
         onCloseTab={handleCloseTab}
       />
 
-      <div className="flex-1 min-h-0 relative">
-        {tabs.map(tab => (
-          <div
-            key={tab.path}
-            className={tab.path === activeTabPath ? 'h-full' : 'hidden'}
+      {/* Markdown preview toggle bar */}
+      {isMarkdown && activeTab && !activeTab.needsFetch && (
+        <div className="flex items-center gap-1 px-2 py-1 border-b bg-card/50 shrink-0">
+          <button
+            onClick={togglePreview}
+            className="flex items-center gap-1.5 px-2 py-1 text-xs rounded hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
+            title={isPreview ? 'Show code' : 'Show preview'}
           >
-            {tab.needsFetch ? (
-              <TabContentLoader projectId={projectId} tab={tab} onInit={onInitContent} />
+            {isPreview ? (
+              <>
+                <Code className="h-3.5 w-3.5" />
+                <span>Code</span>
+              </>
             ) : (
-              <CodeMirrorEditor
-                value={tab.content}
-                extension={tab.extension}
-                onChange={(val) => onContentChange(tab.path, val)}
-                onSave={handleSave}
-                readOnly={tab.extension ? ['application/octet-stream'].includes(tab.extension) : false}
-              />
+              <>
+                <Eye className="h-3.5 w-3.5" />
+                <span>Preview</span>
+              </>
             )}
-          </div>
-        ))}
+          </button>
+        </div>
+      )}
+
+      <div className="flex-1 min-h-0 relative">
+        {tabs.map(tab => {
+          const showPreview = previewPaths.has(tab.path) && MARKDOWN_EXTENSIONS.has(tab.extension)
+          return (
+            <div
+              key={tab.path}
+              className={tab.path === activeTabPath ? 'h-full' : 'hidden'}
+            >
+              {tab.needsFetch ? (
+                <TabContentLoader projectId={projectId} tab={tab} onInit={onInitContent} />
+              ) : showPreview ? (
+                <div className="h-full overflow-auto scrollbar-dark p-6">
+                  <div className="prose prose-invert prose-sm max-w-none">
+                    <Markdown remarkPlugins={[remarkGfm]}>{tab.content}</Markdown>
+                  </div>
+                </div>
+              ) : (
+                <CodeMirrorEditor
+                  value={tab.content}
+                  extension={tab.extension}
+                  onChange={(val) => onContentChange(tab.path, val)}
+                  onSave={handleSave}
+                  readOnly={tab.extension ? ['application/octet-stream'].includes(tab.extension) : false}
+                />
+              )}
+            </div>
+          )
+        })}
       </div>
 
       {/* Unsaved changes confirmation */}
