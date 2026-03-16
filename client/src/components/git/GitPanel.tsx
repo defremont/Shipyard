@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { GitBranch, RefreshCw, Upload, Download, ChevronDown, ChevronRight, GitCommit, ArrowUp, ArrowDown, Trash2, Undo2 } from 'lucide-react'
+import { GitBranch, RefreshCw, Upload, Download, ChevronDown, ChevronRight, GitCommit, ArrowUp, ArrowDown, Trash2, Undo2, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -15,7 +15,7 @@ interface GitPanelProps {
 }
 
 export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
-  const { data: status, isLoading, refetch } = useGitStatus(projectId)
+  const { data: status, isLoading, isFetching, refetch } = useGitStatus(projectId)
   const { data: logData } = useGitLog(projectId)
   const { data: mainCommitData } = useGitMainCommit(projectId, status?.current)
   const stageAll = useStageAll()
@@ -62,32 +62,34 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
       <div className="flex items-center justify-between">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Git</h2>
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refetch()} title="Refresh">
-            <RefreshCw className="h-3.5 w-3.5" />
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refetch()} title="Refresh" disabled={isFetching}>
+            <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin')} />
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
+            disabled={gitPull.isPending || gitPush.isPending}
             onClick={() => gitPull.mutate(projectId, {
               onSuccess: () => toast.success('Pulled'),
               onError: (err) => toast.error(`Pull failed: ${err.message}`),
             })}
             title="Pull"
           >
-            <Download className="h-3.5 w-3.5" />
+            {gitPull.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
           </Button>
           <Button
             variant="ghost"
             size="icon"
             className="h-7 w-7"
+            disabled={gitPush.isPending || gitPull.isPending}
             onClick={() => gitPush.mutate(projectId, {
               onSuccess: () => toast.success('Pushed'),
               onError: (err) => toast.error(`Push failed: ${err.message}`),
             })}
             title="Push"
           >
-            <Upload className="h-3.5 w-3.5" />
+            {gitPush.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
           </Button>
         </div>
       </div>
@@ -151,12 +153,13 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
             {confirmDiscard === 'staged' ? (
               <div className="flex items-center gap-1">
                 <span className="text-[10px] text-red-400">Discard all?</span>
-                <Button variant="ghost" size="sm" className="h-5 text-[9px] text-red-400 hover:text-red-300 px-1.5"
+                <Button variant="ghost" size="sm" className="h-5 text-[9px] text-red-400 hover:text-red-300 px-1.5 gap-1"
+                  disabled={discardAll.isPending}
                   onClick={() => discardAll.mutate({ projectId, section: 'staged' }, {
                     onSuccess: () => { setConfirmDiscard(null); toast.success('Staged changes discarded') },
                     onError: (err) => { setConfirmDiscard(null); toast.error(err.message) },
                   })}>
-                  Yes
+                  {discardAll.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
                 </Button>
                 <Button variant="ghost" size="sm" className="h-5 text-[9px] px-1.5" onClick={() => setConfirmDiscard(null)}>
                   No
@@ -164,7 +167,8 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
               </div>
             ) : (
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => unstageAll.mutate(projectId)}>
+                <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1" disabled={unstageAll.isPending} onClick={() => unstageAll.mutate(projectId)}>
+                  {unstageAll.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
                   Unstage All
                 </Button>
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-red-400"
@@ -198,12 +202,13 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
             {confirmDiscard === 'unstaged' ? (
               <div className="flex items-center gap-1">
                 <span className="text-[10px] text-red-400">Discard all?</span>
-                <Button variant="ghost" size="sm" className="h-5 text-[9px] text-red-400 hover:text-red-300 px-1.5"
+                <Button variant="ghost" size="sm" className="h-5 text-[9px] text-red-400 hover:text-red-300 px-1.5 gap-1"
+                  disabled={discardAll.isPending}
                   onClick={() => discardAll.mutate({ projectId, section: 'unstaged' }, {
                     onSuccess: () => { setConfirmDiscard(null); toast.success('Changes discarded') },
                     onError: (err) => { setConfirmDiscard(null); toast.error(err.message) },
                   })}>
-                  Yes
+                  {discardAll.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
                 </Button>
                 <Button variant="ghost" size="sm" className="h-5 text-[9px] px-1.5" onClick={() => setConfirmDiscard(null)}>
                   No
@@ -211,7 +216,8 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
               </div>
             ) : (
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="sm" className="h-6 text-[10px]" onClick={() => stageAll.mutate(projectId)}>
+                <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1" disabled={stageAll.isPending} onClick={() => stageAll.mutate(projectId)}>
+                  {stageAll.isPending && <Loader2 className="h-3 w-3 animate-spin" />}
                   Stage All
                 </Button>
                 <Button variant="ghost" size="icon" className="h-6 w-6 text-muted-foreground/50 hover:text-red-400"
@@ -248,12 +254,13 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
             {confirmUndo ? (
               <div className="flex items-center gap-1">
                 <span className="text-[10px] text-orange-400">Undo commit?</span>
-                <Button variant="ghost" size="sm" className="h-5 text-[9px] text-orange-400 hover:text-orange-300 px-1.5"
+                <Button variant="ghost" size="sm" className="h-5 text-[9px] text-orange-400 hover:text-orange-300 px-1.5 gap-1"
+                  disabled={undoCommit.isPending}
                   onClick={() => undoCommit.mutate(projectId, {
                     onSuccess: () => { setConfirmUndo(false); toast.success('Commit undone — changes are back in staging') },
                     onError: (err) => { setConfirmUndo(false); toast.error(err.message) },
                   })}>
-                  Yes
+                  {undoCommit.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Yes'}
                 </Button>
                 <Button variant="ghost" size="sm" className="h-5 text-[9px] px-1.5" onClick={() => setConfirmUndo(false)}>
                   No
