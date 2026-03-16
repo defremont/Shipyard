@@ -54,8 +54,8 @@ export function Help() {
         </nav>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6 scrollbar-dark">
-          <div className="max-w-3xl space-y-6">
+        <div className="flex-1 overflow-y-auto p-4 lg:p-6 2xl:p-8 scrollbar-dark">
+          <div className="max-w-3xl mx-auto space-y-6">
             {active === 'overview' && <SectionOverview />}
             {active === 'dashboard' && <SectionDashboard />}
             {active === 'workspace' && <SectionWorkspace />}

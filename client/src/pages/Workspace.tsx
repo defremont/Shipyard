@@ -58,7 +58,7 @@ export function Workspace() {
         {/* Main area */}
         <div className={cn(
           "flex-1 min-w-0 flex flex-col",
-          workspaceMode === 'tasks' && 'overflow-y-auto p-6 scrollbar-dark'
+          workspaceMode === 'tasks' && 'overflow-y-auto p-4 lg:p-6 scrollbar-dark'
         )}>
           {/* Compact project info bar */}
           <div className={cn(
@@ -166,7 +166,7 @@ export function Workspace() {
         </div>
 
         {/* Sidebar - 1/4 width */}
-        <div className="w-72 xl:w-80 border-l overflow-y-auto p-4 space-y-6 shrink-0 bg-card/50 scrollbar-dark">
+        <div className="w-64 lg:w-72 xl:w-80 2xl:w-[22rem] border-l overflow-y-auto p-4 space-y-6 shrink-0 bg-card/50 scrollbar-dark">
           <TerminalLauncher projectId={project.id} projectPath={project.path} projectName={project.name} />
           <FileExplorer projectId={project.id} projectPath={project.path} onOpenInEditor={handleOpenInEditor} />
           {project.isGitRepo && (

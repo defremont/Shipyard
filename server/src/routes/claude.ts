@@ -270,16 +270,16 @@ export async function claudeRoutes(app: FastifyInstance) {
     const cliOk = await claudeCliService.getCliStatus();
     if (cliOk) {
       const userMessage = existingDescription
-        ? `Analyze this task and improve/generate the fields:\n\nTitle: ${title}\nCurrent description: ${existingDescription}\n\nGenerate an improved title (concise, action-oriented), an improved description (user-facing, what needs to be done) and a detailed technical prompt (implementation details, files, solutions).`
-        : `Analyze this task and generate the fields:\n\nTitle: ${title}\n\nGenerate an improved title (concise, action-oriented), a description (user-facing, what needs to be done) and a detailed technical prompt (implementation details, possible approaches, relevant files).`;
+        ? `Improve this task:\nTitle: ${title}\nDescription: ${existingDescription}\n\nReturn improved title, description, and technical prompt.`
+        : `Analyze this task:\nTitle: ${title}\n\nReturn improved title, description, and technical prompt.`;
 
-      const systemInstructions = `You are a senior developer analyzing tasks for a project. ${context}\n\nRespond in JSON format: { "title": "...", "description": "...", "prompt": "..." }\n- title: Concise, action-oriented task title (improve the original if possible, keep it short)\n- description: Clear, user-facing explanation of what needs to be done\n- prompt: Technical analysis with implementation details, relevant files, possible solutions\n\nRespond ONLY with valid JSON, no markdown fences.`;
+      const systemInstructions = `You are a developer improving task descriptions. Project context: ${context}\n\nRespond ONLY with JSON: { "title": "concise action-oriented title", "description": "what needs to be done", "prompt": "technical details, files, approach" }\nNo markdown fences. Keep it concise.`;
 
       try {
         const cwd = await getProjectPath(projectId);
         const result = await claudeCliService.runPrompt(
           `${systemInstructions}\n\n${userMessage}`,
-          { model: 'sonnet', maxTurns: 1, timeout: 60000, cwd },
+          { model: 'haiku', maxTurns: 1, timeout: 30000, cwd },
         );
         try {
           const parsed = parseJsonResponse(result);

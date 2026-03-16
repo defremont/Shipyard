@@ -66,7 +66,7 @@ export function Dashboard() {
       <div className="flex-1 overflow-y-auto scrollbar-dark">
         {/* Working On banner */}
         {workingOn.length > 0 && (
-          <div className="px-6 pt-4 pb-2">
+          <div className="px-4 lg:px-6 2xl:px-8 pt-4 pb-2">
             <div className="flex items-center gap-3 overflow-x-auto scrollbar-dark pb-1">
               <div className="flex items-center gap-1.5 shrink-0 text-xs text-yellow-500 font-medium">
                 <Loader className="h-3.5 w-3.5" />
@@ -80,7 +80,7 @@ export function Dashboard() {
                 >
                   <span className="text-muted-foreground">{task.projectName}:</span>
                   <span className="font-mono text-muted-foreground/60">{task.id}</span>
-                  <span className="truncate max-w-[200px]">{task.title}</span>
+                  <span className="truncate max-w-[200px] 2xl:max-w-[300px]">{task.title}</span>
                   <ArrowRight className="h-3 w-3 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground" />
                 </button>
               ))}
@@ -89,7 +89,7 @@ export function Dashboard() {
         )}
 
         {/* Main content: ProjectList */}
-        <div className="px-6 py-4">
+        <div className="px-4 lg:px-6 2xl:px-8 py-4">
           {projects && (
             <ProjectList
               projects={projects}

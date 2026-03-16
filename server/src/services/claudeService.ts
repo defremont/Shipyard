@@ -84,8 +84,8 @@ export async function testApiKey(apiKey: string): Promise<{ ok: boolean; error?:
   }
 }
 
-function createClient(config: ClaudeConfig): Anthropic {
-  return new Anthropic({ apiKey: config.apiKey });
+function createClient(config: ClaudeConfig, timeout?: number): Anthropic {
+  return new Anthropic({ apiKey: config.apiKey, timeout: timeout ?? 120_000 });
 }
 
 export async function* streamChat(
@@ -118,16 +118,17 @@ export async function analyzeTask(
   taskTitle: string,
   existingDescription?: string,
 ): Promise<{ title: string; description: string; prompt: string }> {
-  const client = createClient(config);
+  // Short timeout — Haiku should respond in a few seconds
+  const client = createClient(config, 20_000);
 
   const userMessage = existingDescription
-    ? `Analyze this task and improve/generate the fields:\n\nTitle: ${taskTitle}\nCurrent description: ${existingDescription}\n\nGenerate an improved title (concise, action-oriented), an improved description (user-facing, what needs to be done) and a detailed technical prompt (implementation details, files, solutions).`
-    : `Analyze this task and generate the fields:\n\nTitle: ${taskTitle}\n\nGenerate an improved title (concise, action-oriented), a description (user-facing, what needs to be done) and a detailed technical prompt (implementation details, possible approaches, relevant files).`;
+    ? `Improve this task:\nTitle: ${taskTitle}\nDescription: ${existingDescription}\n\nReturn improved title, description, and technical prompt.`
+    : `Analyze this task:\nTitle: ${taskTitle}\n\nReturn improved title, description, and technical prompt.`;
 
   const response = await client.messages.create({
     model: FAST_MODEL,
-    max_tokens: 2048,
-    system: `You are a senior developer analyzing tasks for a project. ${projectContext}\n\nRespond in JSON format: { "title": "...", "description": "...", "prompt": "..." }\n- title: Concise, action-oriented task title (improve the original if possible, keep it short)\n- description: Clear, user-facing explanation of what needs to be done\n- prompt: Technical analysis with implementation details, relevant files, possible solutions\n\nRespond ONLY with valid JSON, no markdown fences.`,
+    max_tokens: 1024,
+    system: `You are a developer improving task descriptions. Project context: ${projectContext}\n\nRespond ONLY with JSON: { "title": "concise action-oriented title", "description": "what needs to be done", "prompt": "technical details, files, approach" }\nNo markdown fences. Keep it concise.`,
     messages: [{ role: 'user', content: userMessage }],
   });
 

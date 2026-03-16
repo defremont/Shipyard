@@ -315,10 +315,10 @@ export function TasksPage() {
   return (
     <>
       <Header title="All Tasks" />
-      <div className="flex-1 overflow-hidden p-6">
+      <div className="flex-1 overflow-hidden p-4 lg:p-6">
         {/* Filters */}
-        <div className="flex items-center gap-3 mb-4">
-          <div className="relative flex-1 max-w-xs">
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="relative flex-1 min-w-[200px] max-w-xs">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input
               placeholder="Search tasks..."
@@ -397,7 +397,7 @@ export function TasksPage() {
             onDragStart={handleDragStart}
             onDragEnd={handleDragEnd}
           >
-            <div className="grid grid-cols-3 gap-4 h-full">
+            <div className="grid grid-cols-3 gap-2 lg:gap-4 h-full">
               {columns.map(col => {
                 const colTasks = grouped[col.key] || []
                 const limit = visibleCounts[col.key] || INITIAL_VISIBLE

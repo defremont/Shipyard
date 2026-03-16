@@ -505,12 +505,12 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold flex items-center gap-1.5">
           Tasks ({tasks?.length || 0})
           {isSyncing && <Loader className="h-3 w-3 animate-spin text-muted-foreground" />}
         </h2>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5" onClick={handleCsvExport}>
@@ -600,7 +600,7 @@ export function TaskBoard({ projectId, projectName, projectPath }: TaskBoardProp
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-3 gap-2 lg:gap-3 2xl:gap-4">
             {columns.map(col => {
               const isDoneCol = col.key === 'done'
               const colTasks = grouped[col.key] || []
