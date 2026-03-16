@@ -38,7 +38,7 @@ Atalho desktop: `~/.local/share/applications/shipyard.desktop`
 shipyard/
 ├── client/                        # Frontend (porta 5421)
 │   ├── src/
-│   │   ├── App.tsx                # Rotas: /, /tasks, /project/:id, /settings, /help
+│   │   ├── App.tsx                # Rotas: /, /tasks, /project/:id, /settings, /help, /logs
 │   │   │                          # Help sections: +Claude AI, +MCP Server
 │   │   ├── main.tsx               # Entry point com QueryClientProvider
 │   │   ├── index.css              # Tema dark/light (CSS variables shadcn)
@@ -103,7 +103,8 @@ shipyard/
 │   │   │   ├── useMcp.ts          # MCP server status/config hooks
 │   │   │   ├── useMilestones.ts   # Milestone CRUD hooks + active milestone (localStorage)
 │   │   │   ├── useEditorTabs.ts    # Estado de abas do editor (open/close/dirty/save)
-│   │   │   └── useFiles.ts        # File tree, content, delete, open-folder, save hooks
+│   │   │   ├── useFiles.ts        # File tree, content, delete, open-folder, save hooks
+│   │   │   └── useLogs.ts         # System logs hooks (fetch, stats, clear)
 │   │   ├── lib/
 │   │   │   ├── api.ts             # Fetch wrapper para todas as rotas do backend
 │   │   │   ├── sheetsAdapter.ts   # Converte Task[] <-> formato Google Sheets
@@ -124,7 +125,8 @@ shipyard/
 │   │       ├── Workspace.tsx      # TaskBoard (kanban) + TerminalLauncher + GitPanel
 │   │       ├── TasksPage.tsx      # Kanban global: todas tarefas de todos projetos
 │   │       ├── Settings.tsx       # Scan/add/remove projetos com folder browser
-│   │       └── Help.tsx           # Manual completo do sistema com navegacao lateral
+│   │       ├── Help.tsx           # Manual completo do sistema com navegacao lateral
+│   │       └── LogsPage.tsx       # System logs viewer com filtros por level/category
 │   ├── vite.config.ts             # Proxy /api -> localhost:5420, alias @
 │   └── tailwind.config.ts         # Tema shadcn com CSS variables
 │
@@ -141,7 +143,8 @@ shipyard/
 │   │   │   ├── claude.ts         # Claude API: status, config, chat (SSE), analyze, summarize
 │   │   │   ├── mcp.ts            # MCP JSON-RPC endpoint + OAuth 2.1 (register, authorize, token)
 │   │   │   ├── terminalWs.ts    # WebSocket route para terminal integrado (xterm ↔ pty)
-│   │   │   └── files.ts         # File tree, content, delete, open-folder
+│   │   │   ├── files.ts         # File tree, content, delete, open-folder
+│   │   │   └── logs.ts          # System logs: GET/DELETE /api/logs, GET /api/logs/stats
 │   │   ├── services/
 │   │   │   ├── projectDiscovery.ts  # Selecao manual de projetos (scan + add/remove)
 │   │   │   ├── gitService.ts        # Wrapper simple-git, GIT_TERMINAL_PROMPT=0
@@ -152,7 +155,8 @@ shipyard/
 │   │   │   ├── claudeService.ts     # Anthropic API wrapper: encrypt key, stream chat, analyze, summarize
 │   │   │   ├── claudeContextBuilder.ts # Monta system prompt com context do projeto/tasks/git
 │   │   │   ├── mcpServer.ts         # MCP tool registry + handler (list_projects, create_task, etc.)
-│   │   │   └── mcpAuth.ts           # OAuth 2.1: client registration, PKCE auth codes, JWT tokens
+│   │   │   ├── mcpAuth.ts           # OAuth 2.1: client registration, PKCE auth codes, JWT tokens
+│   │   │   └── logService.ts        # Ring buffer + JSONL file logging (info/warn/error by category)
 │   │   └── types/
 │   │       └── index.ts           # Project, Task, Settings, ProjectsCache, TasksFile
 │   └── package.json
@@ -164,6 +168,7 @@ shipyard/
 │   ├── .claude-key                # Chave AES-256-GCM para encriptar API key
 │   ├── mcp-config.json            # { enabled, requireAuth }
 │   ├── mcp-auth.json              # JWT secret, OAuth clients, auth codes, refresh tokens
+│   ├── server.log                 # JSONL system logs (appended, ring buffer in memory)
 │   └── tasks/                     # Um JSON por projeto
 │       └── {projectId}.json       # { milestones?: Milestone[], tasks: Task[] }
 │
@@ -342,6 +347,11 @@ interface McpConfig {
 - `DELETE /api/projects/:id/files?path=<relpath>` - Deleta arquivo ou pasta (recursivo)
 - `POST /api/projects/:id/files/open-folder` - Abre pasta no explorer do sistema { path }
 
+### Logs
+- `GET /api/logs` - Lista logs { level?, category?, projectId?, since?, limit? } → { logs[] }
+- `GET /api/logs/stats` - Contadores { total, errors, warnings, byCategory }
+- `DELETE /api/logs` - Limpar todos os logs
+
 ### Sistema
 - `GET /api/settings` - Configuracoes
 - `POST /api/browse` - Navega filesystem { path } → { directories[] }
@@ -497,6 +507,21 @@ interface McpConfig {
 - Secao Desktop App documenta Electron, build, tray, portas
 - Secao Data & Storage explica localizacao dos arquivos, portabilidade, privacidade
 - Arquivo: `pages/Help.tsx`
+
+### System Logs (/logs)
+- Pagina de visualizacao de logs do servidor acessivel via sidebar (icone ScrollText)
+- **Ring buffer** de 1000 entradas em memoria + persistencia em `data/server.log` (JSONL)
+- **Filtros por level**: info, warn, error (toggle buttons)
+- **Filtros por category**: server, git, claude, sync, terminal, mcp, tasks, files
+- **Auto-refresh** a cada 5s via react-query polling
+- **Expandir detalhes**: clique em um log para ver details expandidos
+- **Agrupamento por data** com headers sticky
+- **Contadores** no header: total, errors, warnings
+- **Limpar logs**: botao Clear remove todos os logs (in-memory + arquivo)
+- Logs persistem entre restarts do servidor via arquivo JSONL
+- Categorias integradas: git (commit/push/pull errors), claude (chat/analyze failures), sync (proxy errors), terminal (session failures), server (startup events)
+- Arquivo server: `logService.ts`, `routes/logs.ts`
+- Arquivo client: `LogsPage.tsx`, `useLogs.ts`
 
 ### Git Status Indicators
 - ProjectCard exibe: ahead (unpushed), behind (to pull), staged, unstaged+untracked

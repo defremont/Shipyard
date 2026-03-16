@@ -161,6 +161,19 @@ export const api = {
   revokeMcpClient: (clientId: string) =>
     request<{ ok: boolean }>(`/mcp/clients/${clientId}`, { method: 'DELETE' }),
 
+  // Logs
+  getLogs: (filters?: { level?: string; category?: string; projectId?: string; limit?: number }) => {
+    const params = new URLSearchParams()
+    if (filters?.level) params.set('level', filters.level)
+    if (filters?.category) params.set('category', filters.category)
+    if (filters?.projectId) params.set('projectId', filters.projectId)
+    if (filters?.limit) params.set('limit', String(filters.limit))
+    const qs = params.toString()
+    return request<{ logs: any[] }>(`/logs${qs ? `?${qs}` : ''}`)
+  },
+  getLogStats: () => request<{ total: number; errors: number; warnings: number; byCategory: Record<string, number> }>('/logs/stats'),
+  clearLogs: () => request<{ ok: boolean }>('/logs', { method: 'DELETE' }),
+
   // Search
   searchFiles: (query: string, projectId?: string) =>
     request<{ results: Array<{ name: string; path: string; projectId: string; projectName: string; type: 'file' | 'dir'; extension?: string }> }>(

@@ -10,6 +10,7 @@ import {
   resizeSession,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
+import * as log from '../services/logService.js';
 
 // Track active WebSocket connections per session to prevent duplicate listeners
 const activeConnections = new Map<string, { socket: any; cleanup: () => void }>();
@@ -42,7 +43,10 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       if (!project) return reply.status(404).send({ error: 'Project not found' });
 
       const sessionId = await createSession(projectId, project.path, type, cols, rows, project.name, taskId, prompt);
-      if (!sessionId) return reply.status(500).send({ error: 'Failed to create terminal session' });
+      if (!sessionId) {
+        log.error('terminal', 'Failed to create terminal session', `type=${type}`, projectId);
+        return reply.status(500).send({ error: 'Failed to create terminal session' });
+      }
 
       await updateProject(project.id, { lastOpenedAt: new Date().toISOString() });
 

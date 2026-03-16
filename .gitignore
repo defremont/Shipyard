@@ -12,6 +12,7 @@ data/claude.json
 data/.claude-key
 data/mcp-config.json
 data/mcp-auth.json
+data/server.log
 
 # Build artifacts
 client/tsconfig.tsbuildinfo

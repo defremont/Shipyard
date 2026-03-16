@@ -3,6 +3,7 @@ import * as gitService from '../services/gitService.js';
 import * as claudeCliService from '../services/claudeCliService.js';
 import * as claudeService from '../services/claudeService.js';
 import { getProjects } from '../services/projectDiscovery.js';
+import * as log from '../services/logService.js';
 
 /**
  * Strip context lines from a git diff, keeping only +/- lines, file headers,
@@ -133,8 +134,10 @@ export async function gitRoutes(app: FastifyInstance) {
 
       try {
         const hash = await gitService.commit(path, request.body.message);
+        log.info('git', `Commit created: ${hash}`, request.body.message.substring(0, 100), request.params.projectId);
         return { commit: hash };
       } catch (err: any) {
+        log.error('git', `Commit failed`, err.message, request.params.projectId);
         return reply.status(500).send({ error: err.message });
       }
     }
@@ -148,8 +151,10 @@ export async function gitRoutes(app: FastifyInstance) {
 
       try {
         await gitService.push(path);
+        log.info('git', 'Push completed', undefined, request.params.projectId);
         return { success: true };
       } catch (err: any) {
+        log.error('git', 'Push failed', err.message, request.params.projectId);
         return reply.status(500).send({ error: err.message });
       }
     }
@@ -163,8 +168,10 @@ export async function gitRoutes(app: FastifyInstance) {
 
       try {
         await gitService.pull(path);
+        log.info('git', 'Pull completed', undefined, request.params.projectId);
         return { success: true };
       } catch (err: any) {
+        log.error('git', 'Pull failed', err.message, request.params.projectId);
         return reply.status(500).send({ error: err.message });
       }
     }
@@ -285,7 +292,7 @@ export async function gitRoutes(app: FastifyInstance) {
               return { message: text.trim(), source: 'api' as const };
             } catch (apiErr: any) {
               // API failed — fall through to CLI
-              request.log.warn?.(`Commit message API failed, trying CLI: ${apiErr.message}`);
+              log.warn('git', 'Commit message API failed, trying CLI', apiErr.message, request.params.projectId);
             }
           }
 
@@ -310,6 +317,7 @@ export async function gitRoutes(app: FastifyInstance) {
 
         if (result) return result;
       } catch (err: any) {
+        log.error('git', 'Generate commit message failed', err.message, request.params.projectId);
         if (!reply.sent) {
           return reply.status(500).send({ error: err.message || 'Failed to generate commit message' });
         }

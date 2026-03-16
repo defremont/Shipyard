@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import * as log from '../services/logService.js';
 
 export async function syncRoutes(app: FastifyInstance) {
   // Stateless proxy: receives Apps Script URL from client, fetches it, returns result
@@ -47,8 +48,10 @@ export async function syncRoutes(app: FastifyInstance) {
       }
     } catch (err: any) {
       if (err.name === 'AbortError') {
+        log.warn('sync', 'Apps Script request timed out (15s)');
         return reply.status(504).send({ error: 'Request to Apps Script timed out (15s)' });
       }
+      log.error('sync', 'Apps Script proxy failed', err.message);
       return reply.status(502).send({ error: err.message || 'Failed to reach Apps Script' });
     } finally {
       clearTimeout(timeout);

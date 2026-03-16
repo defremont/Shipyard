@@ -13,10 +13,12 @@ import { syncRoutes } from './routes/sync.js';
 import { claudeRoutes } from './routes/claude.js';
 import { mcpRoutes } from './routes/mcp.js';
 import { fileRoutes } from './routes/files.js';
+import { logRoutes } from './routes/logs.js';
 import { initProjectDiscovery } from './services/projectDiscovery.js';
 import { loadSettings } from './services/settingsStore.js';
 import { isAvailable as isTerminalAvailable } from './services/terminalService.js';
 import { getCliStatus as isClaudeCliAvailable } from './services/claudeCliService.js';
+import * as log from './services/logService.js';
 
 // Read config from env (set by Electron) or use defaults
 const PORT = parseInt(process.env.SHIPYARD_PORT || '5420', 10);
@@ -83,6 +85,7 @@ await app.register(syncRoutes);
 await app.register(claudeRoutes);
 await app.register(mcpRoutes);
 await app.register(fileRoutes);
+await app.register(logRoutes);
 
 // SPA fallback: serve index.html for all non-API, non-WS routes
 if (STATIC_DIR) {
@@ -91,14 +94,22 @@ if (STATIC_DIR) {
   });
 }
 
+await log.initLogs();
 await loadSettings();
 await initProjectDiscovery();
 
 try {
   await app.listen({ port: PORT, host: HOST });
-  console.log(`Shipyard server running on http://${HOST}:${PORT}`);
-  console.log(`Terminal integration: ${isTerminalAvailable() ? 'available' : 'disabled (node-pty not found)'}`);
+  const termOk = isTerminalAvailable();
   const cliOk = await isClaudeCliAvailable();
+
+  log.info('server', `Server started on http://${HOST}:${PORT}`);
+  log.info('server', `Terminal integration: ${termOk ? 'available' : 'disabled (node-pty not found)'}`);
+  log.info('server', `Claude CLI: ${cliOk ? 'available (subscription)' : 'not found'}`);
+  if (IS_ELECTRON) log.info('server', 'Mode: Electron embedded');
+
+  console.log(`Shipyard server running on http://${HOST}:${PORT}`);
+  console.log(`Terminal integration: ${termOk ? 'available' : 'disabled (node-pty not found)'}`);
   console.log(`Claude CLI: ${cliOk ? 'available (subscription)' : 'not found'}`);
   console.log(`Claude API: check /api/claude/status`);
   console.log(`MCP Server: endpoint at /mcp (configure in Settings)`);
@@ -106,8 +117,10 @@ try {
   if (STATIC_DIR) console.log(`Serving static files from: ${STATIC_DIR}`);
 } catch (err: any) {
   if (err?.code === 'EADDRINUSE') {
+    log.error('server', `Port ${PORT} is already in use`, err.message);
     console.error(`Port ${PORT} is already in use. Is another instance running?`);
   } else {
+    log.error('server', 'Failed to start server', err?.message || String(err));
     console.error('Failed to start server:', err);
   }
   process.exit(1);

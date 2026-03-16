@@ -4,6 +4,7 @@ import * as claudeCliService from '../services/claudeCliService.js';
 import { buildProjectContext, buildTaskContext } from '../services/claudeContextBuilder.js';
 import * as taskStore from '../services/taskStore.js';
 import { getProjects } from '../services/projectDiscovery.js';
+import * as log from '../services/logService.js';
 
 // Helper: try CLI first, fallback to API. Returns null if neither available.
 async function getAiBackend(): Promise<'cli' | 'api' | null> {
@@ -185,6 +186,7 @@ export async function claudeRoutes(app: FastifyInstance) {
         }
         reply.raw.write(`data: ${JSON.stringify({ type: 'done', source: 'api' })}\n\n`);
       } catch (err: any) {
+        log.error('claude', 'Chat stream failed (API)', err.message, projectId);
         reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Stream failed' })}\n\n`);
       }
 
@@ -228,6 +230,7 @@ export async function claudeRoutes(app: FastifyInstance) {
 
         reply.raw.write(`data: ${JSON.stringify({ type: 'done', source: 'cli' })}\n\n`);
       } catch (err: any) {
+        log.error('claude', 'Chat stream failed (CLI)', err.message, projectId);
         reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'CLI failed' })}\n\n`);
       }
 
@@ -261,7 +264,7 @@ export async function claudeRoutes(app: FastifyInstance) {
       try {
         return await claudeService.analyzeTask(config, context, title, existingDescription);
       } catch (err: any) {
-        console.error('[analyze-task] API failed:', err.message);
+        log.warn('claude', 'Analyze task API failed, trying CLI', err.message, projectId);
         // Fall through to CLI
       }
     }
@@ -285,12 +288,11 @@ export async function claudeRoutes(app: FastifyInstance) {
           const parsed = parseJsonResponse(result);
           return { title: parsed.title || title, description: parsed.description || '', prompt: parsed.prompt || '' };
         } catch {
-          // Graceful fallback: use raw response as description if JSON parsing fails
-          console.warn('[analyze-task] CLI response was not valid JSON, using raw text as description');
+          log.warn('claude', 'Analyze task CLI response was not valid JSON', undefined, projectId);
           return { title, description: result.trim(), prompt: '' };
         }
       } catch (err: any) {
-        console.error('[analyze-task] CLI failed:', err.message);
+        log.error('claude', 'Analyze task failed', err.message, projectId);
         return reply.status(500).send({ error: `AI analysis failed: ${err.message}` });
       }
     }
@@ -338,7 +340,7 @@ Respond ONLY with valid JSON array, no markdown fences. Example:
         const parsed = parseJsonResponse(result);
         return { tasks: Array.isArray(parsed) ? parsed : [] };
       } catch (err: any) {
-        console.error('[bulk-organize] CLI failed:', err.message);
+        log.warn('claude', 'Bulk organize CLI failed, trying API', err.message, projectId);
         // Fall through to API, but save error for reporting
         const config = await claudeService.loadClaudeConfig();
         if (!config) {
@@ -429,7 +431,7 @@ Respond ONLY with valid JSON (no markdown fences):
           summary: parsed.summary || '',
         };
       } catch (err: any) {
-        console.error('[manage-tasks] CLI failed:', err.message);
+        log.warn('claude', 'Manage tasks CLI failed, trying API', err.message, projectId);
         // Fall through to API, but save error for reporting
         const config = await claudeService.loadClaudeConfig();
         if (!config) {
