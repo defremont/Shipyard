@@ -248,7 +248,7 @@ export function TerminalPanel() {
       // inject it when Claude CLI is ready (output-based detection + chunked writes).
       const session = await createSession.mutateAsync({
         projectId: targetProject, type, cols: 80, rows: 24, taskId,
-        ...(taskId && prompt ? { prompt } : {}),
+        ...(prompt ? { prompt } : {}),
       })
       const tab: GlobalTab = {
         sessionId: session.id,
