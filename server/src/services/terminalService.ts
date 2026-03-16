@@ -84,7 +84,7 @@ export async function createSession(
     if (type === 'claude') {
       env['CLAUDECODE'] = '';
       initialCommand = 'claude';
-    } else if (type === 'claude-yolo' || type === 'ai-resolve') {
+    } else if (type === 'claude-yolo' || type === 'ai-resolve' || type === 'ai-manage') {
       env['CLAUDECODE'] = '';
       initialCommand = 'claude --dangerously-skip-permissions';
     } else if (type === 'dev') {
@@ -95,7 +95,7 @@ export async function createSession(
     shellArgs = ['-il'];
     if (type === 'claude') {
       initialCommand = 'claude';
-    } else if (type === 'claude-yolo' || type === 'ai-resolve') {
+    } else if (type === 'claude-yolo' || type === 'ai-resolve' || type === 'ai-manage') {
       initialCommand = 'claude --dangerously-skip-permissions';
     } else if (type === 'dev') {
       initialCommand = await detectDevCommand(projectPath);
@@ -106,7 +106,7 @@ export async function createSession(
   const shortName = projectName && projectName.length > maxLen
     ? projectName.slice(0, maxLen - 3) + '...'
     : projectName || projectId;
-  const typeLabels: Record<string, string> = { claude: 'Claude', 'claude-yolo': 'Claude', dev: 'Dev', shell: 'Shell', 'ai-resolve': 'AI' };
+  const typeLabels: Record<string, string> = { claude: 'Claude', 'claude-yolo': 'Claude', dev: 'Dev', shell: 'Shell', 'ai-resolve': 'AI', 'ai-manage': 'AI Tasks' };
   const title = `[${shortName}] ${typeLabels[type] || 'Shell'}`;
 
   const spawnOptions: Record<string, any> = {
@@ -146,8 +146,8 @@ export async function createSession(
     }, delay);
   }
 
-  // For AI resolve sessions: inject prompt when Claude CLI is ready
-  if (prompt && (type === 'ai-resolve' || type === 'claude-yolo')) {
+  // For AI resolve/manage sessions: inject prompt when Claude CLI is ready
+  if (prompt && (type === 'ai-resolve' || type === 'ai-manage' || type === 'claude-yolo')) {
     injectPromptWhenReady(id, prompt);
   }
 

@@ -2,6 +2,7 @@ import { FastifyInstance } from 'fastify';
 import * as taskStore from '../services/taskStore.js';
 import { getProjects } from '../services/projectDiscovery.js';
 import { buildAiResolvePrompt } from '../services/aiResolvePrompt.js';
+import { buildAiManagePrompt } from '../services/aiManagePrompt.js';
 
 export async function taskRoutes(app: FastifyInstance) {
   // All tasks across all projects
@@ -113,6 +114,27 @@ export async function taskRoutes(app: FastifyInstance) {
 
       const port = (request.server.addresses()?.[0] as any)?.port || 5420;
       const prompt = buildAiResolvePrompt(task, project, port);
+      return { prompt };
+    }
+  );
+
+  // Build AI manage prompt for CLI-based task management
+  app.post<{ Params: { projectId: string }; Body: { rawText: string } }>(
+    '/api/projects/:projectId/ai-manage-prompt',
+    async (request, reply) => {
+      const { projectId } = request.params;
+      const { rawText } = request.body;
+      if (!rawText?.trim()) {
+        return reply.status(400).send({ error: 'No text provided' });
+      }
+
+      const projects = await getProjects();
+      const project = projects.find(p => p.id === projectId);
+      if (!project) return reply.status(404).send({ error: 'Project not found' });
+
+      const tasks = await taskStore.getTasks(projectId);
+      const port = (request.server.addresses()?.[0] as any)?.port || 5420;
+      const prompt = buildAiManagePrompt(rawText, project, tasks, port);
       return { prompt };
     }
   );

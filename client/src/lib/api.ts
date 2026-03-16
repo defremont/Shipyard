@@ -109,6 +109,8 @@ export const api = {
     request<{ success: boolean }>(`/terminal/sessions/${sessionId}/write`, { method: 'POST', body: JSON.stringify({ data }) }),
   getAiResolvePrompt: (projectId: string, taskId: string) =>
     request<{ prompt: string }>(`/projects/${projectId}/tasks/${taskId}/ai-resolve`, { method: 'POST' }),
+  getAiManagePrompt: (projectId: string, rawText: string) =>
+    request<{ prompt: string }>(`/projects/${projectId}/ai-manage-prompt`, { method: 'POST', body: JSON.stringify({ rawText }) }),
 
   // Project management
   scanDirectory: (directory: string) => request<{ projects: { path: string; name: string; techStack: string[]; isGitRepo: boolean }[] }>('/projects/scan', { method: 'POST', body: JSON.stringify({ directory }) }),
