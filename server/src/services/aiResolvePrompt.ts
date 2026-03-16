@@ -57,9 +57,11 @@ export function buildAiResolvePrompt(
   lines.push('```');
   lines.push('');
 
-  lines.push('## IMPORTANT: When you are done');
-  lines.push('Update this task via the Shipyard API with a summary of what was done:');
+  lines.push('## CRITICAL — YOU MUST DO THIS WHEN FINISHED:');
+  lines.push('After committing your changes, you MUST update the task status to "done" via the Shipyard API.');
+  lines.push('This is NOT optional — if you skip this step, the task will be stuck as in-progress.');
   lines.push('');
+  lines.push('Run this curl command:');
   lines.push('```');
   lines.push(`curl -X PUT http://localhost:${serverPort}/api/projects/${project.id}/tasks/${task.id} \\`);
   lines.push(`  -H "Content-Type: application/json" \\`);
@@ -71,6 +73,7 @@ export function buildAiResolvePrompt(
   lines.push('- The "prompt" field should contain a concise technical summary of the implementation (files changed, approach, key decisions)');
   lines.push('- Set status to "done" only when the task is fully complete');
   lines.push('- The server handles timestamps automatically, no need to set them');
+  lines.push('- DO NOT skip this step — it is required for task tracking');
 
   return lines.join('\n');
 }

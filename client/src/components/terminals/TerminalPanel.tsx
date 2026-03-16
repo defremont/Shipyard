@@ -428,18 +428,25 @@ export function TerminalPanel() {
     aiSessions.unregisterBySession(sessionId)
 
     // If this was an AI resolve session, check after a brief delay
-    // whether the task moved to done and mark it as needsReview
+    // whether the task moved to done. If Claude forgot to update the
+    // task status via the API, auto-mark it as done so tasks don't
+    // stay stuck in_progress after the AI finishes.
     if (tab?.taskId) {
       const { projectId, taskId } = tab
       setTimeout(async () => {
         try {
           const { tasks } = await api.getTasks(projectId)
           const task = tasks.find((t: any) => t.id === taskId)
-          if (task && task.status === 'done' && !task.needsReview) {
+          if (!task) return
+          if (task.status === 'done' && !task.needsReview) {
+            // Claude updated the task — just flag for review
             await api.updateTask(projectId, taskId, { needsReview: true })
+          } else if (task.status !== 'done') {
+            // Claude did NOT update the task — auto-mark as done
+            await api.updateTask(projectId, taskId, { status: 'done', needsReview: true })
           }
         } catch {}
-      }, 2000)
+      }, 3000)
     }
   }, [aiSessions])
 

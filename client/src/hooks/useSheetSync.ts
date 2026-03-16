@@ -258,7 +258,9 @@ export function useAutoSync(projectId: string) {
         if (!data.tasks) return
 
         const sheetRows = sheetRowsToTasks(data.tasks, syncOpts)
-        const localTasks = (queryClient.getQueryData(['tasks', projectId]) as Task[]) || []
+        // Read from API (file) instead of React Query cache to include MCP-created tasks
+        const freshLocal = await api.getTasks(projectId)
+        const localTasks = (freshLocal?.tasks as Task[]) ?? (queryClient.getQueryData(['tasks', projectId]) as Task[]) ?? []
 
         // If not syncing prompt, preserve local prompts in sheet rows
         if (!syncOpts.includePrompt) {
