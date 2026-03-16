@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2 } from 'lucide-react'
+import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   useTerminalStatus,
@@ -29,6 +29,7 @@ const PANEL_HEIGHT_KEY = 'shipyard:terminal-height'
 const PANEL_VISIBLE_KEY = 'shipyard:terminal-visible'
 const TABS_STORAGE_KEY = 'shipyard:terminal-tabs'
 const ACTIVE_TAB_KEY = 'shipyard:terminal-active-tab'
+const SPLIT_SESSION_KEY = 'shipyard:terminal-split-session'
 const MIN_HEIGHT = 150
 const MAX_HEIGHT_RATIO = 0.7
 const DEFAULT_HEIGHT = 300
@@ -48,6 +49,13 @@ function loadActiveTabId(): string | null {
   return null
 }
 
+function loadSplitSessionId(): string | null {
+  try {
+    return localStorage.getItem(SPLIT_SESSION_KEY) || null
+  } catch {}
+  return null
+}
+
 export function TerminalPanel() {
   const { data: status } = useTerminalStatus()
   const createSession = useCreateTerminalSession()
@@ -58,6 +66,8 @@ export function TerminalPanel() {
 
   const [tabs, setTabs] = useState<GlobalTab[]>(loadTerminalTabs)
   const [activeTabId, setActiveTabId] = useState<string | null>(loadActiveTabId)
+  const [splitSessionId, setSplitSessionId] = useState<string | null>(loadSplitSessionId)
+  const [activePaneIndex, setActivePaneIndex] = useState<0 | 1>(0)
   const [panelHeight, setPanelHeight] = useState(() => {
     const saved = localStorage.getItem(PANEL_HEIGHT_KEY)
     return saved ? Math.max(MIN_HEIGHT, parseInt(saved, 10)) : DEFAULT_HEIGHT
@@ -70,12 +80,17 @@ export function TerminalPanel() {
   const isDragging = useRef(false)
   const dragStartY = useRef(0)
   const dragStartHeight = useRef(0)
+  const splitNextTabRef = useRef(false)
 
   // Refs for reading current state in callbacks without stale closures
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
   const activeTabIdRef = useRef(activeTabId)
   activeTabIdRef.current = activeTabId
+  const splitSessionIdRef = useRef(splitSessionId)
+  splitSessionIdRef.current = splitSessionId
+  const activePaneIndexRef = useRef(activePaneIndex)
+  activePaneIndexRef.current = activePaneIndex
   const activeProjectIdRef = useRef(activeProjectId)
   activeProjectIdRef.current = activeProjectId
   const isVisibleRef = useRef(isVisible)
@@ -104,20 +119,32 @@ export function TerminalPanel() {
     }
   }, [activeTabId])
 
-  // Clear notification when the active tab becomes visible
+  // Persist split session
   useEffect(() => {
-    if (isVisible && activeTabId) {
-      setTabs(prev => {
-        const tab = prev.find(t => t.sessionId === activeTabId)
-        if (tab?.hasNotification) {
-          return prev.map(t =>
-            t.sessionId === activeTabId ? { ...t, hasNotification: false } : t
-          )
-        }
-        return prev
-      })
+    if (splitSessionId) {
+      localStorage.setItem(SPLIT_SESSION_KEY, splitSessionId)
+    } else {
+      localStorage.removeItem(SPLIT_SESSION_KEY)
     }
-  }, [isVisible, activeTabId])
+  }, [splitSessionId])
+
+  // Clear notification when visible tabs become visible
+  useEffect(() => {
+    if (isVisible) {
+      const visibleIds = [activeTabId, splitSessionId].filter(Boolean) as string[]
+      if (visibleIds.length > 0) {
+        setTabs(prev => {
+          const hasNotif = prev.some(t => visibleIds.includes(t.sessionId) && t.hasNotification)
+          if (!hasNotif) return prev
+          return prev.map(t =>
+            visibleIds.includes(t.sessionId) && t.hasNotification
+              ? { ...t, hasNotification: false }
+              : t
+          )
+        })
+      }
+    }
+  }, [isVisible, activeTabId, splitSessionId])
 
   // On mount: validate persisted tabs against server sessions (recovery from refresh)
   const initializedRef = useRef(false)
@@ -157,6 +184,11 @@ export function TerminalPanel() {
       setActiveTabId(prev => {
         if (prev && serverIds.has(prev)) return prev
         if (sessions.length > 0) return sessions[sessions.length - 1].id
+        return null
+      })
+      // Validate split session
+      setSplitSessionId(prev => {
+        if (prev && serverIds.has(prev)) return prev
         return null
       })
       // If recovered sessions exist, show the panel
@@ -229,7 +261,22 @@ export function TerminalPanel() {
         taskNumber,
       }
       setTabs(prev => [...prev, tab])
-      setActiveTabId(session.id)
+
+      if (splitNextTabRef.current) {
+        // This tab was created for the split right pane
+        splitNextTabRef.current = false
+        setSplitSessionId(session.id)
+        setActivePaneIndex(1)
+      } else if (splitSessionIdRef.current) {
+        // In split mode: assign to active pane
+        if (activePaneIndexRef.current === 1) {
+          setSplitSessionId(session.id)
+        } else {
+          setActiveTabId(session.id)
+        }
+      } else {
+        setActiveTabId(session.id)
+      }
       setIsVisible(true)
 
       // Register AI session for UI indicators
@@ -266,12 +313,50 @@ export function TerminalPanel() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [togglePanel])
 
+  // Toggle split mode
+  const handleToggleSplit = useCallback(() => {
+    if (splitSessionIdRef.current) {
+      // Exit split: keep the focused pane's terminal as active
+      if (activePaneIndexRef.current === 1 && splitSessionIdRef.current) {
+        setActiveTabId(splitSessionIdRef.current)
+      }
+      setSplitSessionId(null)
+      setActivePaneIndex(0)
+    } else {
+      // Enter split: find another tab or create one
+      const currentActive = activeTabIdRef.current
+      const otherTab = tabsRef.current.find(t => t.sessionId !== currentActive && !t.exited)
+      if (otherTab) {
+        setSplitSessionId(otherTab.sessionId)
+        setActivePaneIndex(1)
+      } else {
+        // Create a new terminal for the right pane
+        splitNextTabRef.current = true
+        handleNewTab('shell')
+      }
+    }
+  }, [handleNewTab])
+
   const handleCloseTab = useCallback((sessionId: string) => {
     killSession.mutate(sessionId)
     aiSessions.unregisterBySession(sessionId)
+
+    // Handle split mode cleanup
+    const isSplitLeft = activeTabIdRef.current === sessionId && !!splitSessionIdRef.current
+    const isSplitRight = splitSessionIdRef.current === sessionId
+
+    if (isSplitRight) {
+      setSplitSessionId(null)
+      setActivePaneIndex(0)
+    } else if (isSplitLeft) {
+      setActiveTabId(splitSessionIdRef.current!)
+      setSplitSessionId(null)
+      setActivePaneIndex(0)
+    }
+
     setTabs(prev => {
       const next = prev.filter(t => t.sessionId !== sessionId)
-      if (activeTabIdRef.current === sessionId) {
+      if (!isSplitLeft && !isSplitRight && activeTabIdRef.current === sessionId) {
         setActiveTabId(next.length > 0 ? next[next.length - 1].sessionId : null)
       }
       if (next.length === 0) setIsVisible(false)
@@ -286,15 +371,36 @@ export function TerminalPanel() {
     }
     setTabs([])
     setActiveTabId(null)
+    setSplitSessionId(null)
+    setActivePaneIndex(0)
     setIsVisible(false)
   }, [killSession, aiSessions])
 
   const handleClearExited = useCallback(() => {
     setTabs(prev => {
       const remaining = prev.filter(t => !t.exited)
-      if (activeTabIdRef.current && !remaining.some(t => t.sessionId === activeTabIdRef.current)) {
+
+      // Clean up split if either pane's session was cleared
+      const splitGone = splitSessionIdRef.current && !remaining.some(t => t.sessionId === splitSessionIdRef.current)
+      const activeGone = activeTabIdRef.current && !remaining.some(t => t.sessionId === activeTabIdRef.current)
+
+      if (splitGone && activeGone) {
+        setSplitSessionId(null)
+        setActivePaneIndex(0)
         setActiveTabId(remaining.length > 0 ? remaining[remaining.length - 1].sessionId : null)
+      } else if (splitGone) {
+        setSplitSessionId(null)
+        setActivePaneIndex(0)
+      } else if (activeGone) {
+        if (splitSessionIdRef.current) {
+          setActiveTabId(splitSessionIdRef.current)
+          setSplitSessionId(null)
+          setActivePaneIndex(0)
+        } else {
+          setActiveTabId(remaining.length > 0 ? remaining[remaining.length - 1].sessionId : null)
+        }
       }
+
       if (remaining.length === 0) setIsVisible(false)
       return remaining
     })
@@ -305,8 +411,8 @@ export function TerminalPanel() {
     const tab = tabsRef.current.find(t => t.sessionId === sessionId)
 
     // Show notification if the exited tab is not currently visible
-    // (either it's not the active tab, or the panel is collapsed)
-    const isVisibleToUser = activeTabIdRef.current === sessionId && isVisibleRef.current
+    // (either it's not in any visible pane, or the panel is collapsed)
+    const isVisibleToUser = (activeTabIdRef.current === sessionId || splitSessionIdRef.current === sessionId) && isVisibleRef.current
 
     setTabs(prev => prev.map(t =>
       t.sessionId === sessionId
@@ -345,7 +451,6 @@ export function TerminalPanel() {
 
   // Terminal tab click → also switch to that project's tab
   const handleTerminalTabClick = useCallback((sessionId: string) => {
-    setActiveTabId(sessionId)
     // Clear notification when user views this tab
     setTabs(prev => prev.map(t =>
       t.sessionId === sessionId && t.hasNotification
@@ -356,6 +461,24 @@ export function TerminalPanel() {
     if (tab) {
       openProjectTab(tab.projectId)
     }
+
+    if (splitSessionIdRef.current) {
+      // In split mode
+      if (sessionId === activeTabIdRef.current) {
+        setActivePaneIndex(0)
+      } else if (sessionId === splitSessionIdRef.current) {
+        setActivePaneIndex(1)
+      } else {
+        // Assign to active pane
+        if (activePaneIndexRef.current === 1) {
+          setSplitSessionId(sessionId)
+        } else {
+          setActiveTabId(sessionId)
+        }
+      }
+    } else {
+      setActiveTabId(sessionId)
+    }
   }, [openProjectTab])
 
   // Project tab change → find and activate a terminal for that project
@@ -364,6 +487,11 @@ export function TerminalPanel() {
     // Check if active terminal already belongs to this project
     const activeTab = tabsRef.current.find(t => t.sessionId === activeTabIdRef.current)
     if (activeTab && activeTab.projectId === activeProjectId) return
+    // Also check if split session already belongs to this project
+    if (splitSessionIdRef.current) {
+      const splitTab = tabsRef.current.find(t => t.sessionId === splitSessionIdRef.current)
+      if (splitTab && splitTab.projectId === activeProjectId) return
+    }
     // Find a non-exited terminal for this project
     const match = tabsRef.current.find(t => t.projectId === activeProjectId && !t.exited)
     if (match) {
@@ -393,6 +521,8 @@ export function TerminalPanel() {
 
   // Don't render if terminal not available
   if (!status?.available) return null
+
+  const isSplit = !!splitSessionId
 
   return (
     <div ref={panelRef} className="relative shrink-0 border-t bg-[#0a0a0f]">
@@ -434,44 +564,56 @@ export function TerminalPanel() {
         {/* Session tabs */}
         {isVisible && (
           <div className="flex items-center gap-0.5 flex-1 overflow-x-auto ml-1">
-            {tabs.map(tab => (
-              <button
-                key={tab.sessionId}
-                onClick={() => handleTerminalTabClick(tab.sessionId)}
-                className={cn(
-                  'flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-sm transition-colors max-w-[200px] group',
-                  activeTabId === tab.sessionId
-                    ? tab.taskId && !tab.exited
-                      ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40'
-                      : tab.taskId && tab.exited
-                        ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40'
-                        : 'bg-background/60 text-foreground'
-                    : tab.taskId && !tab.exited
-                      ? 'text-purple-400/60 hover:text-purple-300 hover:bg-purple-500/10'
-                      : tab.taskId && tab.exited
-                        ? 'text-emerald-400/60 hover:text-emerald-300 hover:bg-emerald-500/10'
-                        : 'text-muted-foreground hover:text-foreground hover:bg-background/30',
-                  tab.exited && !tab.taskId && !tab.hasNotification && 'opacity-50'
-                )}
-              >
-                {tab.taskId && !tab.exited && <Sparkles className="h-3 w-3 shrink-0 animate-pulse" />}
-                {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-400" />}
-                {tab.hasNotification && (
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
-                  </span>
-                )}
-                <span className="truncate">{tab.title.replace(/^\[(.*?)\]\s*/, '$1 · ')}</span>
-                {tab.taskId && (
-                  <span className="text-[9px] font-mono opacity-60 shrink-0">#{tab.taskNumber || '?'}</span>
-                )}
-                <X
-                  className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive"
-                  onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.sessionId) }}
-                />
-              </button>
-            ))}
+            {tabs.map(tab => {
+              const isLeftPane = activeTabId === tab.sessionId
+              const isRightPane = splitSessionId === tab.sessionId
+              const isInPane = isLeftPane || isRightPane
+              return (
+                <button
+                  key={tab.sessionId}
+                  onClick={() => handleTerminalTabClick(tab.sessionId)}
+                  className={cn(
+                    'flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-sm transition-colors max-w-[200px] group',
+                    isInPane
+                      ? tab.taskId && !tab.exited
+                        ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40'
+                        : tab.taskId && tab.exited
+                          ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40'
+                          : 'bg-background/60 text-foreground'
+                      : tab.taskId && !tab.exited
+                        ? 'text-purple-400/60 hover:text-purple-300 hover:bg-purple-500/10'
+                        : tab.taskId && tab.exited
+                          ? 'text-emerald-400/60 hover:text-emerald-300 hover:bg-emerald-500/10'
+                          : 'text-muted-foreground hover:text-foreground hover:bg-background/30',
+                    tab.exited && !tab.taskId && !tab.hasNotification && 'opacity-50'
+                  )}
+                >
+                  {/* Split pane indicator dot */}
+                  {isSplit && isLeftPane && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                  )}
+                  {isSplit && isRightPane && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                  )}
+                  {tab.taskId && !tab.exited && <Sparkles className="h-3 w-3 shrink-0 animate-pulse" />}
+                  {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-400" />}
+                  {tab.hasNotification && (
+                    <span className="relative flex h-2 w-2 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                    </span>
+                  )}
+                  <span className="truncate">{tab.title.replace(/^\[(.*?)\]\s*/, '$1 · ')}</span>
+                  {tab.taskId && (
+                    <span className="text-[9px] font-mono opacity-60 shrink-0">#{tab.taskNumber || '?'}</span>
+                  )}
+                  <X
+                    className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive"
+                    onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.sessionId) }}
+                  />
+                </button>
+              )
+            })}
 
             {/* New tab button */}
             <Tooltip>
@@ -491,6 +633,23 @@ export function TerminalPanel() {
         {/* Right actions */}
         {isVisible && tabs.length > 0 && (
           <div className="flex items-center gap-0.5 ml-auto shrink-0">
+            {/* Split toggle */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={handleToggleSplit}
+                  className={cn(
+                    'p-1 transition-colors rounded-sm',
+                    isSplit
+                      ? 'text-primary bg-primary/10 hover:bg-primary/20'
+                      : 'text-muted-foreground hover:text-foreground hover:bg-background/30'
+                  )}
+                >
+                  <Columns2 className="h-3 w-3" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">{isSplit ? 'Unsplit terminal' : 'Split terminal'}</TooltipContent>
+            </Tooltip>
             {tabs.some(t => t.exited) && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -532,19 +691,55 @@ export function TerminalPanel() {
 
       {/* Terminal content area */}
       {isVisible && (
-        <div style={{ height: panelHeight }}>
-          {tabs.map(tab => (
+        <div style={{ height: panelHeight }} className="relative">
+          {/* Split divider */}
+          {isSplit && (
+            <div className="absolute top-0 left-1/2 -translate-x-px w-px h-full bg-border/60 z-10" />
+          )}
+          {/* Active pane indicator bar */}
+          {isSplit && (
             <div
-              key={tab.sessionId}
-              className={cn('h-full', activeTabId === tab.sessionId ? 'block' : 'hidden')}
-            >
-              <IntegratedTerminal
-                sessionId={tab.sessionId}
-                isActive={activeTabId === tab.sessionId}
-                onExit={handleTabExit}
-              />
-            </div>
-          ))}
+              className={cn(
+                'absolute top-0 h-0.5 z-10 transition-all duration-150',
+                activePaneIndex === 0
+                  ? 'left-0 w-[calc(50%-0.5px)] bg-blue-400/60'
+                  : 'left-[calc(50%+0.5px)] w-[calc(50%-0.5px)] bg-emerald-400/60'
+              )}
+            />
+          )}
+
+          {tabs.map(tab => {
+            const isLeft = activeTabId === tab.sessionId
+            const isRight = splitSessionId === tab.sessionId
+            const isShown = isLeft || isRight
+
+            return (
+              <div
+                key={tab.sessionId}
+                className={cn(
+                  isShown ? 'block' : 'hidden',
+                  !isSplit && 'h-full',
+                  isSplit && isShown && 'absolute top-0',
+                )}
+                style={isSplit && isShown ? {
+                  left: isLeft ? 0 : 'calc(50% + 0.5px)',
+                  width: 'calc(50% - 0.5px)',
+                  height: '100%',
+                } : undefined}
+                onMouseDown={() => {
+                  if (isSplit && isShown) {
+                    setActivePaneIndex(isLeft ? 0 : 1)
+                  }
+                }}
+              >
+                <IntegratedTerminal
+                  sessionId={tab.sessionId}
+                  isActive={isShown}
+                  onExit={handleTabExit}
+                />
+              </div>
+            )
+          })}
           {tabs.length === 0 && (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
               <button
