@@ -250,7 +250,7 @@ export async function gitRoutes(app: FastifyInstance) {
     }
   );
 
-  // Generate commit message via Claude API (priority) or CLI (fallback)
+  // Generate commit message via CLI (priority) or configured API key (fallback)
   app.post<{ Params: { projectId: string } }>(
     '/api/projects/:projectId/git/generate-commit-message',
     async (request, reply) => {
@@ -276,10 +276,28 @@ export async function gitRoutes(app: FastifyInstance) {
           const prompt = 'Write a concise git commit message for this diff. Subject line under 72 chars. If multiple changes, add bullet points in body. Output ONLY the message, no quotes, no markdown fences, no explanation.';
           const commitModel = 'claude-haiku-4-5-20251001';
 
-          // Priority: configured API key → env ANTHROPIC_API_KEY → CLI → error
-          const apiKey = (await claudeService.loadClaudeConfig())?.apiKey
-            || process.env.ANTHROPIC_API_KEY;
+          // Priority: CLI first (uses Max subscription) → configured API key → error
+          const cliOk = await claudeCliService.getCliStatus();
+          if (cliOk) {
+            try {
+              const message = await claudeCliService.runPrompt(prompt, {
+                input: compactDiff,
+                model: 'haiku',
+                maxTurns: 1,
+                outputFormat: 'text',
+                timeout: 30_000,
+                hardTimeout: 45_000,
+                cwd: path,
+              });
+              return { message, source: 'cli' as const };
+            } catch (cliErr: any) {
+              log.warn('git', 'Commit message CLI failed, trying API', cliErr.message, request.params.projectId);
+              // Fall through to configured API key
+            }
+          }
 
+          // Fallback: configured API key only (not env key)
+          const apiKey = (await claudeService.loadClaudeConfig())?.apiKey;
           if (apiKey) {
             try {
               const { default: Anthropic } = await import('@anthropic-ai/sdk');
@@ -293,24 +311,9 @@ export async function gitRoutes(app: FastifyInstance) {
               const text = response.content[0].type === 'text' ? response.content[0].text : '';
               return { message: text.trim(), source: 'api' as const };
             } catch (apiErr: any) {
-              // API failed — fall through to CLI
-              log.warn('git', 'Commit message API failed, trying CLI', apiErr.message, request.params.projectId);
+              log.error('git', 'Commit message API also failed', apiErr.message, request.params.projectId);
+              throw apiErr;
             }
-          }
-
-          // Fallback: CLI (with hard timeout to prevent infinite waits)
-          const cliOk = await claudeCliService.getCliStatus();
-          if (cliOk) {
-            const message = await claudeCliService.runPrompt(prompt, {
-              input: compactDiff,
-              model: 'haiku',
-              maxTurns: 1,
-              outputFormat: 'text',
-              timeout: 30_000,
-              hardTimeout: 45_000,
-              cwd: path,
-            });
-            return { message, source: 'cli' as const };
           }
 
           reply.status(503).send({ error: 'No AI available. Install Claude CLI or configure API key.' });

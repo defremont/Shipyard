@@ -243,7 +243,7 @@ export async function claudeRoutes(app: FastifyInstance) {
     return reply.status(400).send({ error: 'No AI available. Install Claude CLI or configure API key.' });
   });
 
-  // Analyze task — API-first (configured key → env key), CLI fallback
+  // Analyze task — CLI-first (uses Max subscription), configured API key fallback
   app.post<{
     Body: { projectId: string; taskId?: string; title: string }
   }>('/api/claude/analyze-task', async (request, reply) => {
@@ -260,43 +260,13 @@ export async function claudeRoutes(app: FastifyInstance) {
       context = await buildProjectContext(projectId);
     }
 
-    const analyzeModel = 'claude-haiku-4-5-20251001';
-
     const userMessage = existingDescription
       ? `Improve this task:\nTitle: ${title}\nDescription: ${existingDescription}\n\nReturn improved title, description, and technical prompt.`
       : `Analyze this task:\nTitle: ${title}\n\nReturn improved title, description, and technical prompt.`;
 
     const systemInstructions = `You are a developer improving task descriptions. Project context: ${context}\n\nRespond ONLY with JSON: { "title": "concise action-oriented title", "description": "what needs to be done", "prompt": "technical details, files, approach" }\nNo markdown fences. Keep it concise.`;
 
-    // Priority: configured API key → env ANTHROPIC_API_KEY → CLI → error
-    const apiKey = (await claudeService.loadClaudeConfig())?.apiKey
-      || process.env.ANTHROPIC_API_KEY;
-
-    if (apiKey) {
-      try {
-        const { default: Anthropic } = await import('@anthropic-ai/sdk');
-        const client = new Anthropic({ apiKey, timeout: 25_000 });
-        const response = await client.messages.create({
-          model: analyzeModel,
-          max_tokens: 1024,
-          system: systemInstructions,
-          messages: [{ role: 'user', content: userMessage }],
-        });
-        const text = response.content[0].type === 'text' ? response.content[0].text : '';
-        try {
-          const parsed = parseJsonResponse(text);
-          return { title: parsed.title || title, description: parsed.description || '', prompt: parsed.prompt || '' };
-        } catch {
-          log.warn('claude', 'Analyze task API response was not valid JSON', undefined, projectId);
-          return { title, description: text.trim(), prompt: '' };
-        }
-      } catch (err: any) {
-        log.warn('claude', 'Analyze task API failed, trying CLI', err.message, projectId);
-        // Fall through to CLI
-      }
-    }
-
-    // Fallback to CLI (with hard timeout to prevent infinite waits)
+    // Priority: CLI first (uses Max subscription) → configured API key → error
     const cliOk = await claudeCliService.getCliStatus();
     if (cliOk) {
       try {
@@ -313,7 +283,18 @@ export async function claudeRoutes(app: FastifyInstance) {
           return { title, description: result.trim(), prompt: '' };
         }
       } catch (err: any) {
-        log.error('claude', 'Analyze task failed', err.message, projectId);
+        log.warn('claude', 'Analyze task CLI failed, trying API', err.message, projectId);
+        // Fall through to configured API key
+      }
+    }
+
+    // Fallback: configured API key only (not env key)
+    const config = await claudeService.loadClaudeConfig();
+    if (config) {
+      try {
+        return await claudeService.analyzeTask(config, context, title, existingDescription);
+      } catch (err: any) {
+        log.error('claude', 'Analyze task API also failed', err.message, projectId);
         return reply.status(500).send({ error: `AI analysis failed: ${err.message}` });
       }
     }
