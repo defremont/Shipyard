@@ -223,13 +223,13 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return sectionState[key] !== undefined ? sectionState[key] : defaultOpen
   }
 
-  // Compute task counts per project (pending = inbox + in_progress)
+  // Compute task counts per project (only todo + in_progress — backlog is not actionable)
   const { pendingByProject, inProgressProjects } = useMemo(() => {
     const pending = new Map<string, number>()
     const inProgress = new Set<string>()
     if (tasks) {
       for (const t of tasks) {
-        if (t.status !== 'done') {
+        if (t.status === 'todo' || t.status === 'in_progress') {
           pending.set(t.projectId, (pending.get(t.projectId) || 0) + 1)
         }
         if (t.status === 'in_progress') {
