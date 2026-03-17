@@ -118,8 +118,8 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px]">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[550px] max-h-[85vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <div className="flex items-start gap-3">
             <PriIcon className={cn('h-5 w-5 mt-0.5 shrink-0', pri.color)} />
             <div className="flex-1 min-w-0">
@@ -136,7 +136,7 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
           </div>
         </DialogHeader>
 
-        <div className="space-y-4 py-2">
+        <div className="space-y-4 py-2 overflow-y-auto min-h-0">
           {task.description && (
             <div>
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
@@ -179,7 +179,7 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
         </div>
 
         {/* Status actions */}
-        <div className="flex items-center gap-2 pt-2 border-t">
+        <div className="flex items-center gap-2 pt-2 border-t shrink-0">
           <span className="text-xs text-muted-foreground mr-1">Move to:</span>
           {statusActions.map(({ status, label, icon: Icon, color }) => {
             const isCurrent = task.status === status || (status === 'todo' && task.status === 'backlog')
@@ -199,7 +199,7 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
           })}
         </div>
 
-        <div className="flex items-center justify-between pt-2">
+        <div className="flex items-center justify-between pt-2 shrink-0">
           <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
             <Button variant="ghost" size="sm" className="gap-1.5 text-xs text-destructive hover:text-destructive" onClick={() => setDeleteOpen(true)}>
               <Trash2 className="h-3.5 w-3.5" />

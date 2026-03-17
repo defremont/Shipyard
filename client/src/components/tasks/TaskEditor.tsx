@@ -103,14 +103,14 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[500px] max-h-[85vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="flex items-center gap-2">
             {task ? 'Edit Task' : 'New Task'}
             {task && <span className="text-xs text-muted-foreground/60 font-mono font-normal">#{task.number || '?'}</span>}
           </DialogTitle>
         </DialogHeader>
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 py-4 overflow-y-auto min-h-0">
           <div>
             <div className="flex items-center justify-between">
               <label className="text-sm font-medium">Title</label>
@@ -225,7 +225,7 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
             </div>
           </div>
         </div>
-        <DialogFooter className="flex items-center justify-between sm:justify-between">
+        <DialogFooter className="flex items-center justify-between sm:justify-between shrink-0">
           {!task && (
             <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
               <input
