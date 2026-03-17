@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react'
-import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Pencil, Trash2, FolderOpen, Loader2, Copy, FolderTree } from 'lucide-react'
+import { useState, useCallback, useRef, useEffect } from 'react'
+import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Pencil, Trash2, FolderOpen, Loader2, Copy, FolderTree, PenLine } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -7,7 +7,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useFileTree, useDeleteFile, useOpenFileFolder, type FileEntry } from '@/hooks/useFiles'
+import { useFileTree, useDeleteFile, useOpenFileFolder, useRenameFile, type FileEntry } from '@/hooks/useFiles'
 import { FileIcon } from './FileIcon'
 import { FilePreviewDialog } from './FilePreviewDialog'
 import { toast } from 'sonner'
@@ -26,14 +26,48 @@ interface TreeNodeProps {
   expanded: Set<string>
   onToggle: (path: string) => void
   onPreview: (path: string) => void
-  onContextAction: (entry: FileEntry, action: 'delete' | 'open-folder' | 'copy-path') => void
+  onContextAction: (entry: FileEntry, action: 'delete' | 'open-folder' | 'copy-path' | 'rename') => void
   onOpenInEditor?: (path: string, name: string, extension: string) => void
+  renamingPath: string | null
+  onStartRename: (path: string) => void
+  onFinishRename: (entry: FileEntry, newName: string) => void
+  onCancelRename: () => void
 }
 
-function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onContextAction, onOpenInEditor }: TreeNodeProps) {
+function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onContextAction, onOpenInEditor, renamingPath, onStartRename, onFinishRename, onCancelRename }: TreeNodeProps) {
   const isOpen = expanded.has(entry.path)
   const { data, isLoading } = useFileTree(projectId, entry.path, entry.type === 'dir' && isOpen)
   const [contextOpen, setContextOpen] = useState(false)
+  const isRenaming = renamingPath === entry.path
+  const [renameValue, setRenameValue] = useState(entry.name)
+  const renameInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (isRenaming) {
+      setRenameValue(entry.name)
+      setTimeout(() => {
+        if (renameInputRef.current) {
+          renameInputRef.current.focus()
+          // Select name without extension for files
+          const dotIndex = entry.type === 'file' ? entry.name.lastIndexOf('.') : -1
+          if (dotIndex > 0) {
+            renameInputRef.current.setSelectionRange(0, dotIndex)
+          } else {
+            renameInputRef.current.select()
+          }
+        }
+      }, 0)
+    }
+  }, [isRenaming, entry.name, entry.type])
+
+  const handleRenameSubmit = () => {
+    const trimmed = renameValue.trim()
+    if (!trimmed || trimmed === entry.name) {
+      onCancelRename()
+      return
+    }
+    onFinishRename(entry, trimmed)
+  }
 
   const handleClick = () => {
     if (entry.type === 'dir') {
@@ -62,18 +96,37 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
         </span>
 
         {/* Icon + Name */}
-        <button
-          className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
-          onClick={handleClick}
-        >
-          <FileIcon name={entry.name} extension={entry.extension} type={entry.type} isOpen={isOpen} className="h-3.5 w-3.5 shrink-0" />
-          <span className="truncate">{entry.name}</span>
-          {entry.type === 'file' && entry.size !== undefined && entry.size > 100_000 && (
-            <span className="text-[9px] text-muted-foreground/50 shrink-0">
-              {entry.size > 1_048_576 ? `${(entry.size / 1_048_576).toFixed(1)}M` : `${Math.round(entry.size / 1024)}K`}
-            </span>
-          )}
-        </button>
+        {isRenaming ? (
+          <div className="flex items-center gap-1.5 min-w-0 flex-1">
+            <FileIcon name={entry.name} extension={entry.extension} type={entry.type} isOpen={isOpen} className="h-3.5 w-3.5 shrink-0" />
+            <input
+              ref={renameInputRef}
+              value={renameValue}
+              onChange={e => setRenameValue(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') handleRenameSubmit()
+                if (e.key === 'Escape') onCancelRename()
+                e.stopPropagation()
+              }}
+              onBlur={handleRenameSubmit}
+              onClick={e => e.stopPropagation()}
+              className="flex-1 min-w-0 bg-background border border-primary/50 rounded px-1 py-0 text-xs outline-none focus:border-primary"
+            />
+          </div>
+        ) : (
+          <button
+            className="flex items-center gap-1.5 min-w-0 flex-1 text-left"
+            onClick={handleClick}
+          >
+            <FileIcon name={entry.name} extension={entry.extension} type={entry.type} isOpen={isOpen} className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{entry.name}</span>
+            {entry.type === 'file' && entry.size !== undefined && entry.size > 100_000 && (
+              <span className="text-[9px] text-muted-foreground/50 shrink-0">
+                {entry.size > 1_048_576 ? `${(entry.size / 1_048_576).toFixed(1)}M` : `${Math.round(entry.size / 1024)}K`}
+              </span>
+            )}
+          </button>
+        )}
 
         {/* Context menu */}
         <Popover open={contextOpen} onOpenChange={setContextOpen}>
@@ -114,6 +167,12 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
             >
               <Copy className="h-3.5 w-3.5" /> Copy Path
             </button>
+            <button
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
+              onClick={() => { setContextOpen(false); onStartRename(entry.path) }}
+            >
+              <PenLine className="h-3.5 w-3.5" /> Rename
+            </button>
             <div className="h-px bg-border my-1" />
             <button
               className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-red-500/10 text-red-400 transition-colors"
@@ -145,6 +204,10 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
                 onPreview={onPreview}
                 onContextAction={onContextAction}
                 onOpenInEditor={onOpenInEditor}
+                renamingPath={renamingPath}
+                onStartRename={onStartRename}
+                onFinishRename={onFinishRename}
+                onCancelRename={onCancelRename}
               />
             ))
           )}
@@ -164,10 +227,12 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor }: FileExp
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ path: string; name: string; type: string } | null>(null)
+  const [renamingPath, setRenamingPath] = useState<string | null>(null)
 
   const { data, isLoading } = useFileTree(projectId, '', sectionOpen)
   const deleteFile = useDeleteFile()
   const openFileFolder = useOpenFileFolder()
+  const renameFile = useRenameFile()
 
   const handleToggle = useCallback((path: string) => {
     setExpanded(prev => {
@@ -181,7 +246,23 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor }: FileExp
     })
   }, [])
 
-  const handleContextAction = useCallback((entry: FileEntry, action: 'delete' | 'open-folder' | 'copy-path') => {
+  const handleFinishRename = useCallback((entry: FileEntry, newName: string) => {
+    renameFile.mutate(
+      { projectId, relPath: entry.path, newName },
+      {
+        onSuccess: () => {
+          toast.success(`Renamed to ${newName}`)
+          setRenamingPath(null)
+        },
+        onError: (err) => {
+          toast.error(`Rename failed: ${(err as Error).message}`)
+          setRenamingPath(null)
+        },
+      }
+    )
+  }, [projectId, renameFile])
+
+  const handleContextAction = useCallback((entry: FileEntry, action: 'delete' | 'open-folder' | 'copy-path' | 'rename') => {
     switch (action) {
       case 'delete':
         setDeleteTarget({ path: entry.path, name: entry.name, type: entry.type })
@@ -192,6 +273,9 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor }: FileExp
       case 'copy-path':
         navigator.clipboard.writeText(entry.path)
         toast.success('Path copied')
+        break
+      case 'rename':
+        setRenamingPath(entry.path)
         break
     }
   }, [projectId, openFileFolder])
@@ -251,6 +335,10 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor }: FileExp
                   onPreview={setPreviewPath}
                   onContextAction={handleContextAction}
                   onOpenInEditor={onOpenInEditor}
+                  renamingPath={renamingPath}
+                  onStartRename={setRenamingPath}
+                  onFinishRename={handleFinishRename}
+                  onCancelRename={() => setRenamingPath(null)}
                 />
               ))}
             </div>

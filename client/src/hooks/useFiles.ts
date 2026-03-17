@@ -53,6 +53,17 @@ export function useOpenFileFolder() {
   })
 }
 
+export function useRenameFile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, relPath, newName }: { projectId: string; relPath: string; newName: string }) =>
+      api.renameFile(projectId, relPath, newName),
+    onSuccess: (_data, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ['files', 'tree', projectId] })
+    },
+  })
+}
+
 export function useSaveFile() {
   const queryClient = useQueryClient()
   return useMutation({

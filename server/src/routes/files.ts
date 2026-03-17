@@ -1,6 +1,6 @@
 import { FastifyInstance } from 'fastify';
-import { readdir, stat, readFile, writeFile, unlink, rm } from 'fs/promises';
-import { join, resolve, extname, relative, sep } from 'path';
+import { readdir, stat, readFile, writeFile, unlink, rm, rename } from 'fs/promises';
+import { join, resolve, extname, relative, sep, dirname, basename } from 'path';
 import { getProjects } from '../services/projectDiscovery.js';
 import { openFolder } from '../services/terminalLauncher.js';
 import * as log from '../services/logService.js';
@@ -477,6 +477,71 @@ export async function fileRoutes(app: FastifyInstance) {
       );
 
       return { results: results.slice(0, limit), totalMatches };
+    }
+  );
+
+  // Rename file or directory
+  app.post<{ Params: { projectId: string }; Body: { path: string; newName: string } }>(
+    '/api/projects/:projectId/files/rename',
+    async (request, reply) => {
+      const projectPath = await getProjectPath(request.params.projectId);
+      if (!projectPath) return reply.status(404).send({ error: 'Project not found' });
+
+      const { path: relPath, newName } = request.body || {};
+      if (!relPath) return reply.status(400).send({ error: 'path is required' });
+      if (!newName || !newName.trim()) return reply.status(400).send({ error: 'newName is required' });
+
+      const trimmedName = newName.trim();
+      if (trimmedName.includes('/') || trimmedName.includes('\\')) {
+        return reply.status(400).send({ error: 'Name cannot contain path separators' });
+      }
+      if (trimmedName === '.' || trimmedName === '..') {
+        return reply.status(400).send({ error: 'Invalid name' });
+      }
+
+      let targetPath: string;
+      try {
+        targetPath = validatePath(projectPath, relPath);
+      } catch (e: any) {
+        return reply.status(e.statusCode || 400).send({ error: e.message });
+      }
+
+      // Prevent renaming project root
+      if (resolve(targetPath) === resolve(projectPath)) {
+        return reply.status(403).send({ error: 'Cannot rename project root' });
+      }
+
+      const parentDir = dirname(targetPath);
+      const newPath = join(parentDir, trimmedName);
+
+      // Validate new path is still within project
+      try {
+        validatePath(projectPath, relative(projectPath, newPath));
+      } catch (e: any) {
+        return reply.status(e.statusCode || 400).send({ error: e.message });
+      }
+
+      try {
+        // Check source exists
+        await stat(targetPath);
+
+        // Check destination doesn't already exist
+        try {
+          await stat(newPath);
+          return reply.status(409).send({ error: 'A file or folder with that name already exists' });
+        } catch (e: any) {
+          if (e.code !== 'ENOENT') throw e;
+        }
+
+        await rename(targetPath, newPath);
+        const newRelPath = relative(projectPath, newPath).replace(/\\/g, '/');
+        log.info('files', `Renamed: ${relPath} → ${newRelPath}`, undefined, request.params.projectId);
+        return { success: true, newPath: newRelPath };
+      } catch (err: any) {
+        if (err.statusCode) return reply.status(err.statusCode).send({ error: err.message });
+        log.error('files', `Failed to rename: ${relPath}`, err.message, request.params.projectId);
+        return reply.status(500).send({ error: err.message });
+      }
     }
   );
 
