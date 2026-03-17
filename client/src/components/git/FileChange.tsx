@@ -26,6 +26,7 @@ interface FileChangeProps {
 
 export function FileChange({ projectId, file, status, staged, onOpenInEditor }: FileChangeProps) {
   const [showDiff, setShowDiff] = useState(false)
+  const [expandDiff, setExpandDiff] = useState(false)
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const stageFile = useStageFile()
   const unstageFile = useUnstageFile()
@@ -118,20 +119,33 @@ export function FileChange({ projectId, file, status, staged, onOpenInEditor }: 
       </div>
       <FilePreviewDialog projectId={projectId} filePath={previewPath} onClose={() => setPreviewPath(null)} />
       {showDiff && diffData?.diff && (
-        <pre className="text-[11px] leading-relaxed p-3 bg-muted/50 overflow-x-auto border-t max-h-64 overflow-y-auto">
-          {diffData.diff.split('\n').map((line, i) => (
-            <div
-              key={i}
-              className={cn(
-                line.startsWith('+') && !line.startsWith('+++') && 'text-green-400 bg-green-500/10',
-                line.startsWith('-') && !line.startsWith('---') && 'text-red-400 bg-red-500/10',
-                line.startsWith('@@') && 'text-blue-400'
-              )}
+        <div className="relative border-t">
+          <pre className={cn(
+            "text-[11px] leading-relaxed p-3 bg-muted/50 overflow-x-auto overflow-y-auto",
+            !expandDiff && 'max-h-64'
+          )}>
+            {diffData.diff.split('\n').map((line, i) => (
+              <div
+                key={i}
+                className={cn(
+                  line.startsWith('+') && !line.startsWith('+++') && 'text-green-400 bg-green-500/10',
+                  line.startsWith('-') && !line.startsWith('---') && 'text-red-400 bg-red-500/10',
+                  line.startsWith('@@') && 'text-blue-400'
+                )}
+              >
+                {line}
+              </div>
+            ))}
+          </pre>
+          {diffData.diff.split('\n').length > 15 && (
+            <button
+              onClick={() => setExpandDiff(!expandDiff)}
+              className="w-full text-[10px] text-muted-foreground hover:text-foreground bg-muted/80 hover:bg-muted py-0.5 transition-colors border-t"
             >
-              {line}
-            </div>
-          ))}
-        </pre>
+              {expandDiff ? 'Collapse' : `Expand (${diffData.diff.split('\n').length} lines)`}
+            </button>
+          )}
+        </div>
       )}
     </div>
   )

@@ -32,6 +32,7 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
   const undoCommit = useUndoCommit()
   const [confirmDiscard, setConfirmDiscard] = useState<'staged' | 'unstaged' | null>(null)
   const [confirmUndo, setConfirmUndo] = useState(false)
+  const [expandedCommit, setExpandedCommit] = useState<string | null>(null)
 
   if (isLoading || !status) {
     return <div className="text-sm text-muted-foreground p-4">Loading git status...</div>
@@ -312,13 +313,20 @@ export function GitPanel({ projectId, onOpenInEditor }: GitPanelProps) {
           {commits.slice(0, 10).map((commit: any, i: number) => {
             const unpushed = i < ahead
             return (
-              <div key={commit.hash} className={cn(
-                'flex items-start gap-1.5 py-1 rounded hover:bg-accent/30 transition-colors px-1',
-                unpushed && 'border-l-2 border-yellow-500 pl-1.5'
-              )}>
+              <div
+                key={commit.hash}
+                className={cn(
+                  'flex items-start gap-1.5 py-1 rounded hover:bg-accent/30 transition-colors px-1 cursor-pointer',
+                  unpushed && 'border-l-2 border-yellow-500 pl-1.5'
+                )}
+                onClick={() => setExpandedCommit(expandedCommit === commit.hash ? null : commit.hash)}
+              >
                 <GitCommit className={cn('h-3 w-3 mt-0.5 shrink-0', unpushed ? 'text-yellow-500' : 'text-muted-foreground/50')} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-[11px] leading-tight truncate">{commit.message}</p>
+                  <p className={cn(
+                    'text-[11px] leading-tight',
+                    expandedCommit === commit.hash ? 'whitespace-pre-wrap break-words' : 'truncate'
+                  )}>{commit.message}</p>
                   <p className="text-[9px] text-muted-foreground/60">
                     {commit.author_name} &middot; {(() => {
                       try { return formatDistanceToNow(new Date(commit.date), { addSuffix: true }) }

@@ -224,6 +224,7 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
 
 export function FileExplorer({ projectId, projectPath, onOpenInEditor }: FileExplorerProps) {
   const [sectionOpen, setSectionOpen] = useState(false)
+  const [expandTree, setExpandTree] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ path: string; name: string; type: string } | null>(null)
@@ -315,7 +316,10 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor }: FileExp
 
       {/* Tree */}
       {sectionOpen && (
-        <div className="max-h-72 overflow-y-auto scrollbar-dark rounded border border-border/50 bg-background/50">
+        <div className={cn(
+          "overflow-y-auto scrollbar-dark rounded border border-border/50 bg-background/50",
+          !expandTree && 'max-h-72'
+        )}>
           {isLoading ? (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -323,25 +327,33 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor }: FileExp
           ) : data?.entries.length === 0 ? (
             <div className="text-xs text-muted-foreground text-center py-4">No files found</div>
           ) : (
-            <div className="py-1">
-              {data?.entries.map(entry => (
-                <TreeNode
-                  key={entry.path}
-                  entry={entry}
-                  projectId={projectId}
-                  depth={0}
-                  expanded={expanded}
-                  onToggle={handleToggle}
-                  onPreview={setPreviewPath}
-                  onContextAction={handleContextAction}
-                  onOpenInEditor={onOpenInEditor}
-                  renamingPath={renamingPath}
-                  onStartRename={setRenamingPath}
-                  onFinishRename={handleFinishRename}
-                  onCancelRename={() => setRenamingPath(null)}
-                />
-              ))}
-            </div>
+            <>
+              <div className="py-1">
+                {data?.entries.map(entry => (
+                  <TreeNode
+                    key={entry.path}
+                    entry={entry}
+                    projectId={projectId}
+                    depth={0}
+                    expanded={expanded}
+                    onToggle={handleToggle}
+                    onPreview={setPreviewPath}
+                    onContextAction={handleContextAction}
+                    onOpenInEditor={onOpenInEditor}
+                    renamingPath={renamingPath}
+                    onStartRename={setRenamingPath}
+                    onFinishRename={handleFinishRename}
+                    onCancelRename={() => setRenamingPath(null)}
+                  />
+                ))}
+              </div>
+              <button
+                onClick={() => setExpandTree(!expandTree)}
+                className="w-full text-[10px] text-muted-foreground hover:text-foreground bg-muted/80 hover:bg-muted py-0.5 transition-colors border-t sticky bottom-0"
+              >
+                {expandTree ? 'Collapse' : 'Expand'}
+              </button>
+            </>
           )}
         </div>
       )}
