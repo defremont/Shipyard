@@ -141,7 +141,7 @@ export const api = {
   testClaudeKey: (apiKey: string) =>
     request<{ ok: boolean; error?: string }>('/claude/config/test', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   analyzeTask: (projectId: string, title: string, taskId?: string) =>
-    request<{ title: string; description: string; prompt: string }>('/claude/analyze-task', { method: 'POST', body: JSON.stringify({ projectId, title, taskId }), timeout: 30_000 }),
+    request<{ title: string; description: string; prompt: string }>('/claude/analyze-task', { method: 'POST', body: JSON.stringify({ projectId, title, taskId }), timeout: 60_000 }),
   bulkOrganizeTasks: (projectId: string, rawText: string) =>
     request<{ tasks: Array<{ title: string; description: string; prompt: string; priority: string; status: string }> }>(
       '/claude/bulk-organize', { method: 'POST', body: JSON.stringify({ projectId, rawText }) }

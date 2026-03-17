@@ -51,8 +51,11 @@ export async function syncRoutes(app: FastifyInstance) {
         log.warn('sync', 'Apps Script request timed out (15s)');
         return reply.status(504).send({ error: 'Request to Apps Script timed out (15s)' });
       }
-      log.error('sync', 'Apps Script proxy failed', err.message);
-      return reply.status(502).send({ error: err.message || 'Failed to reach Apps Script' });
+      // Node.js undici puts the real error in err.cause (e.g. DNS failure, connection refused)
+      const detail = err.cause?.message || err.cause?.code || '';
+      const fullMsg = detail ? `${err.message} (${detail})` : (err.message || 'Failed to reach Apps Script');
+      log.error('sync', 'Apps Script proxy failed', fullMsg);
+      return reply.status(502).send({ error: fullMsg });
     } finally {
       clearTimeout(timeout);
     }
@@ -90,7 +93,9 @@ export async function syncRoutes(app: FastifyInstance) {
       if (err.name === 'AbortError') {
         return reply.status(504).send({ ok: false, error: 'Timeout (10s)' });
       }
-      return reply.status(502).send({ ok: false, error: err.message || 'Connection failed' });
+      const detail = err.cause?.message || err.cause?.code || '';
+      const fullMsg = detail ? `${err.message} (${detail})` : (err.message || 'Connection failed');
+      return reply.status(502).send({ ok: false, error: fullMsg });
     } finally {
       clearTimeout(timeout);
     }
