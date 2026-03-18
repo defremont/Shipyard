@@ -13,6 +13,31 @@ const IGNORE_NAMES = new Set([
   '.parcel-cache', '.svelte-kit',
 ]);
 
+// Dotfiles that should be visible in the file tree
+const VISIBLE_DOTFILES = new Set([
+  '.env', '.env.local', '.env.example', '.env.development', '.env.production',
+  '.env.staging', '.env.test', '.env.sample', '.env.defaults', '.env.template',
+  '.gitignore', '.gitattributes', '.gitmodules',
+  '.dockerignore', '.docker',
+  '.editorconfig',
+  '.prettierrc', '.prettierignore',
+  '.eslintrc', '.eslintignore',
+  '.babelrc',
+  '.npmrc', '.nvmrc', '.npmignore',
+  '.yarnrc',
+  '.browserslistrc',
+  '.stylelintrc',
+  '.huskyrc',
+  '.lintstagedrc',
+]);
+
+function isVisibleDotfile(name: string): boolean {
+  if (VISIBLE_DOTFILES.has(name)) return true;
+  // Allow any .env.* variant
+  if (name.startsWith('.env.')) return true;
+  return false;
+}
+
 const IMAGE_TYPES: Record<string, string> = {
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.gif': 'image/gif', '.svg': 'image/svg+xml', '.webp': 'image/webp',
@@ -43,12 +68,17 @@ function getMimeHint(ext: string, name: string): string {
   if (ext === '.md' || ext === '.mdx' || ext === '.markdown') return 'text/markdown';
   if (ext === '.json' || ext === '.jsonc') return 'application/json';
   if (TEXT_EXTENSIONS.has(ext)) return 'text/plain';
+  // Dotenv files (.env.local, .env.example, .env.development, etc.)
+  if (name.startsWith('.env')) return 'text/plain';
   // Files without extension that are likely text
   const textNames = new Set([
     'Makefile', 'Dockerfile', 'Procfile', 'Gemfile', 'Rakefile',
     'LICENSE', 'CHANGELOG', 'README', 'CLAUDE',
-    '.gitignore', '.gitattributes', '.dockerignore', '.editorconfig',
-    '.prettierrc', '.eslintrc', '.babelrc',
+    '.gitignore', '.gitattributes', '.gitmodules', '.dockerignore',
+    '.editorconfig', '.prettierrc', '.prettierignore',
+    '.eslintrc', '.eslintignore', '.babelrc',
+    '.npmrc', '.nvmrc', '.npmignore', '.yarnrc',
+    '.browserslistrc', '.stylelintrc', '.huskyrc', '.lintstagedrc',
   ]);
   if (textNames.has(name)) return 'text/plain';
   return 'application/octet-stream';
@@ -101,7 +131,7 @@ export async function fileRoutes(app: FastifyInstance) {
 
         for (const entry of entries) {
           if (IGNORE_NAMES.has(entry.name)) continue;
-          if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
+          if (entry.name.startsWith('.') && !isVisibleDotfile(entry.name)) continue;
 
           const entryRelPath = relPath ? `${relPath}/${entry.name}` : entry.name;
 
@@ -313,7 +343,7 @@ export async function fileRoutes(app: FastifyInstance) {
           for (const entry of entries) {
             if (results.length >= limit) break;
             if (IGNORE_NAMES.has(entry.name)) continue;
-            if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
+            if (entry.name.startsWith('.') && !isVisibleDotfile(entry.name)) continue;
 
             const entryRelPath = relPath ? `${relPath}/${entry.name}` : entry.name;
 
@@ -412,7 +442,7 @@ export async function fileRoutes(app: FastifyInstance) {
           for (const entry of entries) {
             if (results.length >= limit || totalMatches >= MAX_TOTAL_MATCHES) break;
             if (IGNORE_NAMES.has(entry.name)) continue;
-            if (entry.name.startsWith('.') && entry.name !== '.env.example') continue;
+            if (entry.name.startsWith('.') && !isVisibleDotfile(entry.name)) continue;
 
             const entryRelPath = relPath ? `${relPath}/${entry.name}` : entry.name;
 
