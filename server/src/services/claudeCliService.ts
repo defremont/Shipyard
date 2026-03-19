@@ -52,11 +52,18 @@ export interface RunPromptOptions {
   cwd?: string;
 }
 
-function buildCliArgs(options?: RunPromptOptions): string[] {
-  const args = ['-p'];
+/**
+ * Build CLI args with prompt as positional argument (after all flags).
+ * This avoids Windows stdin piping issues where spawn() fails to deliver
+ * piped data to the child process, causing the CLI to hang waiting for input.
+ */
+function buildCliArgs(prompt: string, options?: RunPromptOptions): string[] {
+  const args: string[] = ['-p'];
   if (options?.model) args.push('--model', options.model);
   if (options?.outputFormat) args.push('--output-format', options.outputFormat);
   args.push('--no-session-persistence');
+  // Prompt as positional argument — must come after all flags
+  args.push(prompt);
   return args;
 }
 
@@ -67,17 +74,18 @@ function buildCliEnv(): NodeJS.ProcessEnv {
   return env;
 }
 
-function buildStdinContent(prompt: string, input?: string): string {
-  return input ? `${prompt}\n\n${input}` : prompt;
-}
-
 /**
  * Run a prompt and return the full response. Uses activity-based timeout
  * that resets whenever the CLI produces output (stdout or stderr).
+ *
+ * The prompt is passed as a CLI positional argument. If `options.input` is
+ * provided (e.g. a git diff), it is sent via stdin. Otherwise stdin is closed
+ * immediately to avoid the CLI waiting for input that never arrives.
  */
 export async function runPrompt(prompt: string, options?: RunPromptOptions): Promise<string> {
-  const args = buildCliArgs(options);
+  const args = buildCliArgs(prompt, options);
   const env = buildCliEnv();
+  const hasInput = !!options?.input;
 
   return new Promise<string>((resolve, reject) => {
     let settled = false;
@@ -86,7 +94,7 @@ export async function runPrompt(prompt: string, options?: RunPromptOptions): Pro
     const proc = spawn(cliPath, args, {
       env,
       cwd: options?.cwd,
-      stdio: ['pipe', 'pipe', 'pipe'],
+      stdio: [hasInput ? 'pipe' : 'ignore', 'pipe', 'pipe'],
       windowsHide: true,
     });
 
@@ -118,8 +126,8 @@ export async function runPrompt(prompt: string, options?: RunPromptOptions): Pro
 
     const cleanup = () => { clearTimeout(timer); if (hardTimer) clearTimeout(hardTimer); };
 
-    proc.stdout.on('data', (data: Buffer) => { stdout += data.toString(); resetTimer(); });
-    proc.stderr.on('data', (data: Buffer) => { stderr += data.toString(); resetTimer(); });
+    proc.stdout!.on('data', (data: Buffer) => { stdout += data.toString(); resetTimer(); });
+    proc.stderr!.on('data', (data: Buffer) => { stderr += data.toString(); resetTimer(); });
     proc.on('close', (code) => {
       cleanup();
       if (code === 0) {
@@ -133,9 +141,11 @@ export async function runPrompt(prompt: string, options?: RunPromptOptions): Pro
       settle(() => reject(err));
     });
 
-    // Pipe prompt (+ optional input) via stdin
-    proc.stdin.write(buildStdinContent(prompt, options?.input));
-    proc.stdin.end();
+    // Send input via stdin only when provided (e.g. git diff); use single
+    // end(data) call to avoid Windows buffering issues with write()+end().
+    if (hasInput && proc.stdin) {
+      proc.stdin.end(options!.input);
+    }
   });
 }
 
@@ -145,19 +155,21 @@ export async function runPrompt(prompt: string, options?: RunPromptOptions): Pro
  * Uses activity-based timeout that resets on each chunk.
  */
 export async function* streamPrompt(prompt: string, options?: RunPromptOptions): AsyncGenerator<string> {
-  const args = buildCliArgs(options);
+  const args = buildCliArgs(prompt, options);
   const env = buildCliEnv();
+  const hasInput = !!options?.input;
 
   const proc = spawn(cliPath, args, {
     env,
     cwd: options?.cwd,
-    stdio: ['pipe', 'pipe', 'pipe'],
+    stdio: [hasInput ? 'pipe' : 'ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
 
-  // Pipe prompt via stdin
-  proc.stdin.write(buildStdinContent(prompt, options?.input));
-  proc.stdin.end();
+  // Send input via stdin only when provided
+  if (hasInput && proc.stdin) {
+    proc.stdin.end(options!.input);
+  }
 
   const activityTimeout = options?.timeout ?? 120_000;
   let timedOut = false;
@@ -174,14 +186,14 @@ export async function* streamPrompt(prompt: string, options?: RunPromptOptions):
   resetTimer();
 
   let stderr = '';
-  proc.stderr.on('data', (data: Buffer) => {
+  proc.stderr!.on('data', (data: Buffer) => {
     stderr += data.toString();
     resetTimer();
   });
 
   try {
     // Node readable streams are async iterable — yields Buffer chunks as they arrive
-    for await (const chunk of proc.stdout) {
+    for await (const chunk of proc.stdout!) {
       resetTimer();
       yield chunk.toString();
     }
