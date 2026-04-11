@@ -81,6 +81,7 @@ function TaskRow({ task, projectName, projectPath, showProjectBadge, projectMap,
   }
 
   const age = task.createdAt ? formatDistanceToNow(new Date(task.createdAt), { addSuffix: false }) : ''
+  const doneDate = task.status === 'done' && task.doneAt ? new Date(task.doneAt) : null
 
   return (
     <div className={cn(
@@ -129,7 +130,18 @@ function TaskRow({ task, projectName, projectPath, showProjectBadge, projectMap,
         )
       )}
 
-      <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right">{age}</span>
+      {doneDate ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="text-[10px] text-green-500/70 shrink-0 text-right">
+              {doneDate.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+            </span>
+          </TooltipTrigger>
+          <TooltipContent>Completed {formatDistanceToNow(doneDate, { addSuffix: true })}</TooltipContent>
+        </Tooltip>
+      ) : (
+        <span className="text-[10px] text-muted-foreground shrink-0 w-12 text-right">{age}</span>
+      )}
 
       <div className="hidden group-hover:flex items-center gap-0.5 absolute right-2 top-1/2 -translate-y-1/2 bg-card rounded-md shadow-sm border px-0.5 py-0.5 z-10">
         <Tooltip>
