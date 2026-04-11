@@ -7,6 +7,7 @@ import {
   listSessions,
   listAiSessions,
   writeToSession,
+  writeChunked,
   resizeSession,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
@@ -146,7 +147,13 @@ export async function terminalWsRoutes(app: FastifyInstance) {
           const msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
           switch (msg.type) {
             case 'input':
-              session.pty.write(msg.data);
+              // Large inputs (e.g. clipboard paste) must be chunked to avoid
+              // ConPTY buffer overflow on Windows which silently drops data.
+              if (msg.data.length > 256) {
+                writeChunked(sessionId, msg.data, { sendEnter: false });
+              } else {
+                session.pty.write(msg.data);
+              }
               break;
             case 'binary':
               // Binary data from TUI apps (mouse reports, etc.)
