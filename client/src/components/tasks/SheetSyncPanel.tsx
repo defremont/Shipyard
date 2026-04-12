@@ -161,13 +161,14 @@ function resp(data) {
 
 interface SheetSyncPanelProps {
   projectId: string
+  milestoneId?: string
   tasks: Task[]
 }
 
-export function SheetSyncPanel({ projectId, tasks }: SheetSyncPanelProps) {
-  const { config, save, clear } = useSyncConfig(projectId)
-  const push = useSyncPush(projectId)
-  const pull = useSyncPull(projectId)
+export function SheetSyncPanel({ projectId, milestoneId, tasks }: SheetSyncPanelProps) {
+  const { config, save, clear } = useSyncConfig(projectId, milestoneId)
+  const push = useSyncPush(projectId, milestoneId)
+  const pull = useSyncPull(projectId, milestoneId)
   const test = useSyncTest()
   const setup = useSyncSetup()
 

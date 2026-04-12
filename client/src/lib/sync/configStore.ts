@@ -97,6 +97,25 @@ export function hasAnySyncConfig(projectId: string): ProviderId[] {
     if (config?.enabled) configured.push(p)
   }
 
+  // Google Sheets configs are now stored per-milestone under
+  // `shipyard:sync:m:${projectId}:${milestoneId}`. Surface the project as
+  // configured if *any* milestone has a sheet URL set.
+  if (!configured.includes('google-sheets')) {
+    const prefix = `shipyard:sync:m:${projectId}:`
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (!key || !key.startsWith(prefix)) continue
+        const raw = localStorage.getItem(key)
+        if (!raw) continue
+        try {
+          const cfg = JSON.parse(raw)
+          if (cfg?.url) { configured.push('google-sheets'); break }
+        } catch { /* ignore */ }
+      }
+    } catch { /* ignore */ }
+  }
+
   return configured
 }
 

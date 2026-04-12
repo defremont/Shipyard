@@ -285,7 +285,7 @@ function SortableTaskItem({ task, projectName, projectPath, onEdit, onView, onAi
 
 export function TaskBoard({ projectId, projectName, projectPath, milestoneId, onMilestoneChange, onOpenSettings }: TaskBoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId, milestoneId)
-  const { isSyncing } = useAutoSync(projectId)
+  const { isSyncing } = useAutoSync(projectId, milestoneId)
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings, staleTime: Infinity })
   const { data: terminalStatus } = useTerminalStatus()
   const updateTask = useUpdateTask()
@@ -522,7 +522,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           )}
         </h2>
         <div className="flex flex-wrap items-center gap-1">
-          <SheetSyncPanel projectId={projectId} tasks={tasks || []} />
+          <SheetSyncPanel projectId={projectId} milestoneId={milestoneId} tasks={tasks || []} />
           <div className="flex items-center border rounded-md">
             <Tooltip>
               <TooltipTrigger asChild>
