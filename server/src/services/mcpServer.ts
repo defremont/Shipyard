@@ -186,6 +186,115 @@ export async function listMilestones(projectId: string): Promise<McpToolResult> 
   return { content: [{ type: 'text', text: compact(milestones.map(m => ({ id: m.id, name: m.name, status: m.status }))) }] };
 }
 
+// ── Agent Loop Tools ────────────────────────────────────
+// These tools encode the typical "what do I work on → start → progress → done"
+// loop so any CLI agent can drive task state in a few atomic calls.
+
+const PRIORITY_RANK: Record<Task['priority'], number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+
+export async function nextTask(projectId?: string, milestoneId?: string): Promise<McpToolResult> {
+  const tasks = projectId
+    ? await taskStore.getTasks(projectId, milestoneId)
+    : await taskStore.getAllTasks();
+  const ready = tasks
+    .filter(t => t.status === 'in_progress' || t.status === 'todo')
+    .sort((a, b) => {
+      // in_progress first, then todo; then by priority; then by order
+      if (a.status !== b.status) return a.status === 'in_progress' ? -1 : 1;
+      const p = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+      if (p !== 0) return p;
+      return a.order - b.order;
+    });
+  if (ready.length === 0) {
+    return { content: [{ type: 'text', text: compact({ ok: true, task: null, message: 'No ready tasks' }) }] };
+  }
+  const t = ready[0];
+  return {
+    content: [{
+      type: 'text',
+      text: compact({
+        ok: true,
+        task: {
+          id: t.id,
+          projectId: t.projectId,
+          ...(t.milestoneId ? { milestoneId: t.milestoneId } : {}),
+          title: t.title,
+          description: t.description,
+          prompt: t.prompt,
+          status: t.status,
+          priority: t.priority,
+        },
+      }),
+    }],
+  };
+}
+
+export async function startTask(projectId: string, taskId: string): Promise<McpToolResult> {
+  const existing = await taskStore.getTask(projectId, taskId);
+  if (!existing) {
+    return { content: [{ type: 'text', text: `Task "${taskId}" not found` }], isError: true };
+  }
+  const updated = await taskStore.updateTask(projectId, taskId, { status: 'in_progress' });
+  if (!updated) {
+    return { content: [{ type: 'text', text: `Failed to start task "${taskId}"` }], isError: true };
+  }
+  return {
+    content: [{
+      type: 'text',
+      text: compact({
+        ok: true,
+        task: {
+          id: updated.id,
+          projectId: updated.projectId,
+          title: updated.title,
+          description: updated.description,
+          prompt: updated.prompt,
+          status: updated.status,
+          priority: updated.priority,
+        },
+      }),
+    }],
+  };
+}
+
+function appendPromptSection(existing: string | undefined, header: string, body: string): string {
+  const base = (existing || '').trimEnd();
+  const section = `${header}\n${body.trim()}`;
+  return base ? `${base}\n\n${section}` : section;
+}
+
+export async function logTaskProgress(projectId: string, taskId: string, note: string): Promise<McpToolResult> {
+  const existing = await taskStore.getTask(projectId, taskId);
+  if (!existing) {
+    return { content: [{ type: 'text', text: `Task "${taskId}" not found` }], isError: true };
+  }
+  const ts = new Date().toISOString().replace('T', ' ').slice(0, 16);
+  const nextPrompt = appendPromptSection(existing.prompt, `— Note ${ts}`, note);
+  const updated = await taskStore.updateTask(projectId, taskId, { prompt: nextPrompt });
+  if (!updated) {
+    return { content: [{ type: 'text', text: `Failed to log progress for "${taskId}"` }], isError: true };
+  }
+  return { content: [{ type: 'text', text: compact({ ok: true, id: updated.id, promptLength: nextPrompt.length }) }] };
+}
+
+export async function completeTask(projectId: string, taskId: string, summary?: string): Promise<McpToolResult> {
+  const existing = await taskStore.getTask(projectId, taskId);
+  if (!existing) {
+    return { content: [{ type: 'text', text: `Task "${taskId}" not found` }], isError: true };
+  }
+  const nextPrompt = summary
+    ? appendPromptSection(existing.prompt, '— Summary', summary)
+    : existing.prompt;
+  const updated = await taskStore.updateTask(projectId, taskId, {
+    status: 'done',
+    ...(summary ? { prompt: nextPrompt } : {}),
+  });
+  if (!updated) {
+    return { content: [{ type: 'text', text: `Failed to complete task "${taskId}"` }], isError: true };
+  }
+  return { content: [{ type: 'text', text: compact({ ok: true, id: updated.id, title: updated.title, status: updated.status }) }] };
+}
+
 export async function searchTasks(query: string): Promise<McpToolResult> {
   const all = await taskStore.getAllTasks();
   const q = query.toLowerCase();
@@ -330,6 +439,56 @@ export const MCP_TOOLS = [
     },
   },
   {
+    name: 'next_task',
+    description: 'Return the highest-priority ready task (in_progress or todo, ranked by status → priority → order). Ideal first call for any agent loop. Returns full task with description and prompt.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'Optional: restrict to a single project' },
+        milestoneId: { type: 'string', description: 'Optional: restrict to a milestone (requires projectId)' },
+      },
+      required: [] as string[],
+    },
+  },
+  {
+    name: 'start_task',
+    description: 'Move a task to in_progress and return its full content (title, description, prompt). Use this as step 1 when an agent begins work — replaces update_task for this common case.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'The project ID' },
+        taskId: { type: 'string', description: 'The task ID' },
+      },
+      required: ['projectId', 'taskId'],
+    },
+  },
+  {
+    name: 'log_task_progress',
+    description: 'Append a timestamped note to the task prompt without changing status. Use during long work to keep a running log (files touched, decisions made, blockers).',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'The project ID' },
+        taskId: { type: 'string', description: 'The task ID' },
+        note: { type: 'string', description: 'Progress note to append' },
+      },
+      required: ['projectId', 'taskId', 'note'],
+    },
+  },
+  {
+    name: 'complete_task',
+    description: 'Move a task to done and optionally append an implementation summary to the prompt. Use this as the final call when the agent finishes work.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: { type: 'string', description: 'The project ID' },
+        taskId: { type: 'string', description: 'The task ID' },
+        summary: { type: 'string', description: 'Optional summary of what was implemented' },
+      },
+      required: ['projectId', 'taskId'],
+    },
+  },
+  {
     name: 'search_tasks',
     description: 'Search tasks by keyword (returns slim results, use get_task for details)',
     inputSchema: {
@@ -366,6 +525,14 @@ export async function handleToolCall(name: string, args: Record<string, any>): P
       return getGitStatus(args.projectId);
     case 'get_git_log':
       return getGitLog(args.projectId, args.limit);
+    case 'next_task':
+      return nextTask(args.projectId, args.milestoneId);
+    case 'start_task':
+      return startTask(args.projectId, args.taskId);
+    case 'log_task_progress':
+      return logTaskProgress(args.projectId, args.taskId, args.note);
+    case 'complete_task':
+      return completeTask(args.projectId, args.taskId, args.summary);
     case 'search_tasks':
       return searchTasks(args.query);
     default:

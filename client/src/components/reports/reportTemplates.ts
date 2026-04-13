@@ -43,16 +43,16 @@ export interface ReportRenderOptions {
 
 const STATUS_LABEL: Record<Task['status'], string> = {
   backlog: 'Backlog',
-  todo: 'A fazer',
-  in_progress: 'Em andamento',
-  done: 'Concluído',
+  todo: 'To do',
+  in_progress: 'In progress',
+  done: 'Done',
 }
 
 const PRIORITY_LABEL: Record<Task['priority'], string> = {
-  urgent: 'Urgente',
-  high: 'Alta',
-  medium: 'Média',
-  low: 'Baixa',
+  urgent: 'Urgent',
+  high: 'High',
+  medium: 'Medium',
+  low: 'Low',
 }
 
 function escapeHtml(s: string): string {
@@ -67,7 +67,7 @@ function escapeHtml(s: string): string {
 function fmtDate(iso?: string): string {
   if (!iso) return ''
   try {
-    return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    return new Date(iso).toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' })
   } catch {
     return iso.slice(0, 10)
   }
@@ -75,7 +75,7 @@ function fmtDate(iso?: string): string {
 
 function fmtDateTime(iso: string): string {
   try {
-    return new Date(iso).toLocaleString('pt-BR')
+    return new Date(iso).toLocaleString('en-US')
   } catch {
     return iso
   }
@@ -158,8 +158,6 @@ const PRINT_CSS = `
   .commits .hash { color: var(--in-progress); font-weight: 600; }
   .commits .when { color: var(--fg-subtle); }
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 9pt; color: var(--fg-subtle); text-align: center; }
-  section.ai-summary, section.ai-highlights, section.ai-client-intro, section.ai-narrative { background: var(--bg-alt); border: 1px solid var(--border); border-radius: 6px; padding: 16px 20px; margin: 16px 0; }
-  section.ai-summary h2, section.ai-highlights h2, section.ai-client-intro h2, section.ai-narrative h2 { margin-top: 0; border-bottom: none; padding-bottom: 0; }
   @media print {
     @page { size: A4; margin: 18mm; }
     html, body { background: white; }
@@ -170,17 +168,17 @@ const PRINT_CSS = `
 `
 
 function renderCover(data: ReportData, opts: ReportRenderOptions): string {
-  const title = opts.title || (data.milestone ? `${data.project.name} — ${data.milestone.name}` : `Relatório: ${data.project.name}`)
+  const title = opts.title || (data.milestone ? `${data.project.name} — ${data.milestone.name}` : `Report: ${data.project.name}`)
   const metaParts: string[] = []
-  metaParts.push(`<span><strong>Gerado em:</strong> ${escapeHtml(fmtDateTime(data.generatedAt))}</span>`)
+  metaParts.push(`<span><strong>Generated:</strong> ${escapeHtml(fmtDateTime(data.generatedAt))}</span>`)
   if (data.period?.from || data.period?.to) {
-    metaParts.push(`<span><strong>Período:</strong> ${fmtDate(data.period.from) || '—'} a ${fmtDate(data.period.to) || 'hoje'}</span>`)
+    metaParts.push(`<span><strong>Period:</strong> ${fmtDate(data.period.from) || '—'} to ${fmtDate(data.period.to) || 'today'}</span>`)
   }
-  if (opts.clientName) metaParts.push(`<span><strong>Cliente:</strong> ${escapeHtml(opts.clientName)}</span>`)
+  if (opts.clientName) metaParts.push(`<span><strong>Client:</strong> ${escapeHtml(opts.clientName)}</span>`)
   if (data.project.gitBranch) metaParts.push(`<span><strong>Branch:</strong> ${escapeHtml(data.project.gitBranch)}</span>`)
   return `
     <header class="cover">
-      <div class="eyebrow">${escapeHtml(data.project.category || 'Relatório de Progresso')}</div>
+      <div class="eyebrow">${escapeHtml(data.project.category || 'Progress Report')}</div>
       <h1>${escapeHtml(title)}</h1>
       ${data.milestone?.description ? `<p>${escapeHtml(data.milestone.description)}</p>` : ''}
       <div class="meta">${metaParts.join('')}</div>
@@ -192,12 +190,12 @@ function renderMetrics(data: ReportData): string {
   const m = data.metrics
   return `
     <section class="metrics">
-      <h2>Visão Geral</h2>
+      <h2>Overview</h2>
       <div class="metrics-grid">
         <div class="metric"><div class="label">Total</div><div class="value">${m.total}</div></div>
-        <div class="metric"><div class="label">Concluídas</div><div class="value">${m.byStatus.done}</div></div>
-        <div class="metric"><div class="label">Em andamento</div><div class="value">${m.byStatus.in_progress}</div></div>
-        <div class="metric"><div class="label">Progresso</div><div class="value">${m.completionRate}%</div></div>
+        <div class="metric"><div class="label">Done</div><div class="value">${m.byStatus.done}</div></div>
+        <div class="metric"><div class="label">In progress</div><div class="value">${m.byStatus.in_progress}</div></div>
+        <div class="metric"><div class="label">Progress</div><div class="value">${m.completionRate}%</div></div>
       </div>
       <div class="progress"><div style="width:${m.completionRate}%"></div></div>
     </section>
@@ -212,7 +210,7 @@ function renderTaskCard(t: Task, includeTech: boolean): string {
     ? `<p class="tech">${escapeHtml(t.prompt.slice(0, 600))}${t.prompt.length > 600 ? '…' : ''}</p>`
     : ''
   const when = t.status === 'done' && t.doneAt
-    ? `<div class="when">Concluída em ${fmtDate(t.doneAt)}</div>`
+    ? `<div class="when">Completed on ${fmtDate(t.doneAt)}</div>`
     : ''
   return `
     <div class="task">
@@ -246,7 +244,7 @@ function renderKanban(data: ReportData, opts: ReportRenderOptions): string {
     .join('')
   return `
     <section class="kanban">
-      <h2>Tarefas</h2>
+      <h2>Tasks</h2>
       <div class="board">${columns}</div>
     </section>
   `
@@ -259,7 +257,7 @@ function renderTimeline(data: ReportData, opts: ReportRenderOptions): string {
   if (done.length === 0) return ''
   return `
     <section class="timeline">
-      <h2>Entregas do Período</h2>
+      <h2>Deliveries in Period</h2>
       ${done.map(t => renderTaskCard(t, opts.includeTechnicalDetails)).join('')}
     </section>
   `
@@ -282,16 +280,15 @@ function renderCommits(data: ReportData): string {
 export function renderReportHtml(data: ReportData, opts: ReportRenderOptions): string {
   const parts: string[] = []
   if (opts.sections.cover) parts.push(renderCover(data, opts))
-  if (opts.sections.summary) parts.push(`<!-- AI sections (summary, highlights, client intro, narrative) will be inserted here -->`)
   if (opts.sections.metrics) parts.push(renderMetrics(data))
   if (opts.sections.kanban) parts.push(renderKanban(data, opts))
   if (opts.sections.timeline) parts.push(renderTimeline(data, opts))
   if (opts.sections.commits) parts.push(renderCommits(data))
-  parts.push(`<footer class="footer">Gerado por Shipyard em ${escapeHtml(fmtDateTime(data.generatedAt))}</footer>`)
+  parts.push(`<footer class="footer">Generated by Shipyard on ${escapeHtml(fmtDateTime(data.generatedAt))}</footer>`)
 
-  const title = opts.title || `${data.project.name} — Relatório`
+  const title = opts.title || `${data.project.name} — Report`
   return `<!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -308,7 +305,6 @@ ${parts.join('\n')}
 
 export const DEFAULT_SECTIONS: ReportSections = {
   cover: true,
-  summary: true,
   metrics: true,
   kanban: true,
   timeline: false,
