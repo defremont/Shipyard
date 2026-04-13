@@ -64,6 +64,28 @@ export function useRenameFile() {
   })
 }
 
+export function useCreateFile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, parentPath, name, type }: { projectId: string; parentPath: string; name: string; type: 'file' | 'dir' }) =>
+      api.createFile(projectId, parentPath, name, type),
+    onSuccess: (_data, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ['files', 'tree', projectId] })
+    },
+  })
+}
+
+export function useCopyFile() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, sourcePath, destParentPath, newName }: { projectId: string; sourcePath: string; destParentPath?: string; newName?: string }) =>
+      api.copyFile(projectId, sourcePath, destParentPath, newName),
+    onSuccess: (_data, { projectId }) => {
+      queryClient.invalidateQueries({ queryKey: ['files', 'tree', projectId] })
+    },
+  })
+}
+
 export function useSaveFile() {
   const queryClient = useQueryClient()
   return useMutation({

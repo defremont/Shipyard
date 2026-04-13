@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { readdir, stat, readFile, writeFile, unlink, rm, rename } from 'fs/promises';
+import { readdir, stat, readFile, writeFile, unlink, rm, rename, mkdir, copyFile } from 'fs/promises';
 import { join, resolve, extname, relative, sep, dirname, basename } from 'path';
 import { getProjects } from '../services/projectDiscovery.js';
 import { openFolder } from '../services/terminalLauncher.js';
@@ -570,6 +570,163 @@ export async function fileRoutes(app: FastifyInstance) {
       } catch (err: any) {
         if (err.statusCode) return reply.status(err.statusCode).send({ error: err.message });
         log.error('files', `Failed to rename: ${relPath}`, err.message, request.params.projectId);
+        return reply.status(500).send({ error: err.message });
+      }
+    }
+  );
+
+  // Create file or directory
+  app.post<{ Params: { projectId: string }; Body: { parentPath?: string; name: string; type: 'file' | 'dir' } }>(
+    '/api/projects/:projectId/files/create',
+    async (request, reply) => {
+      const projectPath = await getProjectPath(request.params.projectId);
+      if (!projectPath) return reply.status(404).send({ error: 'Project not found' });
+
+      const { parentPath = '', name, type } = request.body || {} as any;
+      if (!name || !name.trim()) return reply.status(400).send({ error: 'name is required' });
+      if (type !== 'file' && type !== 'dir') return reply.status(400).send({ error: 'type must be file or dir' });
+
+      const trimmedName = name.trim();
+      if (trimmedName.includes('/') || trimmedName.includes('\\')) {
+        return reply.status(400).send({ error: 'Name cannot contain path separators' });
+      }
+      if (trimmedName === '.' || trimmedName === '..') {
+        return reply.status(400).send({ error: 'Invalid name' });
+      }
+
+      let parentResolved: string;
+      try {
+        parentResolved = validatePath(projectPath, parentPath);
+      } catch (e: any) {
+        return reply.status(e.statusCode || 400).send({ error: e.message });
+      }
+
+      const newPath = join(parentResolved, trimmedName);
+      try {
+        validatePath(projectPath, relative(projectPath, newPath));
+      } catch (e: any) {
+        return reply.status(e.statusCode || 400).send({ error: e.message });
+      }
+
+      try {
+        try {
+          await stat(newPath);
+          return reply.status(409).send({ error: 'A file or folder with that name already exists' });
+        } catch (e: any) {
+          if (e.code !== 'ENOENT') throw e;
+        }
+
+        if (type === 'dir') {
+          await mkdir(newPath, { recursive: false });
+        } else {
+          await writeFile(newPath, '', 'utf8');
+        }
+
+        const newRelPath = relative(projectPath, newPath).replace(/\\/g, '/');
+        log.info('files', `Created ${type}: ${newRelPath}`, undefined, request.params.projectId);
+        return { success: true, path: newRelPath };
+      } catch (err: any) {
+        log.error('files', `Failed to create ${type}: ${trimmedName}`, err.message, request.params.projectId);
+        return reply.status(500).send({ error: err.message });
+      }
+    }
+  );
+
+  // Copy file or directory (also used for paste / duplicate)
+  app.post<{ Params: { projectId: string }; Body: { sourcePath: string; destParentPath?: string; newName?: string } }>(
+    '/api/projects/:projectId/files/copy',
+    async (request, reply) => {
+      const projectPath = await getProjectPath(request.params.projectId);
+      if (!projectPath) return reply.status(404).send({ error: 'Project not found' });
+
+      const { sourcePath, destParentPath, newName } = request.body || {} as any;
+      if (!sourcePath) return reply.status(400).send({ error: 'sourcePath is required' });
+
+      let sourceResolved: string;
+      try {
+        sourceResolved = validatePath(projectPath, sourcePath);
+      } catch (e: any) {
+        return reply.status(e.statusCode || 400).send({ error: e.message });
+      }
+
+      let sourceStat;
+      try {
+        sourceStat = await stat(sourceResolved);
+      } catch {
+        return reply.status(404).send({ error: 'Source not found' });
+      }
+
+      const parentRel = destParentPath !== undefined
+        ? destParentPath
+        : relative(projectPath, dirname(sourceResolved)).replace(/\\/g, '/');
+
+      let parentResolved: string;
+      try {
+        parentResolved = validatePath(projectPath, parentRel);
+      } catch (e: any) {
+        return reply.status(e.statusCode || 400).send({ error: e.message });
+      }
+
+      // Determine a non-conflicting target name
+      const baseName = (newName && newName.trim()) || basename(sourceResolved);
+      if (baseName.includes('/') || baseName.includes('\\')) {
+        return reply.status(400).send({ error: 'Name cannot contain path separators' });
+      }
+
+      async function exists(p: string) {
+        try { await stat(p); return true; } catch { return false; }
+      }
+
+      // Auto-suffix if target exists (for duplicate / same-folder paste)
+      async function uniqueName(parent: string, desired: string, isDir: boolean) {
+        const target = join(parent, desired);
+        if (!(await exists(target))) return desired;
+        const ext = isDir ? '' : extname(desired);
+        const stem = isDir ? desired : desired.slice(0, desired.length - ext.length);
+        for (let i = 1; i < 1000; i++) {
+          const candidate = `${stem} copy${i === 1 ? '' : ' ' + i}${ext}`;
+          if (!(await exists(join(parent, candidate)))) return candidate;
+        }
+        return `${stem} copy ${Date.now()}${ext}`;
+      }
+
+      const finalName = await uniqueName(parentResolved, baseName, sourceStat.isDirectory());
+      const destResolved = join(parentResolved, finalName);
+
+      try {
+        validatePath(projectPath, relative(projectPath, destResolved));
+      } catch (e: any) {
+        return reply.status(e.statusCode || 400).send({ error: e.message });
+      }
+
+      // Prevent copying a directory into itself
+      if (sourceStat.isDirectory()) {
+        const srcNorm = resolve(sourceResolved) + sep;
+        if ((resolve(destResolved) + sep).startsWith(srcNorm)) {
+          return reply.status(400).send({ error: 'Cannot copy a folder into itself' });
+        }
+      }
+
+      async function copyRecursive(src: string, dest: string) {
+        const st = await stat(src);
+        if (st.isDirectory()) {
+          await mkdir(dest, { recursive: false });
+          const entries = await readdir(src, { withFileTypes: true });
+          for (const e of entries) {
+            await copyRecursive(join(src, e.name), join(dest, e.name));
+          }
+        } else {
+          await copyFile(src, dest);
+        }
+      }
+
+      try {
+        await copyRecursive(sourceResolved, destResolved);
+        const newRelPath = relative(projectPath, destResolved).replace(/\\/g, '/');
+        log.info('files', `Copied: ${sourcePath} → ${newRelPath}`, undefined, request.params.projectId);
+        return { success: true, path: newRelPath };
+      } catch (err: any) {
+        log.error('files', `Failed to copy: ${sourcePath}`, err.message, request.params.projectId);
         return reply.status(500).send({ error: err.message });
       }
     }

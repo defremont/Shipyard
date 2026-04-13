@@ -221,6 +221,16 @@ export const api = {
       `/projects/${projectId}/files/rename`,
       { method: 'POST', body: JSON.stringify({ path: relPath, newName }) }
     ),
+  createFile: (projectId: string, parentPath: string, name: string, type: 'file' | 'dir') =>
+    request<{ success: boolean; path: string }>(
+      `/projects/${projectId}/files/create`,
+      { method: 'POST', body: JSON.stringify({ parentPath, name, type }) }
+    ),
+  copyFile: (projectId: string, sourcePath: string, destParentPath?: string, newName?: string) =>
+    request<{ success: boolean; path: string }>(
+      `/projects/${projectId}/files/copy`,
+      { method: 'POST', body: JSON.stringify({ sourcePath, destParentPath, newName }) }
+    ),
 
   // Reports
   getReportData: (projectId: string, opts: { milestoneId?: string; from?: string; to?: string; includeCommits?: boolean; status?: string[] }) => {

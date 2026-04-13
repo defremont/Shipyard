@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Pencil, Trash2, FolderOpen, Loader2, Copy, FolderTree, PenLine } from 'lucide-react'
+import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Pencil, Trash2, FolderOpen, Loader2, Copy, FolderTree, PenLine, FilePlus, FolderPlus, Scissors, ClipboardPaste, Files } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -7,7 +7,7 @@ import {
   AlertDialogContent, AlertDialogDescription, AlertDialogFooter,
   AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { useFileTree, useDeleteFile, useOpenFileFolder, useRenameFile, type FileEntry } from '@/hooks/useFiles'
+import { useFileTree, useDeleteFile, useOpenFileFolder, useRenameFile, useCreateFile, useCopyFile, type FileEntry } from '@/hooks/useFiles'
 import { FileIcon } from './FileIcon'
 import { FilePreviewDialog } from './FilePreviewDialog'
 import { toast } from 'sonner'
@@ -20,6 +20,13 @@ interface FileExplorerProps {
   activeFilePath?: string | null
 }
 
+type FileAction = 'delete' | 'open-folder' | 'copy-path' | 'rename' | 'copy' | 'cut' | 'paste' | 'duplicate' | 'new-file' | 'new-folder'
+
+interface CreatingState {
+  parentPath: string // '' for root
+  type: 'file' | 'dir'
+}
+
 interface TreeNodeProps {
   entry: FileEntry
   projectId: string
@@ -27,16 +34,20 @@ interface TreeNodeProps {
   expanded: Set<string>
   onToggle: (path: string) => void
   onPreview: (path: string) => void
-  onContextAction: (entry: FileEntry, action: 'delete' | 'open-folder' | 'copy-path' | 'rename') => void
+  onContextAction: (entry: FileEntry, action: FileAction) => void
   onOpenInEditor?: (path: string, name: string, extension: string) => void
   renamingPath: string | null
   onStartRename: (path: string) => void
   onFinishRename: (entry: FileEntry, newName: string) => void
   onCancelRename: () => void
   activeFilePath?: string | null
+  hasClipboard: boolean
+  creating: CreatingState | null
+  onFinishCreate: (parentPath: string, type: 'file' | 'dir', name: string) => void
+  onCancelCreate: () => void
 }
 
-function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onContextAction, onOpenInEditor, renamingPath, onStartRename, onFinishRename, onCancelRename, activeFilePath }: TreeNodeProps) {
+function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onContextAction, onOpenInEditor, renamingPath, onStartRename, onFinishRename, onCancelRename, activeFilePath, hasClipboard, creating, onFinishCreate, onCancelCreate }: TreeNodeProps) {
   const isOpen = expanded.has(entry.path)
   const { data, isLoading } = useFileTree(projectId, entry.path, entry.type === 'dir' && isOpen)
   const [contextOpen, setContextOpen] = useState(false)
@@ -143,7 +154,7 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
               <MoreHorizontal className="h-3 w-3" />
             </button>
           </PopoverTrigger>
-          <PopoverContent className="w-40 p-1" side="right" align="start">
+          <PopoverContent className="w-44 p-1" side="right" align="start">
             {entry.type === 'file' && onOpenInEditor && entry.mimeHint !== 'application/octet-stream' && !entry.mimeHint?.startsWith('image/') && (
               <button
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
@@ -160,6 +171,50 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
                 <Eye className="h-3.5 w-3.5" /> Preview
               </button>
             )}
+            {entry.type === 'dir' && (
+              <>
+                <button
+                  className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
+                  onClick={() => { setContextOpen(false); onContextAction(entry, 'new-file') }}
+                >
+                  <FilePlus className="h-3.5 w-3.5" /> New File
+                </button>
+                <button
+                  className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
+                  onClick={() => { setContextOpen(false); onContextAction(entry, 'new-folder') }}
+                >
+                  <FolderPlus className="h-3.5 w-3.5" /> New Folder
+                </button>
+              </>
+            )}
+            <div className="h-px bg-border my-1" />
+            <button
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
+              onClick={() => { setContextOpen(false); onContextAction(entry, 'copy') }}
+            >
+              <Copy className="h-3.5 w-3.5" /> Copy
+            </button>
+            <button
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
+              onClick={() => { setContextOpen(false); onContextAction(entry, 'cut') }}
+            >
+              <Scissors className="h-3.5 w-3.5" /> Cut
+            </button>
+            {hasClipboard && (
+              <button
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
+                onClick={() => { setContextOpen(false); onContextAction(entry, 'paste') }}
+              >
+                <ClipboardPaste className="h-3.5 w-3.5" /> Paste {entry.type === 'dir' ? 'Into' : 'Here'}
+              </button>
+            )}
+            <button
+              className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
+              onClick={() => { setContextOpen(false); onContextAction(entry, 'duplicate') }}
+            >
+              <Files className="h-3.5 w-3.5" /> Duplicate
+            </button>
+            <div className="h-px bg-border my-1" />
             <button
               className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded hover:bg-accent transition-colors"
               onClick={() => { setContextOpen(false); onContextAction(entry, 'open-folder') }}
@@ -192,6 +247,14 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
       {/* Children */}
       {entry.type === 'dir' && isOpen && (
         <div>
+          {creating && creating.parentPath === entry.path && (
+            <CreateInputRow
+              depth={depth + 1}
+              type={creating.type}
+              onSubmit={(name) => onFinishCreate(entry.path, creating.type, name)}
+              onCancel={onCancelCreate}
+            />
+          )}
           {isLoading ? (
             <div className="flex items-center gap-1 py-1 text-xs text-muted-foreground" style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}>
               <Loader2 className="h-3 w-3 animate-spin" />
@@ -214,16 +277,50 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
                 onFinishRename={onFinishRename}
                 onCancelRename={onCancelRename}
                 activeFilePath={activeFilePath}
+                hasClipboard={hasClipboard}
+                creating={creating}
+                onFinishCreate={onFinishCreate}
+                onCancelCreate={onCancelCreate}
               />
             ))
           )}
-          {!isLoading && data?.entries.length === 0 && (
+          {!isLoading && data?.entries.length === 0 && !(creating && creating.parentPath === entry.path) && (
             <div className="text-[10px] text-muted-foreground/40 py-0.5" style={{ paddingLeft: `${(depth + 1) * 12 + 8}px` }}>
               empty
             </div>
           )}
         </div>
       )}
+    </div>
+  )
+}
+
+function CreateInputRow({ depth, type, onSubmit, onCancel }: { depth: number; type: 'file' | 'dir'; onSubmit: (name: string) => void; onCancel: () => void }) {
+  const [value, setValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+  useEffect(() => { inputRef.current?.focus() }, [])
+  const submit = () => {
+    const trimmed = value.trim()
+    if (!trimmed) { onCancel(); return }
+    onSubmit(trimmed)
+  }
+  return (
+    <div className="flex items-center gap-1 py-0.5 px-1 text-xs" style={{ paddingLeft: `${depth * 12 + 4}px` }}>
+      <span className="w-3.5 h-3.5 shrink-0" />
+      <FileIcon name={value || (type === 'dir' ? 'new-folder' : 'new-file')} extension="" type={type} isOpen={false} className="h-3.5 w-3.5 shrink-0" />
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter') submit()
+          if (e.key === 'Escape') onCancel()
+          e.stopPropagation()
+        }}
+        onBlur={submit}
+        placeholder={type === 'dir' ? 'folder name' : 'file name'}
+        className="flex-1 min-w-0 bg-background border border-primary/50 rounded px-1 py-0 text-xs outline-none focus:border-primary"
+      />
     </div>
   )
 }
@@ -235,11 +332,15 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ path: string; name: string; type: string } | null>(null)
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
+  const [creating, setCreating] = useState<CreatingState | null>(null)
+  const [clipboard, setClipboard] = useState<{ path: string; name: string; op: 'copy' | 'cut' } | null>(null)
 
   const { data, isLoading } = useFileTree(projectId, '', sectionOpen)
   const deleteFile = useDeleteFile()
   const openFileFolder = useOpenFileFolder()
   const renameFile = useRenameFile()
+  const createFile = useCreateFile()
+  const copyFileMut = useCopyFile()
 
   const handleToggle = useCallback((path: string) => {
     setExpanded(prev => {
@@ -269,7 +370,34 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
     )
   }, [projectId, renameFile])
 
-  const handleContextAction = useCallback((entry: FileEntry, action: 'delete' | 'open-folder' | 'copy-path' | 'rename') => {
+  const parentOf = (p: string) => {
+    const idx = p.lastIndexOf('/')
+    return idx === -1 ? '' : p.slice(0, idx)
+  }
+
+  const doPaste = useCallback((destParentPath: string) => {
+    if (!clipboard) return
+    const { path, op } = clipboard
+    copyFileMut.mutate(
+      { projectId, sourcePath: path, destParentPath },
+      {
+        onSuccess: () => {
+          if (op === 'cut') {
+            deleteFile.mutate({ projectId, relPath: path }, {
+              onSuccess: () => toast.success('Moved'),
+              onError: (err) => toast.error(`Move failed: ${(err as Error).message}`),
+            })
+          } else {
+            toast.success('Pasted')
+          }
+          setClipboard(null)
+        },
+        onError: (err) => toast.error(`Paste failed: ${(err as Error).message}`),
+      }
+    )
+  }, [clipboard, copyFileMut, deleteFile, projectId])
+
+  const handleContextAction = useCallback((entry: FileEntry, action: FileAction) => {
     switch (action) {
       case 'delete':
         setDeleteTarget({ path: entry.path, name: entry.name, type: entry.type })
@@ -284,8 +412,55 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
       case 'rename':
         setRenamingPath(entry.path)
         break
+      case 'copy':
+        setClipboard({ path: entry.path, name: entry.name, op: 'copy' })
+        toast.success(`Copied ${entry.name}`)
+        break
+      case 'cut':
+        setClipboard({ path: entry.path, name: entry.name, op: 'cut' })
+        toast.success(`Cut ${entry.name}`)
+        break
+      case 'paste': {
+        const destParent = entry.type === 'dir' ? entry.path : parentOf(entry.path)
+        doPaste(destParent)
+        break
+      }
+      case 'duplicate':
+        copyFileMut.mutate(
+          { projectId, sourcePath: entry.path, destParentPath: parentOf(entry.path), newName: entry.name },
+          {
+            onSuccess: () => toast.success(`Duplicated ${entry.name}`),
+            onError: (err) => toast.error(`Duplicate failed: ${(err as Error).message}`),
+          }
+        )
+        break
+      case 'new-file':
+      case 'new-folder': {
+        const parent = entry.type === 'dir' ? entry.path : parentOf(entry.path)
+        if (entry.type === 'dir' && !expanded.has(entry.path)) {
+          setExpanded(prev => new Set(prev).add(entry.path))
+        }
+        setCreating({ parentPath: parent, type: action === 'new-file' ? 'file' : 'dir' })
+        break
+      }
     }
-  }, [projectId, openFileFolder])
+  }, [projectId, openFileFolder, copyFileMut, doPaste, expanded])
+
+  const handleFinishCreate = useCallback((parentPath: string, type: 'file' | 'dir', name: string) => {
+    createFile.mutate(
+      { projectId, parentPath, name, type },
+      {
+        onSuccess: () => {
+          toast.success(`Created ${name}`)
+          setCreating(null)
+        },
+        onError: (err) => {
+          toast.error(`Create failed: ${(err as Error).message}`)
+          setCreating(null)
+        },
+      }
+    )
+  }, [projectId, createFile])
 
   const confirmDelete = () => {
     if (!deleteTarget) return
@@ -307,18 +482,49 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
   return (
     <div className="space-y-2">
       {/* Section header */}
-      <button
-        className="flex items-center justify-between w-full group"
-        onClick={() => setSectionOpen(!sectionOpen)}
-      >
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-          <FolderTree className="h-3.5 w-3.5" />
-          Files
-        </h2>
-        <div className="flex items-center gap-1">
-          {sectionOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+      <div className="flex items-center justify-between w-full group">
+        <button
+          className="flex items-center gap-1.5 flex-1 text-left"
+          onClick={() => setSectionOpen(!sectionOpen)}
+        >
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+            <FolderTree className="h-3.5 w-3.5" />
+            Files
+          </h2>
+        </button>
+        <div className="flex items-center gap-0.5">
+          {sectionOpen && (
+            <>
+              <button
+                title="New File"
+                className="h-5 w-5 flex items-center justify-center rounded hover:bg-accent transition-colors"
+                onClick={(e) => { e.stopPropagation(); setSectionOpen(true); setCreating({ parentPath: '', type: 'file' }) }}
+              >
+                <FilePlus className="h-3 w-3 text-muted-foreground" />
+              </button>
+              <button
+                title="New Folder"
+                className="h-5 w-5 flex items-center justify-center rounded hover:bg-accent transition-colors"
+                onClick={(e) => { e.stopPropagation(); setSectionOpen(true); setCreating({ parentPath: '', type: 'dir' }) }}
+              >
+                <FolderPlus className="h-3 w-3 text-muted-foreground" />
+              </button>
+              {clipboard && (
+                <button
+                  title={`Paste ${clipboard.name} at root`}
+                  className="h-5 w-5 flex items-center justify-center rounded hover:bg-accent transition-colors"
+                  onClick={(e) => { e.stopPropagation(); doPaste('') }}
+                >
+                  <ClipboardPaste className="h-3 w-3 text-muted-foreground" />
+                </button>
+              )}
+            </>
+          )}
+          <button onClick={() => setSectionOpen(!sectionOpen)} className="h-5 w-5 flex items-center justify-center">
+            {sectionOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+          </button>
         </div>
-      </button>
+      </div>
 
       {/* Tree */}
       {sectionOpen && (
@@ -335,6 +541,14 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
           ) : (
             <>
               <div className="py-1">
+                {creating && creating.parentPath === '' && (
+                  <CreateInputRow
+                    depth={0}
+                    type={creating.type}
+                    onSubmit={(name) => handleFinishCreate('', creating.type, name)}
+                    onCancel={() => setCreating(null)}
+                  />
+                )}
                 {data?.entries.map(entry => (
                   <TreeNode
                     key={entry.path}
@@ -351,6 +565,10 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
                     onFinishRename={handleFinishRename}
                     onCancelRename={() => setRenamingPath(null)}
                     activeFilePath={activeFilePath}
+                    hasClipboard={!!clipboard}
+                    creating={creating}
+                    onFinishCreate={handleFinishCreate}
+                    onCancelCreate={() => setCreating(null)}
                   />
                 ))}
               </div>
