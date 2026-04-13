@@ -111,7 +111,7 @@ const PRINT_CSS = `
     -webkit-font-smoothing: antialiased;
   }
   .report {
-    max-width: 780px;
+    max-width: 1400px;
     margin: 0 auto;
     padding: 48px 56px;
   }
@@ -123,21 +123,48 @@ const PRINT_CSS = `
   ul, ol { margin: 8px 0; padding-left: 22px; color: var(--fg-muted); }
   li { margin: 3px 0; }
   strong { color: var(--fg); }
-  .cover { margin-bottom: 32px; }
+  .cover { margin-bottom: 24px; display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+  .cover .cover-left { flex: 1 1 auto; min-width: 0; }
+  .cover .cover-right { flex: 0 0 auto; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
   .cover .eyebrow { font-size: 9pt; text-transform: uppercase; letter-spacing: 0.12em; color: var(--fg-subtle); font-weight: 600; }
   .cover h1 { margin-top: 6px; }
-  .cover .meta { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 10pt; color: var(--fg-subtle); }
+  .cover .meta { margin-top: 10px; display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: 10pt; color: var(--fg-subtle); }
   .cover .meta span strong { color: var(--fg); font-weight: 600; }
-  .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0 4px; }
-  .metric { border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; background: var(--bg-alt); }
-  .metric .label { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.08em; color: var(--fg-subtle); font-weight: 600; }
-  .metric .value { font-size: 20pt; font-weight: 700; color: var(--fg); margin-top: 2px; }
-  .progress { height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; margin: 4px 0 16px; }
+  .metric-progress { position: relative; overflow: hidden; padding-right: 14px; }
+  .metric-progress .bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--border); }
+  .metric-progress .bar > span { display: block; height: 100%; background: linear-gradient(90deg, #10b981, #22c55e); border-radius: 0 2px 2px 0; }
+  .metrics-grid { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+  .metric { display: flex; align-items: baseline; gap: 6px; border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; background: var(--bg-alt); }
+  .metric .label { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.06em; color: var(--fg-subtle); font-weight: 600; }
+  .metric .value { font-size: 11pt; font-weight: 700; color: var(--fg); }
+  .progress { height: 5px; background: var(--border); border-radius: 3px; overflow: hidden; margin: 4px 0 12px; }
   .progress > div { height: 100%; background: var(--done); }
-  .board { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .column { border: 1px solid var(--border); border-radius: 6px; padding: 12px 14px; background: var(--bg-alt); break-inside: avoid; }
-  .column h3 { display: flex; justify-content: space-between; align-items: baseline; }
-  .column h3 .count { font-size: 9pt; color: var(--fg-subtle); font-weight: 500; }
+  .board { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; align-items: start; }
+  @media (max-width: 1100px) { .board { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 640px) { .board { grid-template-columns: 1fr; } }
+  .column { border: 1px solid var(--border); border-radius: 6px; padding: 0; background: var(--bg-alt); break-inside: avoid; overflow: hidden; }
+  .column > h3 {
+    display: flex; justify-content: space-between; align-items: center;
+    margin: 0; padding: 10px 14px;
+    font-size: 10.5pt; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em;
+    color: white;
+    border-bottom: 3px solid rgba(0,0,0,0.18);
+  }
+  .column > h3 .count {
+    font-size: 9pt; font-weight: 700;
+    color: white;
+    background: rgba(255,255,255,0.28);
+    padding: 1px 9px; border-radius: 10px;
+    letter-spacing: 0.04em;
+  }
+  .column:nth-of-type(1) > h3 { background: var(--in-progress); }
+  .column:nth-of-type(2) > h3 { background: var(--todo); }
+  .column:nth-of-type(3) > h3 { background: var(--backlog); }
+  .column:nth-of-type(4) > h3 { background: var(--done); }
+  .column > .task { margin-left: 14px; margin-right: 14px; }
+  .column > .task:first-of-type { margin-top: 8px; border-top: none; }
+  .column > .task:last-of-type { margin-bottom: 12px; }
   .task { padding: 8px 0; border-top: 1px solid var(--border); break-inside: avoid; }
   .task:first-of-type { border-top: none; }
   .task .head { display: flex; gap: 8px; align-items: baseline; }
@@ -159,15 +186,31 @@ const PRINT_CSS = `
   .commits .when { color: var(--fg-subtle); }
   .footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 9pt; color: var(--fg-subtle); text-align: center; }
   @media print {
-    @page { size: A4; margin: 18mm; }
-    html, body { background: white; }
+    @page { margin: 10mm; }
+    html, body { background: white; font-size: 8.5pt; line-height: 1.35; }
     .report { padding: 0; max-width: 100%; }
-    h2 { break-after: avoid; }
-    .column, .task { break-inside: avoid; }
+    h1 { font-size: 18pt; }
+    h2 { font-size: 12pt; margin-top: 14px; margin-bottom: 6px; break-after: avoid; }
+    h3 { font-size: 10pt; margin-top: 10px; }
+    p { margin: 4px 0; }
+    .cover { margin-bottom: 14px; }
+    .metrics-grid { gap: 6px; }
+    .metric { padding: 3px 8px; }
+    .metric .value { font-size: 10pt; }
+    .board { gap: 8px; }
+    .column { padding: 0; break-inside: auto; }
+    .column > h3 { padding: 6px 10px; font-size: 9pt; }
+    .column > .task { margin-left: 10px; margin-right: 10px; }
+    .task { padding: 5px 0; break-inside: avoid; }
+    .task .title { font-size: 9pt; }
+    .task .desc { font-size: 8pt; margin-top: 2px; }
+    .task .pill { font-size: 6.5pt; }
+    .task .when { font-size: 7.5pt; }
+    .footer { margin-top: 16px; padding-top: 8px; }
   }
 `
 
-function renderCover(data: ReportData, opts: ReportRenderOptions): string {
+function renderCover(data: ReportData, opts: ReportRenderOptions, includeMetrics: boolean): string {
   const title = opts.title || (data.milestone ? `${data.project.name} — ${data.milestone.name}` : `Report: ${data.project.name}`)
   const metaParts: string[] = []
   metaParts.push(`<span><strong>Generated:</strong> ${escapeHtml(fmtDateTime(data.generatedAt))}</span>`)
@@ -176,29 +219,29 @@ function renderCover(data: ReportData, opts: ReportRenderOptions): string {
   }
   if (opts.clientName) metaParts.push(`<span><strong>Client:</strong> ${escapeHtml(opts.clientName)}</span>`)
   if (data.project.gitBranch) metaParts.push(`<span><strong>Branch:</strong> ${escapeHtml(data.project.gitBranch)}</span>`)
+  const m = data.metrics
+  const metricsBlock = includeMetrics
+    ? `
+      <div class="cover-right">
+        <div class="metrics-grid">
+          <div class="metric"><div class="label">Total</div><div class="value">${m.total}</div></div>
+          <div class="metric"><div class="label">Done</div><div class="value">${m.byStatus.done}</div></div>
+          <div class="metric"><div class="label">In progress</div><div class="value">${m.byStatus.in_progress}</div></div>
+          <div class="metric metric-progress"><div class="label">Progress</div><div class="value">${m.completionRate}%</div><div class="bar"><span style="width:${m.completionRate}%"></span></div></div>
+        </div>
+      </div>
+    `
+    : ''
   return `
     <header class="cover">
-      <div class="eyebrow">${escapeHtml(data.project.category || 'Progress Report')}</div>
-      <h1>${escapeHtml(title)}</h1>
-      ${data.milestone?.description ? `<p>${escapeHtml(data.milestone.description)}</p>` : ''}
-      <div class="meta">${metaParts.join('')}</div>
-    </header>
-  `
-}
-
-function renderMetrics(data: ReportData): string {
-  const m = data.metrics
-  return `
-    <section class="metrics">
-      <h2>Overview</h2>
-      <div class="metrics-grid">
-        <div class="metric"><div class="label">Total</div><div class="value">${m.total}</div></div>
-        <div class="metric"><div class="label">Done</div><div class="value">${m.byStatus.done}</div></div>
-        <div class="metric"><div class="label">In progress</div><div class="value">${m.byStatus.in_progress}</div></div>
-        <div class="metric"><div class="label">Progress</div><div class="value">${m.completionRate}%</div></div>
+      <div class="cover-left">
+        <div class="eyebrow">${escapeHtml(data.project.category || 'Progress Report')}</div>
+        <h1>${escapeHtml(title)}</h1>
+        ${data.milestone?.description ? `<p>${escapeHtml(data.milestone.description)}</p>` : ''}
+        <div class="meta">${metaParts.join('')}</div>
       </div>
-      <div class="progress"><div style="width:${m.completionRate}%"></div></div>
-    </section>
+      ${metricsBlock}
+    </header>
   `
 }
 
@@ -232,15 +275,16 @@ function renderKanban(data: ReportData, opts: ReportRenderOptions): string {
   const columns = cols
     .map(({ status, label }) => {
       const list = data.tasks.filter(t => t.status === status)
-      if (list.length === 0) return ''
+      const body = list.length === 0
+        ? '<p class="desc" style="font-style:italic;opacity:0.6">—</p>'
+        : list.map(t => renderTaskCard(t, opts.includeTechnicalDetails)).join('')
       return `
         <div class="column">
           <h3>${label} <span class="count">${list.length}</span></h3>
-          ${list.map(t => renderTaskCard(t, opts.includeTechnicalDetails)).join('')}
+          ${body}
         </div>
       `
     })
-    .filter(Boolean)
     .join('')
   return `
     <section class="kanban">
@@ -279,8 +323,7 @@ function renderCommits(data: ReportData): string {
 
 export function renderReportHtml(data: ReportData, opts: ReportRenderOptions): string {
   const parts: string[] = []
-  if (opts.sections.cover) parts.push(renderCover(data, opts))
-  if (opts.sections.metrics) parts.push(renderMetrics(data))
+  if (opts.sections.cover) parts.push(renderCover(data, opts, opts.sections.metrics))
   if (opts.sections.kanban) parts.push(renderKanban(data, opts))
   if (opts.sections.timeline) parts.push(renderTimeline(data, opts))
   if (opts.sections.commits) parts.push(renderCommits(data))
