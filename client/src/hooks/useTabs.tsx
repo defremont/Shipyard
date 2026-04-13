@@ -12,6 +12,7 @@ interface TabsContextType {
   openTab: (projectId: string) => void
   closeTab: (id: string) => void
   switchTab: (id: string) => void
+  reorderTabs: (fromId: string, toId: string) => void
 }
 
 const STORAGE_KEY = 'shipyard-tabs'
@@ -117,8 +118,21 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     if (tab) navigate(tab.path)
   }, [tabs, navigate])
 
+  const reorderTabs = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return
+    setTabs(prev => {
+      const fromIdx = prev.findIndex(t => t.id === fromId)
+      const toIdx = prev.findIndex(t => t.id === toId)
+      if (fromIdx === -1 || toIdx === -1) return prev
+      const next = prev.slice()
+      const [moved] = next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, moved)
+      return next
+    })
+  }, [])
+
   return (
-    <TabsContext.Provider value={{ tabs, activeTabId, openTab, closeTab, switchTab }}>
+    <TabsContext.Provider value={{ tabs, activeTabId, openTab, closeTab, switchTab, reorderTabs }}>
       {children}
     </TabsContext.Provider>
   )

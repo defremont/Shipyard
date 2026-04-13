@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { X, Home } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
@@ -5,12 +6,19 @@ import { useTabs } from '@/hooks/useTabs'
 import { useProjects, type Project } from '@/hooks/useProjects'
 import { useGitStatus } from '@/hooks/useGit'
 
-function ProjectTab({ tabId, project, isActive, onSwitch, onClose }: {
+function ProjectTab({ tabId, project, isActive, isDragging, isDragOver, onSwitch, onClose, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
   tabId: string
   project?: Project
   isActive: boolean
+  isDragging: boolean
+  isDragOver: boolean
   onSwitch: () => void
   onClose: () => void
+  onDragStart: (e: React.DragEvent) => void
+  onDragEnd: () => void
+  onDragOver: (e: React.DragEvent) => void
+  onDragLeave: () => void
+  onDrop: (e: React.DragEvent) => void
 }) {
   const { data: gitStatus } = useGitStatus(project?.isGitRepo ? tabId : undefined)
   const label = project?.name || tabId
@@ -22,11 +30,19 @@ function ProjectTab({ tabId, project, isActive, onSwitch, onClose }: {
 
   return (
     <div
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
       className={cn(
-        'flex items-center gap-1 pl-3 pr-1 h-8 rounded-t-md transition-colors shrink-0 group max-w-[200px]',
+        'flex items-center gap-1 pl-3 pr-1 h-8 rounded-t-md transition-colors shrink-0 group max-w-[200px] cursor-grab active:cursor-grabbing',
         isActive
           ? 'bg-background border border-b-0 text-foreground'
-          : 'text-muted-foreground hover:text-foreground hover:bg-background/50'
+          : 'text-muted-foreground hover:text-foreground hover:bg-background/50',
+        isDragging && 'opacity-40',
+        isDragOver && 'ring-2 ring-primary ring-inset'
       )}
     >
       <button
@@ -57,10 +73,12 @@ function ProjectTab({ tabId, project, isActive, onSwitch, onClose }: {
 }
 
 export function TabBar() {
-  const { tabs, activeTabId, switchTab, closeTab } = useTabs()
+  const { tabs, activeTabId, switchTab, closeTab, reorderTabs } = useTabs()
   const { data: projects } = useProjects()
   const location = useLocation()
   const navigate = useNavigate()
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
 
   const isHome = location.pathname === '/' || location.pathname === '/tasks' || location.pathname === '/settings' || location.pathname === '/help' || location.pathname === '/logs'
 
@@ -87,8 +105,36 @@ export function TabBar() {
           tabId={tab.id}
           project={projects?.find(p => p.id === tab.id)}
           isActive={tab.id === activeTabId}
+          isDragging={draggingId === tab.id}
+          isDragOver={dragOverId === tab.id && draggingId !== tab.id}
           onSwitch={() => switchTab(tab.id)}
           onClose={() => closeTab(tab.id)}
+          onDragStart={(e) => {
+            setDraggingId(tab.id)
+            e.dataTransfer.effectAllowed = 'move'
+            e.dataTransfer.setData('text/plain', tab.id)
+          }}
+          onDragEnd={() => {
+            setDraggingId(null)
+            setDragOverId(null)
+          }}
+          onDragOver={(e) => {
+            if (draggingId && draggingId !== tab.id) {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+              setDragOverId(tab.id)
+            }
+          }}
+          onDragLeave={() => {
+            setDragOverId(prev => (prev === tab.id ? null : prev))
+          }}
+          onDrop={(e) => {
+            e.preventDefault()
+            const fromId = e.dataTransfer.getData('text/plain') || draggingId
+            if (fromId) reorderTabs(fromId, tab.id)
+            setDraggingId(null)
+            setDragOverId(null)
+          }}
         />
       ))}
     </div>
