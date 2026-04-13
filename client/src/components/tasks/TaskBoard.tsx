@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown, Import, LayoutGrid, List, Sparkles, ChevronDown, CheckCheck, Eye, EyeOff } from 'lucide-react'
+import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown, Import, LayoutGrid, List, Sparkles, ChevronDown, CheckCheck, Eye, EyeOff, FileText } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -25,6 +25,7 @@ import { CsvReviewDialog } from './CsvReviewDialog'
 import { BulkImportDialog } from './BulkImportDialog'
 import { SheetSyncPanel } from './SheetSyncPanel'
 import { MilestoneSelector } from './MilestoneSelector'
+import { ReportDialog } from '@/components/reports/ReportDialog'
 import { SyncPanelExports } from '@/components/sync/SyncPanel'
 import { useTasks, useUpdateTask, useReorderTasks, useCreateTask, type Task } from '@/hooks/useTasks'
 import { useTerminalStatus } from '@/hooks/useTerminal'
@@ -302,6 +303,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
   )
   const [addingInColumn, setAddingInColumn] = useState<string | null>(null)
   const [bulkImportOpen, setBulkImportOpen] = useState(false)
+  const [reportOpen, setReportOpen] = useState(false)
   const [doneReadAt, setDoneReadAt] = useState<string | null>(() =>
     localStorage.getItem(`shipyard:done-read:${projectId}`)
   )
@@ -570,6 +572,14 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
               <TooltipContent>Import / Export tasks (CSV, JSON, Markdown)</TooltipContent>
             </Tooltip>
           )}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-muted-foreground" onClick={() => setReportOpen(true)}>
+                <FileText className="h-3.5 w-3.5" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Gerar relatório (HTML/PDF/TXT)</TooltipContent>
+          </Tooltip>
           <Button size="sm" className="h-7 gap-1 text-xs" onClick={handleNew}>
             <Plus className="h-3.5 w-3.5" />
             New Task
@@ -730,6 +740,14 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
         projectId={projectId}
         open={bulkImportOpen}
         onOpenChange={setBulkImportOpen}
+      />
+
+      <ReportDialog
+        projectId={projectId}
+        projectName={projectName}
+        milestoneId={milestoneId}
+        open={reportOpen}
+        onOpenChange={setReportOpen}
       />
 
       {csvDiff && (

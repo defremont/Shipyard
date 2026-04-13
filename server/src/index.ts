@@ -14,6 +14,7 @@ import { claudeRoutes } from './routes/claude.js';
 import { mcpRoutes } from './routes/mcp.js';
 import { fileRoutes } from './routes/files.js';
 import { logRoutes } from './routes/logs.js';
+import { reportRoutes } from './routes/reports.js';
 import { initProjectDiscovery } from './services/projectDiscovery.js';
 import { loadSettings } from './services/settingsStore.js';
 import { isAvailable as isTerminalAvailable } from './services/terminalService.js';
@@ -86,6 +87,7 @@ await app.register(claudeRoutes);
 await app.register(mcpRoutes);
 await app.register(fileRoutes);
 await app.register(logRoutes);
+await app.register(reportRoutes);
 
 // SPA fallback: serve index.html for all non-API, non-WS routes
 if (STATIC_DIR) {

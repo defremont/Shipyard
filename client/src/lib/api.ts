@@ -221,4 +221,16 @@ export const api = {
       `/projects/${projectId}/files/rename`,
       { method: 'POST', body: JSON.stringify({ path: relPath, newName }) }
     ),
+
+  // Reports
+  getReportData: (projectId: string, opts: { milestoneId?: string; from?: string; to?: string; includeCommits?: boolean; status?: string[] }) => {
+    const params = new URLSearchParams();
+    if (opts.milestoneId) params.set('milestone', opts.milestoneId);
+    if (opts.from) params.set('from', opts.from);
+    if (opts.to) params.set('to', opts.to);
+    if (opts.includeCommits) params.set('includeCommits', '1');
+    if (opts.status?.length) params.set('status', opts.status.join(','));
+    const qs = params.toString();
+    return request<any>(`/projects/${projectId}/reports/data${qs ? `?${qs}` : ''}`);
+  },
 };

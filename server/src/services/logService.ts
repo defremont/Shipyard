@@ -3,7 +3,7 @@ import { promises as fsp } from 'fs';
 import { DATA_DIR } from './dataDir.js';
 
 export type LogLevel = 'info' | 'warn' | 'error';
-export type LogCategory = 'server' | 'git' | 'claude' | 'sync' | 'terminal' | 'mcp' | 'tasks' | 'files';
+export type LogCategory = 'server' | 'git' | 'claude' | 'sync' | 'terminal' | 'mcp' | 'tasks' | 'files' | 'reports';
 
 export interface LogEntry {
   id: number;
