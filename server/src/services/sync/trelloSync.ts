@@ -103,6 +103,25 @@ export async function testConnection(config: SyncConfig): Promise<{ ok: boolean;
   }
 }
 
+// ── Board discovery (for "link to existing" onboarding) ────────────────
+
+export interface DiscoveredBoard {
+  id: string;
+  name: string;
+  url: string;
+  closed: boolean;
+}
+
+export async function listBoards(config: SyncConfig): Promise<DiscoveredBoard[]> {
+  const boards = await trelloRequest<DiscoveredBoard[]>(
+    config,
+    '/members/me/boards',
+    'GET',
+    { filter: 'open', fields: 'name,url,closed' },
+  );
+  return boards.filter(b => !b.closed);
+}
+
 /**
  * Build the URL the user should open to authorize Shipyard and copy back the
  * personal token. The API key itself comes from trello.com/power-ups/admin.
@@ -321,4 +340,113 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
   // useful when a user manually rearranges the board.
   void STATUS_FROM_LIST;
   return out;
+}
+
+// ── Link to existing board ─────────────────────────────────────────────
+
+function normalizeTitle(s: string): string {
+  return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export interface LinkBoardResult {
+  boardId: string;
+  boardUrl: string;
+  matchedCount: number;
+  totalCards: number;
+  listsCreated: number;
+  labelsCreated: number;
+}
+
+/**
+ * Connect a project to an ALREADY EXISTING Trello board.
+ * Maps status lists + priority labels by name/color (creates missing).
+ * Reconciles cardMap by matching card names to local task titles.
+ */
+export async function linkToExistingBoard(
+  config: SyncConfig,
+  boardId: string,
+  localTasks: Task[],
+): Promise<{ state: Required<Pick<TrelloState, 'boardId' | 'boardUrl' | 'listIds' | 'labelIds' | 'cardMap'>>; result: LinkBoardResult }> {
+  const [board, boardLists, boardLabels, boardCards] = await Promise.all([
+    trelloRequest<{ id: string; name: string; url: string }>(
+      config, `/boards/${boardId}`, 'GET', { fields: 'name,url' },
+    ),
+    trelloRequest<Array<{ id: string; name: string; closed: boolean }>>(
+      config, `/boards/${boardId}/lists`, 'GET', { fields: 'name,closed' },
+    ),
+    trelloRequest<Array<{ id: string; name: string; color: string }>>(
+      config, `/boards/${boardId}/labels`,
+    ),
+    trelloRequest<Array<{ id: string; name: string; closed: boolean }>>(
+      config, `/boards/${boardId}/cards`, 'GET', { fields: 'name,closed' },
+    ),
+  ]);
+
+  // Map status → list id; reuse by canonical name, create missing
+  const openLists = boardLists.filter(l => !l.closed);
+  const listIds = {} as Record<TaskStatus, string>;
+  let listsCreated = 0;
+  for (const status of STATUS_ORDER) {
+    const existing = openLists.find(l => {
+      const mapped = STATUS_FROM_LIST[l.name];
+      return mapped === status || l.name?.toLowerCase() === STATUS_LABELS[status].toLowerCase();
+    });
+    if (existing) {
+      listIds[status] = existing.id;
+    } else {
+      const created = await trelloRequest<{ id: string }>(config, '/lists', 'POST', {
+        name: STATUS_LABELS[status], idBoard: boardId, pos: 'bottom',
+      });
+      listIds[status] = created.id;
+      listsCreated++;
+    }
+  }
+
+  // Map priority → label id; reuse by name first, then color, create missing
+  const labelIds = {} as Record<TaskPriority, string>;
+  let labelsCreated = 0;
+  for (const [priority, color] of Object.entries(PRIORITY_COLORS) as [TaskPriority, string][]) {
+    const byName = boardLabels.find(l => l.name?.toLowerCase() === priority);
+    const byColor = !byName ? boardLabels.find(l => l.color === color && !l.name) : undefined;
+    const existing = byName ?? byColor;
+    if (existing) {
+      labelIds[priority] = existing.id;
+    } else {
+      const created = await trelloRequest<{ id: string }>(config, '/labels', 'POST', {
+        name: priority, color, idBoard: boardId,
+      });
+      labelIds[priority] = created.id;
+      labelsCreated++;
+    }
+  }
+
+  // Build cardMap by matching card name → local task title
+  const localByTitle = new Map<string, string>();
+  for (const t of localTasks) {
+    const key = normalizeTitle(t.title);
+    if (key && !localByTitle.has(key)) localByTitle.set(key, t.id);
+  }
+  const openCards = boardCards.filter(c => !c.closed);
+  const cardMap: Record<string, string> = {};
+  let matchedCount = 0;
+  for (const card of openCards) {
+    const key = normalizeTitle(card.name);
+    const taskId = localByTitle.get(key);
+    if (taskId && !cardMap[taskId]) {
+      cardMap[taskId] = card.id;
+      matchedCount++;
+    }
+  }
+
+  return {
+    state: { boardId: board.id, boardUrl: board.url, listIds, labelIds, cardMap },
+    result: {
+      boardId: board.id,
+      boardUrl: board.url,
+      matchedCount,
+      totalCards: openCards.length,
+      listsCreated,
+      labelsCreated,
+    },
+  };
 }

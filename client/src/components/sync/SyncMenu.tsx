@@ -7,7 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   RefreshCw, LayoutDashboard, ClipboardList, CheckCircle2, XCircle, Loader2,
-  ExternalLink, Upload, Download, ArrowLeftRight, Plug,
+  ExternalLink, Upload, Download, ArrowLeftRight, Plug, Link2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
@@ -154,6 +154,13 @@ function ProjectProviderRow({
   const [busy, setBusy] = useState<'push' | 'pull' | 'merge' | null>(null)
   const [spaceId, setSpaceId] = useState<string>(integration?.settings?.spaceId ?? '')
 
+  // Link-to-existing state
+  const [linkMode, setLinkMode] = useState(false)
+  const [linkLoading, setLinkLoading] = useState(false)
+  const [linkItems, setLinkItems] = useState<Array<{ id: string; name: string; url?: string }>>([])
+  const [pickedLinkId, setPickedLinkId] = useState('')
+  const [linking, setLinking] = useState(false)
+
   // Keep spaceId in sync when the integration updates from the server.
   if (integration?.settings?.spaceId && spaceId !== integration.settings.spaceId && !spaceId) {
     setSpaceId(integration.settings.spaceId)
@@ -203,6 +210,49 @@ function ProjectProviderRow({
 
   async function handleToggleAutoSync() {
     await saveMutation.mutateAsync({ autoSync: !autoSync })
+  }
+
+  async function enterLinkMode() {
+    if (providerId === 'clickup' && !spaceId) {
+      toast.error('Pick a ClickUp Space first')
+      return
+    }
+    setLinkMode(true)
+    setPickedLinkId('')
+    setLinkLoading(true)
+    try {
+      if (providerId === 'trello') {
+        const { boards } = await api.listTrelloBoards()
+        setLinkItems(boards.map(b => ({ id: b.id, name: b.name, url: b.url })))
+      } else {
+        const { lists } = await api.listClickupLists(spaceId)
+        setLinkItems(lists.map(l => ({ id: l.id, name: l.name, url: l.url })))
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load')
+      setLinkMode(false)
+    } finally {
+      setLinkLoading(false)
+    }
+  }
+
+  async function confirmLink() {
+    if (!pickedLinkId) return
+    setLinking(true)
+    try {
+      const result = providerId === 'trello'
+        ? await api.linkTrelloBoard(projectId, pickedLinkId)
+        : await api.linkClickupList(projectId, spaceId, pickedLinkId)
+      toast.success(result.message || `Linked to existing ${providerLabel}`)
+      setLinkMode(false)
+      queryClient.invalidateQueries({ queryKey: ['sync', 'integrations'] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', projectId] })
+      onChanged()
+    } catch (err: any) {
+      toast.error(err?.message || 'Link failed')
+    } finally {
+      setLinking(false)
+    }
   }
 
   async function runAction(kind: 'push' | 'pull' | 'merge') {
@@ -293,6 +343,69 @@ function ProjectProviderRow({
               </p>
             </div>
           </label>
+
+          {!enabled && !linkMode && (
+            <button
+              type="button"
+              onClick={enterLinkMode}
+              className="flex items-center gap-1.5 text-[11px] text-primary hover:underline w-fit"
+            >
+              <Link2 className="h-3 w-3" />
+              Already have a {providerId === 'trello' ? 'board' : 'list'}? Link to existing
+            </button>
+          )}
+
+          {linkMode && (
+            <div className="space-y-2 p-2 rounded-md border bg-accent/30">
+              <div className="text-[11px] font-medium">
+                Link to existing {providerId === 'trello' ? 'board' : 'list'}
+              </div>
+              {linkLoading ? (
+                <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading {providerId === 'trello' ? 'boards' : 'lists'}…
+                </div>
+              ) : linkItems.length === 0 ? (
+                <p className="text-[10px] text-muted-foreground">
+                  No open {providerId === 'trello' ? 'boards' : 'lists'} found in your account{providerId === 'clickup' ? ' for this space' : ''}.
+                </p>
+              ) : (
+                <Select value={pickedLinkId} onValueChange={setPickedLinkId}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder={`Choose a ${providerId === 'trello' ? 'board' : 'list'}`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {linkItems.map(it => (
+                      <SelectItem key={it.id} value={it.id}>{it.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              <p className="text-[10px] text-muted-foreground">
+                Local tasks matching remote items by title will be re-linked. Unmatched remote items can be pulled as new tasks.
+              </p>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  size="sm"
+                  onClick={confirmLink}
+                  disabled={!pickedLinkId || linking}
+                  className="h-7 text-xs"
+                >
+                  {linking && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
+                  Link
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setLinkMode(false)}
+                  disabled={linking}
+                  className="h-7 text-xs"
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
 
           {enabled && (
             <label className="flex items-start gap-2 p-2 rounded-md border cursor-pointer hover:bg-accent/30">

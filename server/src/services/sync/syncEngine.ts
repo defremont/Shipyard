@@ -15,6 +15,8 @@ export interface SyncOperationResult {
   updated?: number;
   errors?: string[];
   remoteUrl?: string;
+  matchedCount?: number;
+  totalRemote?: number;
 }
 
 function buildEffective(
@@ -146,6 +148,79 @@ export async function mergeBoth(
     remoteUrl: push.remoteUrl,
     message: `${pull.message}; ${push.message}`,
   };
+}
+
+// ── Link to existing remote board/list ─────────────────────────────────
+
+export async function linkTrelloBoard(
+  projectId: string,
+  boardId: string,
+): Promise<SyncOperationResult> {
+  const config = await store.getEffectiveConfig(projectId, 'trello');
+  if (!config) return { success: false, message: 'Trello not connected — add credentials first' };
+
+  try {
+    const tasks = await taskStore.getTasks(projectId);
+    const { state, result } = await trello.linkToExistingBoard(config, boardId, tasks);
+
+    await store.saveProjectConfig({
+      projectId,
+      providerId: 'trello',
+      enabled: true,
+      settings: { projectName: config.settings.projectName ?? projectId },
+      state,
+    });
+    await store.patchStatus(projectId, 'trello', { ok: true });
+
+    return {
+      success: true,
+      remoteUrl: result.boardUrl,
+      matchedCount: result.matchedCount,
+      totalRemote: result.totalCards,
+      message: `Linked to existing board — ${result.matchedCount} of ${tasks.length} local tasks matched by title (${result.listsCreated} lists + ${result.labelsCreated} labels created as needed)`,
+    };
+  } catch (err: any) {
+    const message = err?.message ?? 'Link failed';
+    await store.patchStatus(projectId, 'trello', { ok: false, error: message });
+    return { success: false, message };
+  }
+}
+
+export async function linkClickupList(
+  projectId: string,
+  spaceId: string,
+  listId: string,
+): Promise<SyncOperationResult> {
+  const base = await store.getEffectiveConfig(projectId, 'clickup');
+  if (!base) return { success: false, message: 'ClickUp not connected — add credentials first' };
+
+  const config: EffectiveConfig = { ...base, settings: { ...base.settings, spaceId } };
+
+  try {
+    const tasks = await taskStore.getTasks(projectId);
+    const { state, result } = await clickup.linkToExistingList(config, listId, tasks);
+
+    await store.saveProjectConfig({
+      projectId,
+      providerId: 'clickup',
+      enabled: true,
+      settings: { projectName: config.settings.projectName ?? projectId, spaceId },
+      state,
+    });
+    await store.patchStatus(projectId, 'clickup', { ok: true });
+
+    return {
+      success: true,
+      remoteUrl: result.listUrl,
+      matchedCount: result.matchedCount,
+      totalRemote: result.totalTasks,
+      message: `Linked to existing list — ${result.matchedCount} of ${tasks.length} local tasks matched by title`,
+    };
+  } catch (err: any) {
+    const message = err?.message ?? 'Link failed';
+    await store.patchStatus(projectId, 'clickup', { ok: false, error: message });
+    return { success: false, message };
+  }
 }
 
 async function fetchRemote(config: EffectiveConfig, providerId: SyncProviderId): Promise<RemoteTask[]> {

@@ -116,6 +116,18 @@ export async function listSpaces(config: SyncConfig, teamId: string): Promise<Di
   return data.spaces ?? [];
 }
 
+export interface DiscoveredList { id: string; name: string; url?: string }
+
+export async function listLists(config: SyncConfig, spaceId: string): Promise<DiscoveredList[]> {
+  const data = await clickupRequest<{ lists: DiscoveredList[] }>(
+    config,
+    `/space/${spaceId}/list`,
+    'GET',
+    { archived: false },
+  );
+  return data.lists ?? [];
+}
+
 // ── Push / Pull ────────────────────────────────────────────────────────
 
 async function ensureList(config: SyncConfig, projectName: string): Promise<ClickUpState> {
@@ -238,6 +250,64 @@ export interface PulledTask {
   status: TaskStatus;
   priority: TaskPriority;
   updatedAt: string;
+}
+
+// ── Link to existing list ──────────────────────────────────────────────
+
+function normalizeTitle(s: string): string {
+  return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+export interface LinkListResult {
+  listId: string;
+  listUrl?: string;
+  matchedCount: number;
+  totalTasks: number;
+}
+
+/**
+ * Connect a project to an ALREADY EXISTING ClickUp list.
+ * Reconciles taskMap by matching remote task names to local task titles.
+ */
+export async function linkToExistingList(
+  config: SyncConfig,
+  listId: string,
+  localTasks: Task[],
+): Promise<{ state: Required<Pick<ClickUpState, 'listId' | 'listUrl' | 'taskMap'>>; result: LinkListResult }> {
+  const [list, tasksData] = await Promise.all([
+    clickupRequest<{ id: string; name: string; url?: string }>(config, `/list/${listId}`),
+    clickupRequest<{ tasks: Array<{ id: string; name: string }> }>(
+      config, `/list/${listId}/task`, 'GET', { archived: false, subtasks: false },
+    ),
+  ]);
+
+  const localByTitle = new Map<string, string>();
+  for (const t of localTasks) {
+    const key = normalizeTitle(t.title);
+    if (key && !localByTitle.has(key)) localByTitle.set(key, t.id);
+  }
+
+  const taskMap: Record<string, string> = {};
+  let matchedCount = 0;
+  const remoteTasks = tasksData.tasks ?? [];
+  for (const remote of remoteTasks) {
+    const key = normalizeTitle(remote.name);
+    const taskId = localByTitle.get(key);
+    if (taskId && !taskMap[taskId]) {
+      taskMap[taskId] = remote.id;
+      matchedCount++;
+    }
+  }
+
+  return {
+    state: { listId: list.id, listUrl: list.url ?? '', taskMap },
+    result: {
+      listId: list.id,
+      listUrl: list.url,
+      matchedCount,
+      totalTasks: remoteTasks.length,
+    },
+  };
 }
 
 export async function pullTasks(config: SyncConfig): Promise<PulledTask[]> {

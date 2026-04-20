@@ -131,6 +131,27 @@ export const api = {
       { method: 'POST', body: JSON.stringify({ apiKey }) },
     ),
 
+  // Link-to-existing flow (for connecting a project on another computer
+  // to a board/list that already exists)
+  listTrelloBoards: () =>
+    request<{ boards: Array<{ id: string; name: string; url: string; closed: boolean }> }>(
+      '/sync/trello/boards',
+    ),
+  listClickupLists: (spaceId: string) =>
+    request<{ lists: Array<{ id: string; name: string; url?: string }> }>(
+      `/sync/clickup/lists?spaceId=${encodeURIComponent(spaceId)}`,
+    ),
+  linkTrelloBoard: (projectId: string, boardId: string) =>
+    request<SyncOperationResult & { matchedCount?: number; totalRemote?: number }>(
+      `/projects/${projectId}/sync/trello/link`,
+      { method: 'POST', body: JSON.stringify({ boardId }) },
+    ),
+  linkClickupList: (projectId: string, spaceId: string, listId: string) =>
+    request<SyncOperationResult & { matchedCount?: number; totalRemote?: number }>(
+      `/projects/${projectId}/sync/clickup/link`,
+      { method: 'POST', body: JSON.stringify({ spaceId, listId }) },
+    ),
+
   // Per-project sync configs
   listIntegrations: (projectId?: string) =>
     request<{ integrations: SyncIntegration[] }>(

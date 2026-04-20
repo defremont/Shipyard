@@ -262,4 +262,79 @@ export async function syncRoutes(app: FastifyInstance) {
       return { url: trello.buildAuthorizeUrl(apiKey) };
     },
   );
+
+  // ── Link-to-existing: list remote boards/lists + attach a project ───
+
+  app.get('/api/sync/trello/boards', async (_request, reply) => {
+    const creds = await store.getProviderCredentials('trello');
+    if (!creds) return reply.status(400).send({ error: 'Trello not connected' });
+    const effective = {
+      providerId: 'trello' as const,
+      projectId: '__global__',
+      settings: creds.settings,
+      state: {},
+      enabled: true,
+      autoSync: false,
+      lastSyncAt: null,
+      lastSyncStatus: null,
+      lastSyncError: null,
+    };
+    try {
+      const boards = await trello.listBoards(effective);
+      return { boards };
+    } catch (err: any) {
+      return reply.status(400).send({ error: err?.message ?? 'Failed to list boards' });
+    }
+  });
+
+  app.get<{ Querystring: { spaceId?: string } }>(
+    '/api/sync/clickup/lists',
+    async (request, reply) => {
+      const spaceId = request.query.spaceId;
+      if (!spaceId) return reply.status(400).send({ error: 'spaceId required' });
+      const creds = await store.getProviderCredentials('clickup');
+      if (!creds) return reply.status(400).send({ error: 'ClickUp not connected' });
+      const effective = {
+        providerId: 'clickup' as const,
+        projectId: '__global__',
+        settings: creds.settings,
+        state: {},
+        enabled: true,
+        autoSync: false,
+        lastSyncAt: null,
+        lastSyncStatus: null,
+        lastSyncError: null,
+      };
+      try {
+        const lists = await clickup.listLists(effective, spaceId);
+        return { lists };
+      } catch (err: any) {
+        return reply.status(400).send({ error: err?.message ?? 'Failed to list lists' });
+      }
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: { boardId?: string } }>(
+    '/api/projects/:projectId/sync/trello/link',
+    async (request, reply) => {
+      const boardId = request.body?.boardId;
+      if (!boardId) return reply.status(400).send({ error: 'boardId required' });
+      const result = await engine.linkTrelloBoard(request.params.projectId, boardId);
+      if (!result.success) return reply.status(400).send({ error: result.message });
+      log.info('sync', `Linked trello board ${boardId}`, undefined, request.params.projectId);
+      return result;
+    },
+  );
+
+  app.post<{ Params: { projectId: string }; Body: { spaceId?: string; listId?: string } }>(
+    '/api/projects/:projectId/sync/clickup/link',
+    async (request, reply) => {
+      const { spaceId, listId } = request.body || {};
+      if (!spaceId || !listId) return reply.status(400).send({ error: 'spaceId and listId required' });
+      const result = await engine.linkClickupList(request.params.projectId, spaceId, listId);
+      if (!result.success) return reply.status(400).send({ error: result.message });
+      log.info('sync', `Linked clickup list ${listId} (space ${spaceId})`, undefined, request.params.projectId);
+      return result;
+    },
+  );
 }
