@@ -1,6 +1,8 @@
 import type { Task } from '../../types/index.js';
-import type { SyncConfig } from '../syncStore.js';
+import type { EffectiveConfig } from '../syncStore.js';
 import { patchState } from '../syncStore.js';
+
+type SyncConfig = EffectiveConfig;
 
 const BASE = 'https://api.trello.com/1';
 

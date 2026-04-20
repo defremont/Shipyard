@@ -1,0 +1,428 @@
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Button } from '@/components/ui/button'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Badge } from '@/components/ui/badge'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  RefreshCw, LayoutDashboard, ClipboardList, CheckCircle2, XCircle, Loader2,
+  ExternalLink, Upload, Download, ArrowLeftRight, Plug,
+} from 'lucide-react'
+import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
+import { formatDistanceToNow } from 'date-fns'
+import { api, type SyncIntegration, type SyncProviderStatus } from '@/lib/api'
+import { SheetSyncPanel } from '@/components/tasks/SheetSyncPanel'
+import type { Task } from '@/hooks/useTasks'
+
+// A unified "Sync" menu that lives in the project toolbar. It keeps the
+// existing Google Sheets flow (milestone-scoped, with Apps Script wizard)
+// and adds per-project enable/auto-sync toggles for Trello + ClickUp.
+//
+// Credentials for Trello/ClickUp are held globally in the server store
+// (Settings → Integrations). This menu only toggles whether *this* project
+// participates and, for ClickUp, which Space the tasks go into.
+
+type ProviderId = 'trello' | 'clickup'
+
+interface Props {
+  projectId: string
+  projectName: string
+  milestoneId?: string
+  tasks: Task[]
+}
+
+export function SyncMenu({ projectId, projectName, milestoneId, tasks }: Props) {
+  const [open, setOpen] = useState(false)
+
+  const { data: providersData } = useQuery({
+    queryKey: ['sync', 'providers'],
+    queryFn: () => api.listSyncProviders(),
+    enabled: open,
+  })
+  const { data: integrationsData, refetch: refetchIntegrations } = useQuery({
+    queryKey: ['sync', 'integrations', projectId],
+    queryFn: () => api.listIntegrations(projectId),
+    enabled: open,
+  })
+
+  const providers = providersData?.providers ?? []
+  const integrations = integrationsData?.integrations ?? []
+
+  const trelloInt = integrations.find(i => i.providerId === 'trello')
+  const clickupInt = integrations.find(i => i.providerId === 'clickup')
+  const trelloProv = providers.find(p => p.providerId === 'trello')
+  const clickupProv = providers.find(p => p.providerId === 'clickup')
+
+  const anyEnabled =
+    !!trelloInt?.enabled || !!clickupInt?.enabled
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <PopoverTrigger asChild>
+            <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5">
+              <RefreshCw className={cn('h-3.5 w-3.5', anyEnabled && 'text-emerald-500')} />
+              Sync
+            </Button>
+          </PopoverTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Sync tasks with Google Sheets, Trello or ClickUp</TooltipContent>
+      </Tooltip>
+      <PopoverContent className="w-[420px] p-0" align="end">
+        <div className="p-3 border-b">
+          <div className="text-xs font-semibold">Sync integrations</div>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            Choose where {projectName}'s tasks go.
+          </p>
+        </div>
+
+        <div className="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
+          {/* Google Sheets keeps its own self-contained panel */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium">Google Sheets</span>
+              <Badge variant="outline" className="text-[9px] px-1 py-0 text-muted-foreground">
+                per milestone
+              </Badge>
+            </div>
+            <div className="pl-0.5">
+              <SheetSyncPanel projectId={projectId} milestoneId={milestoneId} tasks={tasks} />
+            </div>
+          </div>
+
+          <div className="border-t -mx-3" />
+
+          <ProjectProviderRow
+            providerId="trello"
+            providerLabel="Trello"
+            providerIcon={LayoutDashboard}
+            providerColor="text-sky-500"
+            providerStatus={trelloProv}
+            integration={trelloInt}
+            projectId={projectId}
+            projectName={projectName}
+            onChanged={refetchIntegrations}
+          />
+
+          <div className="border-t -mx-3" />
+
+          <ProjectProviderRow
+            providerId="clickup"
+            providerLabel="ClickUp"
+            providerIcon={ClipboardList}
+            providerColor="text-purple-500"
+            providerStatus={clickupProv}
+            integration={clickupInt}
+            projectId={projectId}
+            projectName={projectName}
+            onChanged={refetchIntegrations}
+          />
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+function ProjectProviderRow({
+  providerId,
+  providerLabel,
+  providerIcon: Icon,
+  providerColor,
+  providerStatus,
+  integration,
+  projectId,
+  projectName,
+  onChanged,
+}: {
+  providerId: ProviderId
+  providerLabel: string
+  providerIcon: React.ElementType
+  providerColor: string
+  providerStatus?: SyncProviderStatus
+  integration?: SyncIntegration
+  projectId: string
+  projectName: string
+  onChanged: () => void
+}) {
+  const queryClient = useQueryClient()
+  const connected = providerStatus?.connected ?? false
+  const enabled = integration?.enabled ?? false
+  const autoSync = integration?.autoSync ?? false
+  const [busy, setBusy] = useState<'push' | 'pull' | 'merge' | null>(null)
+  const [spaceId, setSpaceId] = useState<string>(integration?.settings?.spaceId ?? '')
+
+  // Keep spaceId in sync when the integration updates from the server.
+  if (integration?.settings?.spaceId && spaceId !== integration.settings.spaceId && !spaceId) {
+    setSpaceId(integration.settings.spaceId)
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: (body: { settings?: Record<string, any>; enabled?: boolean; autoSync?: boolean }) =>
+      api.saveIntegration(projectId, providerId, body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sync', 'integrations'] })
+      onChanged()
+    },
+    onError: (err: Error) => toast.error(err.message),
+  })
+
+  const disableMutation = useMutation({
+    mutationFn: () => api.deleteIntegration(projectId, providerId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['sync', 'integrations'] })
+      onChanged()
+      toast.success(`${providerLabel} disabled for this project`)
+    },
+  })
+
+  async function handleToggleEnabled() {
+    if (!connected) {
+      toast.error(`Connect ${providerLabel} first (Settings → Integrations)`)
+      return
+    }
+    if (enabled) {
+      disableMutation.mutate()
+      return
+    }
+    if (providerId === 'clickup' && !spaceId) {
+      toast.error('Pick a ClickUp Space first')
+      return
+    }
+    await saveMutation.mutateAsync({
+      enabled: true,
+      settings: {
+        projectName,
+        ...(providerId === 'clickup' ? { spaceId } : {}),
+      },
+    })
+    toast.success(`${providerLabel} enabled for this project`)
+  }
+
+  async function handleToggleAutoSync() {
+    await saveMutation.mutateAsync({ autoSync: !autoSync })
+  }
+
+  async function runAction(kind: 'push' | 'pull' | 'merge') {
+    setBusy(kind)
+    try {
+      const call =
+        kind === 'push' ? api.pushIntegration :
+        kind === 'pull' ? api.pullIntegration :
+        api.mergeIntegration
+      const result = await call(projectId, providerId)
+      if (result.success) toast.success(result.message)
+      else toast.error(result.message)
+      if (kind !== 'push') {
+        queryClient.invalidateQueries({ queryKey: ['tasks', projectId] })
+        queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      }
+      queryClient.invalidateQueries({ queryKey: ['sync', 'integrations'] })
+      onChanged()
+    } catch (err: any) {
+      toast.error(err?.message || 'Operation failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const lastSyncLabel = integration?.lastSyncAt
+    ? formatDistanceToNow(new Date(integration.lastSyncAt), { addSuffix: true })
+    : null
+  const remoteUrl = integration?.state?.boardUrl || integration?.state?.listUrl
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2">
+        <Icon className={cn('h-4 w-4', providerColor)} />
+        <span className="text-xs font-medium">{providerLabel}</span>
+        {!connected && (
+          <Badge variant="outline" className="text-[9px] px-1 py-0 text-muted-foreground">
+            not connected
+          </Badge>
+        )}
+        {connected && enabled && (
+          <Badge variant="outline" className="text-[9px] px-1 py-0 text-emerald-500 border-emerald-500/30">
+            <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
+            enabled
+          </Badge>
+        )}
+        {integration?.lastSyncStatus === 'error' && (
+          <Badge variant="outline" className="text-[9px] px-1 py-0 text-red-500 border-red-500/30">
+            <XCircle className="h-2.5 w-2.5 mr-0.5" />
+            error
+          </Badge>
+        )}
+        {remoteUrl && (
+          <a
+            href={remoteUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="ml-auto inline-flex items-center gap-1 text-[10px] text-primary hover:underline"
+          >
+            Open <ExternalLink className="h-2.5 w-2.5" />
+          </a>
+        )}
+      </div>
+
+      {!connected ? (
+        <p className="text-[11px] text-muted-foreground">
+          Go to <span className="font-medium">Settings → Integrations → {providerLabel}</span> to paste your API credentials once.
+        </p>
+      ) : (
+        <>
+          {providerId === 'clickup' && (
+            <ClickUpSpacePicker value={spaceId} onChange={setSpaceId} disabled={enabled && !!integration?.settings?.spaceId} />
+          )}
+
+          <label className="flex items-start gap-2 p-2 rounded-md border cursor-pointer hover:bg-accent/30">
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={handleToggleEnabled}
+              className="mt-0.5 h-3.5 w-3.5"
+            />
+            <div className="flex-1">
+              <div className="text-xs font-medium">Enable sync for this project</div>
+              <p className="text-[10px] text-muted-foreground">
+                {providerId === 'trello'
+                  ? 'Creates a dedicated Trello board on first push.'
+                  : 'Creates a dedicated ClickUp list inside the selected space.'}
+              </p>
+            </div>
+          </label>
+
+          {enabled && (
+            <label className="flex items-start gap-2 p-2 rounded-md border cursor-pointer hover:bg-accent/30">
+              <input
+                type="checkbox"
+                checked={autoSync}
+                onChange={handleToggleAutoSync}
+                className="mt-0.5 h-3.5 w-3.5"
+              />
+              <div className="flex-1">
+                <div className="text-xs font-medium">Auto-sync on task changes</div>
+                <p className="text-[10px] text-muted-foreground">
+                  Pushes to {providerLabel} ~2.5s after any local edit. Remote changes pulled every 45s.
+                </p>
+              </div>
+            </label>
+          )}
+
+          {enabled && (
+            <div className="flex items-center gap-1 flex-wrap">
+              <Button variant="outline" size="sm" onClick={() => runAction('push')} disabled={busy !== null} className="h-7 text-xs">
+                {busy === 'push' ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Upload className="h-3 w-3 mr-1" />}
+                Push
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => runAction('pull')} disabled={busy !== null} className="h-7 text-xs">
+                {busy === 'pull' ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Download className="h-3 w-3 mr-1" />}
+                Pull
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => runAction('merge')} disabled={busy !== null} className="h-7 text-xs">
+                {busy === 'merge' ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <ArrowLeftRight className="h-3 w-3 mr-1" />}
+                Sync
+              </Button>
+              {lastSyncLabel && (
+                <span className="text-[10px] text-muted-foreground ml-auto">
+                  Last: {lastSyncLabel}
+                </span>
+              )}
+            </div>
+          )}
+
+          {integration?.lastSyncError && (
+            <p className="text-[10px] text-red-500 truncate">{integration.lastSyncError}</p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function ClickUpSpacePicker({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string
+  onChange: (v: string) => void
+  disabled?: boolean
+}) {
+  const [loading, setLoading] = useState(false)
+  const [teams, setTeams] = useState<Array<{ id: string; name: string }>>([])
+  const [spaces, setSpaces] = useState<Array<{ id: string; name: string; private: boolean }>>([])
+  const [teamId, setTeamId] = useState<string>('')
+
+  async function loadTeams() {
+    setLoading(true)
+    try {
+      const { teams: t = [] } = await api.clickupDiscover({})
+      setTeams(t)
+      if (t.length === 1) {
+        setTeamId(t[0].id)
+        const { spaces: sp = [] } = await api.clickupDiscover({ teamId: t[0].id })
+        setSpaces(sp)
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not load workspaces')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function selectTeam(id: string) {
+    setTeamId(id)
+    setLoading(true)
+    try {
+      const { spaces: sp = [] } = await api.clickupDiscover({ teamId: id })
+      setSpaces(sp)
+    } catch (err: any) {
+      toast.error(err?.message || 'Could not load spaces')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (disabled) {
+    return (
+      <div className="text-[10px] text-muted-foreground border rounded p-2">
+        Space: <code>{value}</code>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-[11px] font-medium text-muted-foreground">Space</span>
+        <Button variant="outline" size="sm" onClick={loadTeams} disabled={loading} className="h-6 text-[10px] ml-auto">
+          {loading && <Loader2 className="h-2.5 w-2.5 mr-1 animate-spin" />}
+          Load workspaces
+        </Button>
+      </div>
+      {teams.length > 0 && (
+        <Select value={teamId} onValueChange={selectTeam}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Workspace" /></SelectTrigger>
+          <SelectContent>
+            {teams.map(t => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+      {spaces.length > 0 && (
+        <Select value={value} onValueChange={onChange}>
+          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Space" /></SelectTrigger>
+          <SelectContent>
+            {spaces.map(s => <SelectItem key={s.id} value={s.id}>{s.name}{s.private ? ' (private)' : ''}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  )
+}
+
+// Keep the Plug icon import referenced so the bundler doesn't complain
+// in dev mode; used conditionally when nothing is connected yet.
+void Plug

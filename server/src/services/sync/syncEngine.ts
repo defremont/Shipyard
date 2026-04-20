@@ -4,8 +4,7 @@ import * as log from '../logService.js';
 import * as trello from './trelloSync.js';
 import * as clickup from './clickupSync.js';
 import { mergeRemoteIntoLocal, type RemoteTask } from './syncMerge.js';
-import type { SyncConfig, SyncProviderId } from '../syncStore.js';
-import type { Task } from '../../types/index.js';
+import type { EffectiveConfig, SyncProviderId } from '../syncStore.js';
 
 export interface SyncOperationResult {
   success: boolean;
@@ -18,40 +17,64 @@ export interface SyncOperationResult {
   remoteUrl?: string;
 }
 
+function buildEffective(
+  providerId: SyncProviderId,
+  projectId: string,
+  overrides?: Record<string, any>,
+): EffectiveConfig {
+  return {
+    providerId,
+    projectId,
+    settings: overrides ?? {},
+    state: {},
+    enabled: true,
+    autoSync: false,
+    lastSyncAt: null,
+    lastSyncStatus: null,
+    lastSyncError: null,
+  };
+}
+
 export async function testConnection(
   projectId: string,
   providerId: SyncProviderId,
   overrides?: Record<string, any>,
 ): Promise<{ ok: boolean; message: string }> {
-  let config = await store.getConfig(projectId, providerId);
-  if (overrides) {
+  let config: EffectiveConfig | null = null;
+  if (overrides && Object.keys(overrides).length > 0) {
+    // Test with proposed credentials before they're saved globally.
+    const stored = await store.getEffectiveConfig(projectId, providerId);
     config = {
-      providerId,
-      projectId,
-      enabled: true,
-      autoSync: false,
-      settings: { ...(config?.settings ?? {}), ...overrides },
-      state: config?.state ?? {},
-      lastSyncAt: null,
-      lastSyncStatus: null,
-      lastSyncError: null,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
+      ...(stored ?? buildEffective(providerId, projectId)),
+      settings: { ...(stored?.settings ?? {}), ...overrides },
     };
+  } else {
+    config = await store.getEffectiveConfig(projectId, providerId);
   }
-  if (!config) return { ok: false, message: 'Not configured' };
+  if (!config) return { ok: false, message: 'Not connected — add credentials first' };
 
   if (providerId === 'trello') return trello.testConnection(config);
   if (providerId === 'clickup') return clickup.testConnection(config);
   return { ok: false, message: `Unknown provider: ${providerId}` };
 }
 
+async function ensureEnabled(
+  projectId: string,
+  providerId: SyncProviderId,
+): Promise<EffectiveConfig | { error: string }> {
+  const config = await store.getEffectiveConfig(projectId, providerId);
+  if (!config) return { error: `${providerId} not connected — add credentials in Settings` };
+  const project = await store.getProjectConfig(projectId, providerId);
+  if (!project?.enabled) return { error: `${providerId} not enabled for this project` };
+  return config;
+}
+
 export async function pushAll(
   projectId: string,
   providerId: SyncProviderId,
 ): Promise<SyncOperationResult> {
-  const config = await store.getConfig(projectId, providerId);
-  if (!config) return { success: false, message: 'Not configured' };
+  const config = await ensureEnabled(projectId, providerId);
+  if ('error' in config) return { success: false, message: config.error };
 
   const tasks = await taskStore.getTasks(projectId);
 
@@ -78,8 +101,8 @@ export async function pullAll(
   projectId: string,
   providerId: SyncProviderId,
 ): Promise<SyncOperationResult> {
-  const config = await store.getConfig(projectId, providerId);
-  if (!config) return { success: false, message: 'Not configured' };
+  const config = await ensureEnabled(projectId, providerId);
+  if ('error' in config) return { success: false, message: config.error };
 
   try {
     const remote = await fetchRemote(config, providerId);
@@ -106,7 +129,6 @@ export async function pullAll(
   }
 }
 
-/** Pull-then-push: reconcile both sides in a single operation. */
 export async function mergeBoth(
   projectId: string,
   providerId: SyncProviderId,
@@ -126,7 +148,7 @@ export async function mergeBoth(
   };
 }
 
-async function fetchRemote(config: SyncConfig, providerId: SyncProviderId): Promise<RemoteTask[]> {
+async function fetchRemote(config: EffectiveConfig, providerId: SyncProviderId): Promise<RemoteTask[]> {
   if (providerId === 'trello') {
     const cards = await trello.pullCards(config);
     return cards.map(c => ({ remoteId: c.cardId, taskId: c.taskId, title: c.title, description: c.description, prompt: c.prompt, status: c.status, priority: c.priority, updatedAt: c.updatedAt }));
@@ -139,7 +161,7 @@ async function fetchRemote(config: SyncConfig, providerId: SyncProviderId): Prom
 }
 
 async function mergeIdMap(
-  config: SyncConfig,
+  config: EffectiveConfig,
   providerId: SyncProviderId,
   patch: Record<string, string>,
 ): Promise<void> {
@@ -165,23 +187,19 @@ function toResult(errors: string[], pushed: number, total: number, remoteUrl?: s
 }
 
 // ── Auto-sync scheduler ─────────────────────────────────────────────────
-//
-// Debounced per (projectId, providerId). Kicked off by task-mutation routes
-// (see routes/tasks.ts). If the sync is configured with autoSync=false the
-// trigger is a no-op. Errors are swallowed and recorded in the store so
-// repeated failures don't spam the logs.
 
 const timers = new Map<string, NodeJS.Timeout>();
 const DEBOUNCE_MS = 2500;
 
 export function triggerAutoSync(projectId: string): void {
-  // Fire for every configured provider on this project; debounce per pair.
-  // We don't await — caller is a mutation route that shouldn't block.
   void (async () => {
     try {
-      const configs = await store.listConfigs(projectId);
+      const configs = await store.listProjectConfigs(projectId);
       for (const cfg of configs) {
         if (!cfg.enabled || !cfg.autoSync) continue;
+        // If credentials are missing globally, skip silently.
+        const creds = await store.getProviderCredentials(cfg.providerId);
+        if (!creds) continue;
         const key = `${projectId}:${cfg.providerId}`;
         const prev = timers.get(key);
         if (prev) clearTimeout(prev);

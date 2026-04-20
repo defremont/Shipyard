@@ -4,6 +4,13 @@ interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 
+export interface SyncProviderStatus {
+  providerId: 'trello' | 'clickup';
+  connected: boolean;
+  settingsSet: Record<string, boolean>;
+  updatedAt: string | null;
+}
+
 export interface SyncIntegration {
   providerId: 'trello' | 'clickup';
   projectId: string;
@@ -98,6 +105,33 @@ export const api = {
     request<{ ok: boolean; error?: string; data?: any }>('/sync/test', { method: 'POST', body: JSON.stringify({ url }) }),
 
   // ── Stateful integrations (Trello, ClickUp) ─────────────────────────
+  // Global provider credentials (shared across projects)
+  listSyncProviders: () =>
+    request<{ providers: SyncProviderStatus[] }>('/sync/providers'),
+  saveSyncProvider: (providerId: 'trello' | 'clickup', settings: Record<string, any>) =>
+    request<{ provider: SyncProviderStatus }>(
+      `/sync/providers/${providerId}`,
+      { method: 'POST', body: JSON.stringify({ settings }) },
+    ),
+  deleteSyncProvider: (providerId: 'trello' | 'clickup') =>
+    request<{ deleted: boolean }>(`/sync/providers/${providerId}`, { method: 'DELETE' }),
+  testSyncProvider: (providerId: 'trello' | 'clickup', overrides?: Record<string, any>) =>
+    request<{ ok: boolean; message: string }>(
+      `/sync/providers/${providerId}/test`,
+      { method: 'POST', body: JSON.stringify({ overrides }) },
+    ),
+  clickupDiscover: (body: { token?: string; teamId?: string }) =>
+    request<{ teams?: Array<{ id: string; name: string }>; spaces?: Array<{ id: string; name: string; private: boolean }> }>(
+      '/sync/clickup/discover',
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  trelloAuthorizeUrl: (apiKey?: string) =>
+    request<{ url: string }>(
+      '/sync/trello/authorize-url',
+      { method: 'POST', body: JSON.stringify({ apiKey }) },
+    ),
+
+  // Per-project sync configs
   listIntegrations: (projectId?: string) =>
     request<{ integrations: SyncIntegration[] }>(
       projectId ? `/projects/${projectId}/sync` : '/sync/integrations',
@@ -135,16 +169,6 @@ export const api = {
     request<SyncOperationResult>(
       `/projects/${projectId}/sync/${providerId}/merge`,
       { method: 'POST', body: JSON.stringify({}) },
-    ),
-  clickupDiscover: (projectId: string, body: { token?: string; teamId?: string }) =>
-    request<{ teams?: Array<{ id: string; name: string }>; spaces?: Array<{ id: string; name: string; private: boolean }> }>(
-      `/projects/${projectId}/sync/clickup/discover`,
-      { method: 'POST', body: JSON.stringify(body) },
-    ),
-  trelloAuthorizeUrl: (projectId: string, apiKey?: string) =>
-    request<{ url: string }>(
-      `/projects/${projectId}/sync/trello/authorize-url`,
-      { method: 'POST', body: JSON.stringify({ apiKey }) },
     ),
 
   // Git

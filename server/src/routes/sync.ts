@@ -12,23 +12,18 @@ function parseProviderId(value: string): SyncProviderId | null {
 
 export async function syncRoutes(app: FastifyInstance) {
   // ── Legacy: Google Sheets proxy (stateless) ─────────────────────────
-  // Keep unchanged — the Sheets integration still uses a client-held URL.
   app.post<{
     Body: { url: string; method: 'GET' | 'POST'; payload?: unknown; action?: string };
   }>('/api/sync/proxy', async (request, reply) => {
     const { url, method, payload, action } = request.body;
-
     if (!url || !url.startsWith('https://script.google.com/macros/s/')) {
       return reply.status(400).send({ error: 'Only Google Apps Script URLs are allowed' });
     }
-
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
-
     try {
       let fetchUrl = url;
       const fetchOptions: RequestInit = { signal: controller.signal, redirect: 'follow' };
-
       if (method === 'GET') {
         const queryAction = action || 'read';
         fetchUrl = url + (url.includes('?') ? '&' : '?') + 'action=' + queryAction;
@@ -38,17 +33,11 @@ export async function syncRoutes(app: FastifyInstance) {
         fetchOptions.headers = { 'Content-Type': 'application/json' };
         fetchOptions.body = JSON.stringify(payload || {});
       }
-
       const res = await fetch(fetchUrl, fetchOptions);
       if (!res.ok) return reply.status(502).send({ error: `Apps Script returned status ${res.status}` });
-
       const text = await res.text();
-      try {
-        const data = JSON.parse(text);
-        return { data };
-      } catch {
-        return reply.status(502).send({ error: 'Invalid JSON response from Apps Script' });
-      }
+      try { return { data: JSON.parse(text) }; }
+      catch { return reply.status(502).send({ error: 'Invalid JSON response from Apps Script' }); }
     } catch (err: any) {
       if (err.name === 'AbortError') {
         log.warn('sync', 'Apps Script request timed out (15s)');
@@ -87,24 +76,71 @@ export async function syncRoutes(app: FastifyInstance) {
     }
   });
 
-  // ── New stateful integrations (Trello, ClickUp) ─────────────────────
+  // ── Provider (global) endpoints ─────────────────────────────────────
 
-  // List all configured integrations (all projects, sanitized).
-  app.get('/api/sync/integrations', async () => {
-    const configs = await store.listConfigs();
-    return { integrations: configs.map(store.sanitize) };
+  app.get('/api/sync/providers', async () => {
+    const status = await store.listProviderStatus();
+    return { providers: status };
   });
 
-  // Per-project list.
-  app.get<{ Params: { projectId: string } }>(
-    '/api/projects/:projectId/sync',
-    async (request) => {
-      const configs = await store.listConfigs(request.params.projectId);
-      return { integrations: configs.map(store.sanitize) };
+  app.post<{
+    Params: { providerId: string };
+    Body: { settings: Record<string, any> };
+  }>('/api/sync/providers/:providerId', async (request, reply) => {
+    const providerId = parseProviderId(request.params.providerId);
+    if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
+    const { settings } = request.body || {};
+    if (!settings) return reply.status(400).send({ error: 'Missing settings' });
+
+    // Strip empties so we don't overwrite existing secrets with blanks.
+    const cleaned: Record<string, any> = {};
+    for (const [k, v] of Object.entries(settings)) {
+      if (v === undefined) continue;
+      if (typeof v === 'string' && v.length === 0) continue;
+      cleaned[k] = v;
+    }
+    await store.saveProviderCredentials(providerId, cleaned);
+    log.info('sync', `Saved ${providerId} global credentials`);
+    const statuses = await store.listProviderStatus();
+    return { provider: statuses.find(p => p.providerId === providerId) };
+  });
+
+  app.delete<{ Params: { providerId: string } }>(
+    '/api/sync/providers/:providerId',
+    async (request, reply) => {
+      const providerId = parseProviderId(request.params.providerId);
+      if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
+      const deleted = await store.deleteProviderCredentials(providerId);
+      return { deleted };
     },
   );
 
-  // Save credentials + settings for one provider (merges with existing).
+  app.post<{
+    Params: { providerId: string };
+    Body: { overrides?: Record<string, any> };
+  }>('/api/sync/providers/:providerId/test', async (request, reply) => {
+    const providerId = parseProviderId(request.params.providerId);
+    if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
+    // We don't have a project here — use a synthetic id for the override path.
+    const result = await engine.testConnection('__global__', providerId, request.body?.overrides);
+    return result;
+  });
+
+  // ── Per-project endpoints ───────────────────────────────────────────
+
+  app.get<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/sync',
+    async (request) => {
+      const configs = await store.listProjectConfigs(request.params.projectId);
+      return { integrations: configs.map(store.sanitizeProject) };
+    },
+  );
+
+  app.get('/api/sync/integrations', async () => {
+    const configs = await store.listProjectConfigs();
+    return { integrations: configs.map(store.sanitizeProject) };
+  });
+
   app.post<{
     Params: { projectId: string; providerId: string };
     Body: {
@@ -116,31 +152,37 @@ export async function syncRoutes(app: FastifyInstance) {
     const providerId = parseProviderId(request.params.providerId);
     if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
 
-    const { settings, enabled, autoSync } = request.body || {};
-    const saved = await store.saveConfig({
+    // If enabling, global creds are required — fail early with a clear error.
+    if (request.body?.enabled) {
+      const creds = await store.getProviderCredentials(providerId);
+      if (!creds) {
+        return reply.status(400).send({
+          error: `Connect your ${providerId} account first (Settings → Integrations).`,
+        });
+      }
+    }
+
+    const saved = await store.saveProjectConfig({
       projectId: request.params.projectId,
       providerId,
-      settings,
-      enabled,
-      autoSync,
+      settings: request.body?.settings,
+      enabled: request.body?.enabled,
+      autoSync: request.body?.autoSync,
     });
-    log.info('sync', `Saved ${providerId} config`, undefined, request.params.projectId);
-    return { integration: store.sanitize(saved) };
+    log.info('sync', `Saved ${providerId} project config`, undefined, request.params.projectId);
+    return { integration: store.sanitizeProject(saved) };
   });
 
-  // Disconnect (delete config).
   app.delete<{ Params: { projectId: string; providerId: string } }>(
     '/api/projects/:projectId/sync/:providerId',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      const deleted = await store.deleteConfig(request.params.projectId, providerId);
+      const deleted = await store.deleteProjectConfig(request.params.projectId, providerId);
       return { deleted };
     },
   );
 
-  // Test connection. Accepts either stored credentials or overrides (used
-  // by the onboarding dialog before saving).
   app.post<{
     Params: { projectId: string; providerId: string };
     Body: { overrides?: Record<string, any> };
@@ -151,87 +193,73 @@ export async function syncRoutes(app: FastifyInstance) {
     return result;
   });
 
-  // Push all local tasks to the remote board/list.
   app.post<{ Params: { projectId: string; providerId: string } }>(
     '/api/projects/:projectId/sync/:providerId/push',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      const result = await engine.pushAll(request.params.projectId, providerId);
-      return result;
+      return engine.pushAll(request.params.projectId, providerId);
     },
   );
 
-  // Pull + merge from the remote side.
   app.post<{ Params: { projectId: string; providerId: string } }>(
     '/api/projects/:projectId/sync/:providerId/pull',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      const result = await engine.pullAll(request.params.projectId, providerId);
-      return result;
+      return engine.pullAll(request.params.projectId, providerId);
     },
   );
 
-  // Bidirectional (pull then push).
   app.post<{ Params: { projectId: string; providerId: string } }>(
     '/api/projects/:projectId/sync/:providerId/merge',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      const result = await engine.mergeBoth(request.params.projectId, providerId);
-      return result;
+      return engine.mergeBoth(request.params.projectId, providerId);
     },
   );
 
-  // ── Discovery (ClickUp) ─────────────────────────────────────────────
-  // Returns workspaces/spaces so the onboarding UI can render dropdowns
-  // instead of asking the user to hunt a numeric id in URLs.
+  // ── Discovery helpers ───────────────────────────────────────────────
+
   app.post<{
-    Params: { projectId: string };
     Body: { token?: string; teamId?: string };
-  }>('/api/projects/:projectId/sync/clickup/discover', async (request, reply) => {
+  }>('/api/sync/clickup/discover', async (request, reply) => {
     const { token: overrideToken, teamId } = request.body || {};
 
-    let config = await store.getConfig(request.params.projectId, 'clickup');
-    if (overrideToken) {
-      config = {
-        providerId: 'clickup',
-        projectId: request.params.projectId,
-        enabled: true,
-        autoSync: false,
-        settings: { ...(config?.settings ?? {}), token: overrideToken },
-        state: config?.state ?? {},
-        lastSyncAt: null,
-        lastSyncStatus: null,
-        lastSyncError: null,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-    }
-    if (!config) return reply.status(400).send({ error: 'Token required' });
+    const creds = await store.getProviderCredentials('clickup');
+    const token = overrideToken || creds?.settings.token;
+    if (!token) return reply.status(400).send({ error: 'Token required' });
+
+    const effective = {
+      providerId: 'clickup' as const,
+      projectId: '__global__',
+      settings: { token },
+      state: {},
+      enabled: true,
+      autoSync: false,
+      lastSyncAt: null,
+      lastSyncStatus: null,
+      lastSyncError: null,
+    };
 
     try {
-      const teams = await clickup.listTeams(config);
+      const teams = await clickup.listTeams(effective);
       if (!teamId) return { teams };
-      const spaces = await clickup.listSpaces(config, teamId);
+      const spaces = await clickup.listSpaces(effective, teamId);
       return { teams, spaces };
     } catch (err: any) {
       return reply.status(400).send({ error: err?.message ?? 'Discovery failed' });
     }
   });
 
-  // ── Trello: authorize URL helper ────────────────────────────────────
-  // The API key has to be created on trello.com/power-ups/admin by the user;
-  // once we have it, we hand back the exact URL they should open to copy
-  // the personal token (scope read,write,account, expiration never).
-  app.post<{
-    Params: { projectId: string };
-    Body: { apiKey?: string };
-  }>('/api/projects/:projectId/sync/trello/authorize-url', async (request, reply) => {
-    const stored = await store.getConfig(request.params.projectId, 'trello');
-    const apiKey = request.body?.apiKey || stored?.settings.apiKey;
-    if (!apiKey) return reply.status(400).send({ error: 'Trello API key required' });
-    return { url: trello.buildAuthorizeUrl(apiKey) };
-  });
+  app.post<{ Body: { apiKey?: string } }>(
+    '/api/sync/trello/authorize-url',
+    async (request, reply) => {
+      const creds = await store.getProviderCredentials('trello');
+      const apiKey = request.body?.apiKey || creds?.settings.apiKey;
+      if (!apiKey) return reply.status(400).send({ error: 'Trello API key required' });
+      return { url: trello.buildAuthorizeUrl(apiKey) };
+    },
+  );
 }

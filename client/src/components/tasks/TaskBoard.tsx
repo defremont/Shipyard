@@ -23,7 +23,7 @@ import { TaskViewer } from './TaskViewer'
 import { TaskListView } from './TaskListView'
 import { CsvReviewDialog } from './CsvReviewDialog'
 import { BulkImportDialog } from './BulkImportDialog'
-import { SheetSyncPanel } from './SheetSyncPanel'
+import { SyncMenu } from '@/components/sync/SyncMenu'
 import { MilestoneSelector } from './MilestoneSelector'
 import { ReportDialog } from '@/components/reports/ReportDialog'
 import { SyncPanelExports } from '@/components/sync/SyncPanel'
@@ -524,7 +524,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           )}
         </h2>
         <div className="flex flex-wrap items-center gap-1">
-          <SheetSyncPanel projectId={projectId} milestoneId={milestoneId} tasks={tasks || []} />
+          <SyncMenu projectId={projectId} projectName={projectName} milestoneId={milestoneId} tasks={tasks || []} />
           <div className="flex items-center border rounded-md">
             <Tooltip>
               <TooltipTrigger asChild>
