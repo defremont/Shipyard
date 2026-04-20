@@ -4,12 +4,52 @@ import { googleSheetsProvider } from './googleSheets'
 import { jsonExportProvider } from './jsonExport'
 import { markdownExportProvider } from './markdownExport'
 
-// Phase 1: Available now
+// Phase 1: real client-side providers (Sheets proxies through server, exports
+// run fully in-browser).
 registerProvider(googleSheetsProvider)
 registerProvider(jsonExportProvider)
 registerProvider(markdownExportProvider)
 
-// Phase 2: Coming soon (definitions only, no implementation yet)
+// Phase 1 stateful integrations: Trello + ClickUp. Implementation lives on
+// the server (see server/src/services/sync/*); the client only needs the
+// definition so the UI can render the card + config form. The dialog routes
+// test/push/pull through /api/projects/:id/sync/:providerId/* instead of
+// calling a client-side push() method.
+const statefulDefinitions: ProviderDefinition[] = [
+  {
+    id: 'trello',
+    name: 'Trello',
+    description: 'Sync tasks to a dedicated Trello board (auto-creates board, lists and priority labels)',
+    icon: 'LayoutDashboard',
+    direction: 'bidirectional',
+    requiresServer: true,
+    phase: 1,
+    available: true,
+    configFields: [
+      { key: 'apiKey', label: 'API Key', type: 'password', required: true, helpText: 'From trello.com/power-ups/admin — create a Power-Up and copy the API Key.' },
+      { key: 'token', label: 'Token', type: 'password', required: true, helpText: 'Use the "Authorize" button in the Shipyard dialog to generate a token.' },
+    ],
+  },
+  {
+    id: 'clickup',
+    name: 'ClickUp',
+    description: 'Sync tasks to a dedicated ClickUp list inside a space you pick',
+    icon: 'ClipboardList',
+    direction: 'bidirectional',
+    requiresServer: true,
+    phase: 1,
+    available: true,
+    configFields: [
+      { key: 'token', label: 'Personal API Token', type: 'password', required: true, helpText: 'ClickUp → Settings → Apps → generate a Personal token.' },
+      { key: 'spaceId', label: 'Space', type: 'text', required: true, helpText: 'Pick in the Shipyard dialog after entering your token.' },
+    ],
+  },
+]
+for (const def of statefulDefinitions) {
+  registerProvider({ definition: def })
+}
+
+// Phase 2: Coming soon (definitions only).
 const phase2Definitions: ProviderDefinition[] = [
   {
     id: 'github-issues',
@@ -64,21 +104,6 @@ const phase3Definitions: ProviderDefinition[] = [
     ],
   },
   {
-    id: 'trello',
-    name: 'Trello',
-    description: 'Sync tasks with Trello cards and boards',
-    icon: 'LayoutDashboard',
-    direction: 'bidirectional',
-    requiresServer: true,
-    phase: 3,
-    available: false,
-    configFields: [
-      { key: 'apiKey', label: 'API Key', type: 'password', required: true },
-      { key: 'token', label: 'Token', type: 'password', required: true },
-      { key: 'boardId', label: 'Board ID', type: 'text', required: true },
-    ],
-  },
-  {
     id: 'notion',
     name: 'Notion',
     description: 'Sync tasks with a Notion database',
@@ -94,7 +119,6 @@ const phase3Definitions: ProviderDefinition[] = [
   },
 ]
 
-// Register placeholder providers for definitions display
 for (const def of [...phase2Definitions, ...phase3Definitions]) {
   registerProvider({ definition: def })
 }

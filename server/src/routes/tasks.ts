@@ -4,6 +4,7 @@ import { getProjects } from '../services/projectDiscovery.js';
 import { buildAiResolvePrompt } from '../services/aiResolvePrompt.js';
 import { buildAiManagePrompt } from '../services/aiManagePrompt.js';
 import * as log from '../services/logService.js';
+import { triggerAutoSync } from '../services/sync/syncEngine.js';
 
 export async function taskRoutes(app: FastifyInstance) {
   // All tasks across all projects
@@ -77,6 +78,7 @@ export async function taskRoutes(app: FastifyInstance) {
           milestoneId: request.body.milestoneId,
         });
         log.info('tasks', `Task created: ${task.title}`, undefined, request.params.projectId);
+        triggerAutoSync(request.params.projectId);
         return task;
       } catch (err: any) {
         log.error('tasks', 'Failed to create task', err.message, request.params.projectId);
@@ -93,6 +95,7 @@ export async function taskRoutes(app: FastifyInstance) {
       if (request.body.status) {
         log.info('tasks', `Task "${task.title}" → ${request.body.status}`, undefined, request.params.projectId);
       }
+      triggerAutoSync(request.params.projectId);
       return task;
     }
   );
@@ -103,6 +106,7 @@ export async function taskRoutes(app: FastifyInstance) {
       const deleted = await taskStore.deleteTask(request.params.projectId, request.params.taskId);
       if (!deleted) return reply.status(404).send({ error: 'Task not found' });
       log.info('tasks', `Task deleted: ${request.params.taskId}`, undefined, request.params.projectId);
+      triggerAutoSync(request.params.projectId);
       return { success: true };
     }
   );
@@ -114,6 +118,7 @@ export async function taskRoutes(app: FastifyInstance) {
       try {
         const count = await taskStore.importTasks(request.params.projectId, request.body.tasks);
         log.info('tasks', `Imported ${count} tasks`, undefined, request.params.projectId);
+        triggerAutoSync(request.params.projectId);
         return { imported: count };
       } catch (err: any) {
         log.error('tasks', 'Task import failed', err.message, request.params.projectId);
@@ -136,6 +141,7 @@ export async function taskRoutes(app: FastifyInstance) {
       let total = 0;
       for (const [pid, tasks] of byProject) {
         total += await taskStore.importTasks(pid, tasks);
+        triggerAutoSync(pid);
       }
       return { imported: total };
     }
@@ -152,6 +158,7 @@ export async function taskRoutes(app: FastifyInstance) {
         const result = await taskStore.applyCsvChanges(request.params.projectId, request.body);
         const { update, create, remove } = request.body;
         log.info('tasks', `CSV apply: ${update?.length || 0} updated, ${create?.length || 0} created, ${remove?.length || 0} removed`, undefined, request.params.projectId);
+        triggerAutoSync(request.params.projectId);
         return result;
       } catch (err: any) {
         log.error('tasks', 'CSV apply failed', err.message, request.params.projectId);
@@ -165,6 +172,7 @@ export async function taskRoutes(app: FastifyInstance) {
     '/api/projects/:projectId/tasks/replace',
     async (request) => {
       const tasks = await taskStore.replaceTasks(request.params.projectId, request.body.tasks, request.body.milestoneId);
+      triggerAutoSync(request.params.projectId);
       return { tasks };
     }
   );
@@ -212,6 +220,7 @@ export async function taskRoutes(app: FastifyInstance) {
     '/api/projects/:projectId/tasks/reorder',
     async (request) => {
       const tasks = await taskStore.reorderTasks(request.params.projectId, request.body.taskIds);
+      triggerAutoSync(request.params.projectId);
       return { tasks };
     }
   );

@@ -8,6 +8,7 @@ export type ProviderId =
   | 'webhook'
   | 'linear'
   | 'trello'
+  | 'clickup'
   | 'notion'
 
 export type SyncDirection = 'push' | 'pull' | 'bidirectional' | 'export-only' | 'notify-only'

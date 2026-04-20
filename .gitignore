@@ -12,6 +12,7 @@ data/claude.json
 data/.claude-key
 data/mcp-config.json
 data/mcp-auth.json
+data/sync-config.json
 data/server.log
 
 # Build artifacts

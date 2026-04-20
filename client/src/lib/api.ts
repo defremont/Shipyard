@@ -4,6 +4,31 @@ interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 
+export interface SyncIntegration {
+  providerId: 'trello' | 'clickup';
+  projectId: string;
+  enabled: boolean;
+  autoSync: boolean;
+  settings: Record<string, any>;
+  state: Record<string, any>;
+  lastSyncAt: string | null;
+  lastSyncStatus: 'ok' | 'error' | null;
+  lastSyncError: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SyncOperationResult {
+  success: boolean;
+  message: string;
+  pushed?: number;
+  pulled?: number;
+  created?: number;
+  updated?: number;
+  errors?: string[];
+  remoteUrl?: string;
+}
+
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   const { timeout, ...fetchOptions } = options || {};
   const headers: Record<string, string> = {};
@@ -71,6 +96,56 @@ export const api = {
     request<{ data: any; error?: string }>('/sync/proxy', { method: 'POST', body: JSON.stringify({ url, method, payload, action }) }),
   syncTest: (url: string) =>
     request<{ ok: boolean; error?: string; data?: any }>('/sync/test', { method: 'POST', body: JSON.stringify({ url }) }),
+
+  // ── Stateful integrations (Trello, ClickUp) ─────────────────────────
+  listIntegrations: (projectId?: string) =>
+    request<{ integrations: SyncIntegration[] }>(
+      projectId ? `/projects/${projectId}/sync` : '/sync/integrations',
+    ),
+  saveIntegration: (projectId: string, providerId: 'trello' | 'clickup', body: {
+    settings?: Record<string, any>;
+    enabled?: boolean;
+    autoSync?: boolean;
+  }) =>
+    request<{ integration: SyncIntegration }>(
+      `/projects/${projectId}/sync/${providerId}`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  deleteIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+    request<{ deleted: boolean }>(
+      `/projects/${projectId}/sync/${providerId}`,
+      { method: 'DELETE' },
+    ),
+  testIntegration: (projectId: string, providerId: 'trello' | 'clickup', overrides?: Record<string, any>) =>
+    request<{ ok: boolean; message: string }>(
+      `/projects/${projectId}/sync/${providerId}/test`,
+      { method: 'POST', body: JSON.stringify({ overrides }) },
+    ),
+  pushIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+    request<SyncOperationResult>(
+      `/projects/${projectId}/sync/${providerId}/push`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+  pullIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+    request<SyncOperationResult>(
+      `/projects/${projectId}/sync/${providerId}/pull`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+  mergeIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+    request<SyncOperationResult>(
+      `/projects/${projectId}/sync/${providerId}/merge`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+  clickupDiscover: (projectId: string, body: { token?: string; teamId?: string }) =>
+    request<{ teams?: Array<{ id: string; name: string }>; spaces?: Array<{ id: string; name: string; private: boolean }> }>(
+      `/projects/${projectId}/sync/clickup/discover`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+  trelloAuthorizeUrl: (projectId: string, apiKey?: string) =>
+    request<{ url: string }>(
+      `/projects/${projectId}/sync/trello/authorize-url`,
+      { method: 'POST', body: JSON.stringify({ apiKey }) },
+    ),
 
   // Git
   getGitStatus: (projectId: string, subrepo?: string) => request<any>(`/projects/${projectId}/git/status${subrepo ? `?subrepo=${encodeURIComponent(subrepo)}` : ''}`),

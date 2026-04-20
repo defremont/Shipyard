@@ -6,11 +6,13 @@ import { GlobalSearch } from './GlobalSearch'
 import { FileContentSearch } from './FileContentSearch'
 import { TabsProvider } from '@/hooks/useTabs'
 import { TerminalPanel } from '@/components/terminals/TerminalPanel'
+import { useIntegrationAutoPull } from '@/hooks/useIntegrationAutoPull'
 
 const SIDEBAR_KEY = 'shipyard-sidebar-collapsed'
 
 export function Layout() {
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(SIDEBAR_KEY) === 'true')
+  useIntegrationAutoPull()
 
   const toggle = () => {
     setCollapsed(prev => {

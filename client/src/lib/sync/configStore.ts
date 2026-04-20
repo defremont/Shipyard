@@ -90,7 +90,7 @@ export function removeGlobalConfig(providerId: ProviderId) {
 /** Check if any sync provider is configured for a project */
 export function hasAnySyncConfig(projectId: string): ProviderId[] {
   const configured: ProviderId[] = []
-  const providers: ProviderId[] = ['google-sheets', 'github-issues', 'webhook', 'linear', 'trello', 'notion']
+  const providers: ProviderId[] = ['google-sheets', 'github-issues', 'webhook', 'linear', 'trello', 'clickup', 'notion']
 
   for (const p of providers) {
     const config = readProviderConfig(projectId, p)
