@@ -1,8 +1,52 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog } from 'electron';
 import { join, resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
-import { spawn, type ChildProcess } from 'child_process';
+import { spawn, execSync, type ChildProcess } from 'child_process';
 import { request } from 'http';
+import { homedir, platform as osPlatform } from 'os';
+
+// ── PATH fix for GUI launch on Linux/macOS ─────────────────────────
+// GUI-launched apps on Linux/macOS do NOT inherit shell PATH (no .bashrc/.zshrc).
+// That breaks detection of user-installed CLIs like `claude`, `git`, `pnpm`, etc.
+// We read PATH from the user's login shell and prepend common install locations.
+function fixPathForGuiLaunch() {
+  if (osPlatform() === 'win32') return;
+
+  // Try to read PATH from the user's login+interactive shell
+  try {
+    const shell = process.env.SHELL || '/bin/bash';
+    const output = execSync(`${shell} -ilc 'printf "%s" "$PATH"'`, {
+      encoding: 'utf8',
+      timeout: 3000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (output) {
+      process.env.PATH = output;
+      console.log('[Electron] PATH restored from user shell');
+    }
+  } catch (err) {
+    console.warn('[Electron] Could not read shell PATH:', (err as Error).message);
+  }
+
+  // Always append common install locations (in case shell config is minimal)
+  const home = homedir();
+  const existing = (process.env.PATH || '').split(':').filter(Boolean);
+  const common = [
+    `${home}/.npm-global/bin`,
+    `${home}/.local/bin`,
+    `${home}/bin`,
+    `${home}/.volta/bin`,
+    `${home}/.bun/bin`,
+    '/usr/local/bin',
+    '/opt/homebrew/bin',
+    '/usr/bin',
+    '/bin',
+  ];
+  for (const p of common) if (!existing.includes(p)) existing.push(p);
+  process.env.PATH = existing.join(':');
+}
+
+fixPathForGuiLaunch();
 
 // ── Paths ──────────────────────────────────────────────────────────
 
