@@ -150,22 +150,26 @@ const columns: ColumnConfig[] = [
 ]
 
 const COLUMN_KEYS = new Set(columns.map(c => c.key))
+const BACKLOG_DROP_ID = 'inbox-backlog'
+const DROP_ZONE_KEYS = new Set([...COLUMN_KEYS, BACKLOG_DROP_ID])
 
-// Custom collision detection: prioritize sortable items over column containers
+// Custom collision detection: prioritize sortable items over drop containers
 const itemsFirstCollision: CollisionDetection = (args) => {
   // First try pointerWithin to find containers the pointer is inside
   const pointerCollisions = pointerWithin(args)
 
   if (pointerCollisions.length > 0) {
-    // Filter to only sortable items (not column containers)
-    const itemCollisions = pointerCollisions.filter(c => !COLUMN_KEYS.has(c.id as string))
+    // Filter to only sortable items (not column or backlog containers)
+    const itemCollisions = pointerCollisions.filter(c => !DROP_ZONE_KEYS.has(c.id as string))
     if (itemCollisions.length > 0) {
       // Among items, pick the closest center
       const itemIds = new Set(itemCollisions.map(c => c.id))
       const itemContainers = args.droppableContainers.filter(c => itemIds.has(c.id))
       return closestCenter({ ...args, droppableContainers: itemContainers })
     }
-    // No items found — return the column container
+    // No items found — prefer the most specific drop zone (backlog over inbox column)
+    const backlogHit = pointerCollisions.find(c => c.id === BACKLOG_DROP_ID)
+    if (backlogHit) return [backlogHit]
     return pointerCollisions.filter(c => COLUMN_KEYS.has(c.id as string))
   }
 
@@ -248,6 +252,27 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, mil
             Show {hiddenCount} more
           </button>
         )}
+      </div>
+    </div>
+  )
+}
+
+function BacklogSubHeader({ count, children }: { count: number; children: React.ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: BACKLOG_DROP_ID })
+  return (
+    <div
+      ref={setNodeRef}
+      className={cn(
+        'rounded-md border border-dashed border-muted-foreground/20 px-1.5 py-1 transition-colors',
+        isOver && 'border-primary/50 bg-primary/5',
+      )}
+    >
+      <div className="flex items-center gap-1.5 px-0.5 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
+        <span>Backlog</span>
+        <span className="text-muted-foreground/50">({count})</span>
+      </div>
+      <div className="space-y-2">
+        {children}
       </div>
     </div>
   )
@@ -393,18 +418,29 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     const result: Record<string, Task[]> = { inbox: [], in_progress: [], done: [] }
     if (!tasks) return result
 
+    const backlog: Task[] = []
+    const todo: Task[] = []
     for (const task of tasks) {
       if (task.status === 'done') result.done.push(task)
       else if (task.status === 'in_progress') result.in_progress.push(task)
-      else result.inbox.push(task)
+      else if (task.status === 'backlog') backlog.push(task)
+      else todo.push(task)
     }
 
-    for (const key of Object.keys(result)) {
-      result[key] = sortTasks(result[key], sortBy)
-    }
+    result.in_progress = sortTasks(result.in_progress, sortBy)
+    result.done = sortTasks(result.done, sortBy)
+    // Inbox is ordered: backlog tasks first, then todo tasks — keeps sub-sections
+    // contiguous so a single SortableContext still works.
+    result.inbox = [...sortTasks(backlog, sortBy), ...sortTasks(todo, sortBy)]
 
     return result
   }, [tasks, sortBy])
+
+  const inboxSplit = useMemo(() => {
+    const inbox = grouped.inbox || []
+    const backlogCount = inbox.filter(t => t.status === 'backlog').length
+    return { backlogCount, todoCount: inbox.length - backlogCount }
+  }, [grouped.inbox])
 
   // Split done tasks into unread and read based on doneReadAt timestamp
   const { unreadDone, readDone } = useMemo(() => {
@@ -463,6 +499,14 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
 
     const task = active.data.current?.task as Task
     if (!task) return
+
+    // Dropped on the backlog sub-zone inside the Inbox column
+    if (over.id === BACKLOG_DROP_ID) {
+      if (task.status !== 'backlog') {
+        updateTask.mutate({ projectId: task.projectId, taskId: task.id, status: 'backlog' })
+      }
+      return
+    }
 
     // Dropped on a column directly (empty column)
     if (COLUMN_KEYS.has(over.id as string)) {
@@ -634,17 +678,56 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                 >
                   {allVisibleTasks.length > 0 ? (
                     <>
-                      {visibleTasks.map(task => (
-                        <SortableTaskItem
-                          key={task.id}
-                          task={task}
-                          projectName={projectName}
-                          projectPath={projectPath}
-                          onEdit={handleEdit}
-                          onView={handleView}
-                          onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
-                        />
-                      ))}
+                      {col.key === 'inbox' && inboxSplit.backlogCount > 0 ? (
+                        <>
+                          <BacklogSubHeader count={inboxSplit.backlogCount}>
+                            {visibleTasks
+                              .filter(t => t.status === 'backlog')
+                              .map(task => (
+                                <SortableTaskItem
+                                  key={task.id}
+                                  task={task}
+                                  projectName={projectName}
+                                  projectPath={projectPath}
+                                  onEdit={handleEdit}
+                                  onView={handleView}
+                                  onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
+                                />
+                              ))}
+                          </BacklogSubHeader>
+                          {inboxSplit.todoCount > 0 && (
+                            <div className="flex items-center gap-1.5 px-0.5 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
+                              <span>To Do</span>
+                              <span className="text-muted-foreground/50">({inboxSplit.todoCount})</span>
+                            </div>
+                          )}
+                          {visibleTasks
+                            .filter(t => t.status !== 'backlog')
+                            .map(task => (
+                              <SortableTaskItem
+                                key={task.id}
+                                task={task}
+                                projectName={projectName}
+                                projectPath={projectPath}
+                                onEdit={handleEdit}
+                                onView={handleView}
+                                onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
+                              />
+                            ))}
+                        </>
+                      ) : (
+                        visibleTasks.map(task => (
+                          <SortableTaskItem
+                            key={task.id}
+                            task={task}
+                            projectName={projectName}
+                            projectPath={projectPath}
+                            onEdit={handleEdit}
+                            onView={handleView}
+                            onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
+                          />
+                        ))
+                      )}
                       {isDoneCol && readDone.length > 0 && (
                         <button
                           onClick={() => setShowReadDone(!showReadDone)}
