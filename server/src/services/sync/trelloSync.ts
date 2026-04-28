@@ -282,20 +282,49 @@ export interface PulledTask {
 
 export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
   const state: TrelloState = config.state ?? {};
-  if (!state.boardId || !state.listIds || !state.labelIds) return [];
+  if (!state.boardId) return [];
 
-  const [cards, labels] = await Promise.all([
+  // Fetch cards, labels, and lists in parallel. Lists are needed so we can
+  // resolve a list id we didn't push to (e.g. a manually-named "Backlog"
+  // list created on Trello after we set up state.listIds, or an existing
+  // board the user linked to where lists rotated).
+  const [cards, labels, lists] = await Promise.all([
     trelloRequest<TrelloCard[]>(config, `/boards/${state.boardId}/cards`, 'GET', { fields: 'name,desc,idList,idLabels,closed,dateLastActivity' }),
     trelloRequest<Array<{ id: string; name: string; color: string }>>(config, `/boards/${state.boardId}/labels`),
+    trelloRequest<Array<{ id: string; name: string; closed: boolean }>>(config, `/boards/${state.boardId}/lists`, 'GET', { fields: 'name,closed' }),
   ]);
 
   const labelById: Record<string, { name: string; color: string }> = {};
   for (const l of labels) labelById[l.id] = l;
 
+  // Primary lookup: list ids we tracked when pushing.
   const listToStatus: Record<string, TaskStatus> = {};
-  for (const status of STATUS_ORDER) {
-    const lid = state.listIds![status];
-    if (lid) listToStatus[lid] = status;
+  if (state.listIds) {
+    for (const status of STATUS_ORDER) {
+      const lid = state.listIds[status];
+      if (lid) listToStatus[lid] = status;
+    }
+  }
+
+  // Fallback lookup: any list whose name matches a known status label —
+  // this catches new lists the user created in Trello, or the case where a
+  // user linked to an existing board mid-sync. We only set the entry if the
+  // primary map didn't already cover this list id.
+  for (const list of lists) {
+    if (list.closed) continue;
+    if (listToStatus[list.id]) continue;
+    const byCanonical = STATUS_FROM_LIST[list.name];
+    if (byCanonical) {
+      listToStatus[list.id] = byCanonical;
+      continue;
+    }
+    const lower = (list.name || '').toLowerCase();
+    for (const status of STATUS_ORDER) {
+      if (STATUS_LABELS[status].toLowerCase() === lower) {
+        listToStatus[list.id] = status;
+        break;
+      }
+    }
   }
 
   const reverseCardMap: Record<string, string> = {};
@@ -306,8 +335,8 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
   const out: PulledTask[] = [];
   for (const card of cards) {
     if (card.closed) continue;
-    const status = listToStatus[card.idList];
-    if (!status) continue;
+    // Cards in unrecognised lists default to backlog so they're not dropped.
+    const status = listToStatus[card.idList] ?? 'backlog';
 
     let priority: TaskPriority = 'medium';
     for (const labelId of card.idLabels) {
@@ -336,9 +365,6 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
     });
   }
 
-  // Handle lists named like the status even if listIds drifted — fallback
-  // useful when a user manually rearranges the board.
-  void STATUS_FROM_LIST;
   return out;
 }
 

@@ -150,7 +150,6 @@ function ProjectProviderRow({
   const queryClient = useQueryClient()
   const connected = providerStatus?.connected ?? false
   const enabled = integration?.enabled ?? false
-  const autoSync = integration?.autoSync ?? false
   const [busy, setBusy] = useState<'push' | 'pull' | 'merge' | null>(null)
   const [spaceId, setSpaceId] = useState<string>(integration?.settings?.spaceId ?? '')
 
@@ -200,16 +199,16 @@ function ProjectProviderRow({
     }
     await saveMutation.mutateAsync({
       enabled: true,
+      // Bidirectional sync runs as soon as the integration is enabled —
+      // setting autoSync alongside keeps the persisted flag consistent
+      // with what actually happens.
+      autoSync: true,
       settings: {
         projectName,
         ...(providerId === 'clickup' ? { spaceId } : {}),
       },
     })
-    toast.success(`${providerLabel} enabled for this project`)
-  }
-
-  async function handleToggleAutoSync() {
-    await saveMutation.mutateAsync({ autoSync: !autoSync })
+    toast.success(`${providerLabel} enabled — bidirectional sync is on`)
   }
 
   async function enterLinkMode() {
@@ -408,20 +407,10 @@ function ProjectProviderRow({
           )}
 
           {enabled && (
-            <label className="flex items-start gap-2 p-2 rounded-md border cursor-pointer hover:bg-accent/30">
-              <input
-                type="checkbox"
-                checked={autoSync}
-                onChange={handleToggleAutoSync}
-                className="mt-0.5 h-3.5 w-3.5"
-              />
-              <div className="flex-1">
-                <div className="text-xs font-medium">Auto-sync on task changes</div>
-                <p className="text-[10px] text-muted-foreground">
-                  Pushes to {providerLabel} ~2.5s after any local edit. Remote changes pulled every 45s.
-                </p>
-              </div>
-            </label>
+            <p className="text-[10px] text-muted-foreground px-1">
+              Local edits push to {providerLabel} ~2.5s after the change. Remote
+              edits pull every 30s. Use the buttons below for an immediate one-off.
+            </p>
           )}
 
           {enabled && (

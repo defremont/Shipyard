@@ -33,6 +33,15 @@ function TabContentLoader({ projectId, tab, onInit }: { projectId: string; tab: 
     }
   }, [data, tab.needsFetch, tab.path, onInit])
 
+  // For diff-mode tabs (staged/unstaged), a missing file just means "no working
+  // tree content" — typically a deleted file. Treat the fetch as empty so the
+  // diff view can still render the original side from git.
+  useEffect(() => {
+    if (error && tab.needsFetch && tab.diffMode) {
+      onInit(tab.path, '')
+    }
+  }, [error, tab.needsFetch, tab.diffMode, tab.path, onInit])
+
   if (isLoading) {
     return (
       <div className="flex-1 flex items-center justify-center">
@@ -41,7 +50,7 @@ function TabContentLoader({ projectId, tab, onInit }: { projectId: string; tab: 
     )
   }
 
-  if (error) {
+  if (error && !tab.diffMode) {
     return (
       <div className="flex-1 flex items-center justify-center text-sm text-red-400">
         Failed to load file: {(error as Error).message}
@@ -53,14 +62,27 @@ function TabContentLoader({ projectId, tab, onInit }: { projectId: string; tab: 
 }
 
 function DiffTabContent({ projectId, tab }: { projectId: string; tab: EditorTab }) {
-  const { data: headData, isLoading: headLoading } = useGitFileAtRef(
+  const isStaged = tab.diffMode === 'staged'
+  // Staged diff: HEAD (original) ↔ index "‌:0" (modified — what would be committed).
+  // Unstaged diff: index "‌:0" (original — what's already staged, falls back to HEAD
+  // when the file isn't staged) ↔ working tree content (modified — `tab.content`).
+  const originalRef = isStaged ? 'HEAD' : ':0'
+  const { data: originalData, isLoading: originalLoading } = useGitFileAtRef(
     projectId,
     tab.path,
-    tab.diffMode === 'staged' ? 'HEAD' : 'HEAD',
-    tab.subrepo
+    originalRef,
+    tab.subrepo,
+  )
+  // For the staged view we also need to read what's in the index; for unstaged
+  // we just compare against the working tree the editor already loaded.
+  const { data: stagedData, isLoading: stagedLoading } = useGitFileAtRef(
+    projectId,
+    isStaged ? tab.path : undefined,
+    ':0',
+    tab.subrepo,
   )
 
-  if (headLoading || tab.needsFetch) {
+  if ((isStaged ? stagedLoading : false) || originalLoading || tab.needsFetch) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -68,10 +90,13 @@ function DiffTabContent({ projectId, tab }: { projectId: string; tab: EditorTab 
     )
   }
 
+  const original = originalData?.content ?? ''
+  const modified = isStaged ? (stagedData?.content ?? '') : tab.content
+
   return (
     <DiffEditor
-      original={headData?.content ?? ''}
-      modified={tab.content}
+      original={original}
+      modified={modified}
       extension={tab.extension}
     />
   )

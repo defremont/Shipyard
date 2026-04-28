@@ -4,7 +4,7 @@ import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
-import { FileChange } from './FileChange'
+import { FileTree } from './FileTree'
 import { CommitForm } from './CommitForm'
 import { CommitDetailDialog } from './CommitDetailDialog'
 import { useGitStatus, useGitLog, useGitMainCommit, useGitBranches, useCheckoutBranch, useStageAll, useUnstageAll, useGitPush, useGitPull, useDiscardAll, useUndoCommit } from '@/hooks/useGit'
@@ -220,11 +220,15 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
             )}
           </div>
           {stagedOpen && (
-            <div className="space-y-1">
-              {stagedFiles.map(({ file, status: s }: { file: string; status: string }) => (
-                <FileChange key={`staged-${file}`} projectId={projectId} file={file} status={s} staged subrepo={subrepo} onOpenInEditor={onOpenInEditor} onOpenDiffInEditor={onOpenDiffInEditor} activeFilePath={activeFilePath} />
-              ))}
-            </div>
+            <FileTree
+              projectId={projectId}
+              files={stagedFiles}
+              staged
+              subrepo={subrepo}
+              onOpenInEditor={onOpenInEditor}
+              onOpenDiffInEditor={onOpenDiffInEditor}
+              activeFilePath={activeFilePath}
+            />
           )}
         </div>
       )}
@@ -269,11 +273,15 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
             )}
           </div>
           {unstagedOpen && (
-            <div className="space-y-1">
-              {unstagedFiles.map(({ file, status: s }) => (
-                <FileChange key={`unstaged-${file}`} projectId={projectId} file={file} status={s} staged={false} subrepo={subrepo} onOpenInEditor={onOpenInEditor} onOpenDiffInEditor={onOpenDiffInEditor} activeFilePath={activeFilePath} />
-              ))}
-            </div>
+            <FileTree
+              projectId={projectId}
+              files={unstagedFiles}
+              staged={false}
+              subrepo={subrepo}
+              onOpenInEditor={onOpenInEditor}
+              onOpenDiffInEditor={onOpenDiffInEditor}
+              activeFilePath={activeFilePath}
+            />
           )}
         </div>
       )}

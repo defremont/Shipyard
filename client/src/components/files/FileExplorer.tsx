@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Pencil, Trash2, FolderOpen, Loader2, Copy, FolderTree, PenLine, FilePlus, FolderPlus, Scissors, ClipboardPaste, Files } from 'lucide-react'
+import { ChevronDown, ChevronRight, MoreHorizontal, Eye, Pencil, Trash2, FolderOpen, Loader2, Copy, PenLine, FilePlus, FolderPlus, ClipboardPaste, Files, Scissors } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
@@ -325,9 +325,7 @@ function CreateInputRow({ depth, type, onSubmit, onCancel }: { depth: number; ty
   )
 }
 
-export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFilePath }: FileExplorerProps) {
-  const [sectionOpen, setSectionOpen] = useState(false)
-  const [expandTree, setExpandTree] = useState(false)
+export function FileExplorer({ projectId, projectPath: _projectPath, onOpenInEditor, activeFilePath }: FileExplorerProps) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [previewPath, setPreviewPath] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<{ path: string; name: string; type: string } | null>(null)
@@ -335,7 +333,7 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
   const [creating, setCreating] = useState<CreatingState | null>(null)
   const [clipboard, setClipboard] = useState<{ path: string; name: string; op: 'copy' | 'cut' } | null>(null)
 
-  const { data, isLoading } = useFileTree(projectId, '', sectionOpen)
+  const { data, isLoading } = useFileTree(projectId, '', true)
   const deleteFile = useDeleteFile()
   const openFileFolder = useOpenFileFolder()
   const renameFile = useRenameFile()
@@ -480,108 +478,77 @@ export function FileExplorer({ projectId, projectPath, onOpenInEditor, activeFil
   }
 
   return (
-    <div className="space-y-2">
-      {/* Section header */}
-      <div className="flex items-center justify-between w-full group">
+    <div className="flex flex-col h-full min-h-0">
+      {/* Toolbar */}
+      <div className="flex items-center justify-end gap-0.5 pb-1 shrink-0">
         <button
-          className="flex items-center gap-1.5 flex-1 text-left"
-          onClick={() => setSectionOpen(!sectionOpen)}
+          title="New File"
+          className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent transition-colors"
+          onClick={() => setCreating({ parentPath: '', type: 'file' })}
         >
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
-            <FolderTree className="h-3.5 w-3.5" />
-            Files
-          </h2>
+          <FilePlus className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
-        <div className="flex items-center gap-0.5">
-          {sectionOpen && (
-            <>
-              <button
-                title="New File"
-                className="h-5 w-5 flex items-center justify-center rounded hover:bg-accent transition-colors"
-                onClick={(e) => { e.stopPropagation(); setSectionOpen(true); setCreating({ parentPath: '', type: 'file' }) }}
-              >
-                <FilePlus className="h-3 w-3 text-muted-foreground" />
-              </button>
-              <button
-                title="New Folder"
-                className="h-5 w-5 flex items-center justify-center rounded hover:bg-accent transition-colors"
-                onClick={(e) => { e.stopPropagation(); setSectionOpen(true); setCreating({ parentPath: '', type: 'dir' }) }}
-              >
-                <FolderPlus className="h-3 w-3 text-muted-foreground" />
-              </button>
-              {clipboard && (
-                <button
-                  title={`Paste ${clipboard.name} at root`}
-                  className="h-5 w-5 flex items-center justify-center rounded hover:bg-accent transition-colors"
-                  onClick={(e) => { e.stopPropagation(); doPaste('') }}
-                >
-                  <ClipboardPaste className="h-3 w-3 text-muted-foreground" />
-                </button>
-              )}
-            </>
-          )}
-          <button onClick={() => setSectionOpen(!sectionOpen)} className="h-5 w-5 flex items-center justify-center">
-            {sectionOpen ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
+        <button
+          title="New Folder"
+          className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent transition-colors"
+          onClick={() => setCreating({ parentPath: '', type: 'dir' })}
+        >
+          <FolderPlus className="h-3.5 w-3.5 text-muted-foreground" />
+        </button>
+        {clipboard && (
+          <button
+            title={`Paste ${clipboard.name} at root`}
+            className="h-6 w-6 flex items-center justify-center rounded hover:bg-accent transition-colors"
+            onClick={() => doPaste('')}
+          >
+            <ClipboardPaste className="h-3.5 w-3.5 text-muted-foreground" />
           </button>
-        </div>
+        )}
       </div>
 
-      {/* Tree */}
-      {sectionOpen && (
-        <div className={cn(
-          "overflow-y-auto scrollbar-dark rounded border border-border/50 bg-background/50",
-          !expandTree && 'max-h-72'
-        )}>
-          {isLoading ? (
-            <div className="flex items-center justify-center py-4">
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            </div>
-          ) : data?.entries.length === 0 ? (
-            <div className="text-xs text-muted-foreground text-center py-4">No files found</div>
-          ) : (
-            <>
-              <div className="py-1">
-                {creating && creating.parentPath === '' && (
-                  <CreateInputRow
-                    depth={0}
-                    type={creating.type}
-                    onSubmit={(name) => handleFinishCreate('', creating.type, name)}
-                    onCancel={() => setCreating(null)}
-                  />
-                )}
-                {data?.entries.map(entry => (
-                  <TreeNode
-                    key={entry.path}
-                    entry={entry}
-                    projectId={projectId}
-                    depth={0}
-                    expanded={expanded}
-                    onToggle={handleToggle}
-                    onPreview={setPreviewPath}
-                    onContextAction={handleContextAction}
-                    onOpenInEditor={onOpenInEditor}
-                    renamingPath={renamingPath}
-                    onStartRename={setRenamingPath}
-                    onFinishRename={handleFinishRename}
-                    onCancelRename={() => setRenamingPath(null)}
-                    activeFilePath={activeFilePath}
-                    hasClipboard={!!clipboard}
-                    creating={creating}
-                    onFinishCreate={handleFinishCreate}
-                    onCancelCreate={() => setCreating(null)}
-                  />
-                ))}
-              </div>
-              <button
-                onClick={() => setExpandTree(!expandTree)}
-                className="w-full text-[10px] text-muted-foreground hover:text-foreground bg-muted/80 hover:bg-muted py-0.5 transition-colors border-t sticky bottom-0"
-              >
-                {expandTree ? 'Collapse' : 'Expand'}
-              </button>
-            </>
-          )}
-        </div>
-      )}
+      {/* Tree (always visible, fills remaining height) */}
+      <div className="flex-1 min-h-0 overflow-y-auto scrollbar-dark">
+        {isLoading ? (
+          <div className="flex items-center justify-center py-4">
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          </div>
+        ) : data?.entries.length === 0 && !creating ? (
+          <div className="text-xs text-muted-foreground text-center py-4">No files found</div>
+        ) : (
+          <div className="py-1">
+            {creating && creating.parentPath === '' && (
+              <CreateInputRow
+                depth={0}
+                type={creating.type}
+                onSubmit={(name) => handleFinishCreate('', creating.type, name)}
+                onCancel={() => setCreating(null)}
+              />
+            )}
+            {data?.entries.map(entry => (
+              <TreeNode
+                key={entry.path}
+                entry={entry}
+                projectId={projectId}
+                depth={0}
+                expanded={expanded}
+                onToggle={handleToggle}
+                onPreview={setPreviewPath}
+                onContextAction={handleContextAction}
+                onOpenInEditor={onOpenInEditor}
+                renamingPath={renamingPath}
+                onStartRename={setRenamingPath}
+                onFinishRename={handleFinishRename}
+                onCancelRename={() => setRenamingPath(null)}
+                activeFilePath={activeFilePath}
+                hasClipboard={!!clipboard}
+                creating={creating}
+                onFinishCreate={handleFinishCreate}
+                onCancelCreate={() => setCreating(null)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Preview dialog */}
       <FilePreviewDialog

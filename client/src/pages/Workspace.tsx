@@ -1,19 +1,16 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { TaskBoard } from '@/components/tasks/TaskBoard'
-import { GitPanel } from '@/components/git/GitPanel'
-import { TerminalLauncher } from '@/components/terminals/TerminalLauncher'
 import { useProjects, useUpdateProject } from '@/hooks/useProjects'
 import { Badge } from '@/components/ui/badge'
 import {
   GitBranch, Star, ExternalLink, Link2, Settings, Code2, LayoutList
 } from 'lucide-react'
-import { FileExplorer } from '@/components/files/FileExplorer'
 import { EditorPanel } from '@/components/editor/EditorPanel'
 import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { useEditorTabs } from '@/hooks/useEditorTabs'
+import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
 
 export function Workspace() {
@@ -38,10 +35,25 @@ export function Workspace() {
     const saved = localStorage.getItem(`shipyard:workspace-mode:${projectId}`)
     _setWorkspaceMode(saved === 'editor' ? 'editor' : 'tasks')
   }, [projectId])
+
+  // Allow other parts of the app (the activity-bar Project Tasks shortcut) to
+  // flip the workspace mode without going through the header toggle.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ mode?: 'tasks' | 'editor' }>).detail
+      if (detail?.mode === 'tasks' || detail?.mode === 'editor') {
+        setWorkspaceMode(detail.mode)
+      }
+    }
+    window.addEventListener('shipyard:workspace-mode', handler)
+    return () => window.removeEventListener('shipyard:workspace-mode', handler)
+  }, [setWorkspaceMode])
+
   const { milestoneId, setMilestoneId } = useActiveMilestone(projectId || '')
 
-  const editor = useEditorTabs(projectId || '')
+  const editor = useEditorTabsContext()
 
+  // Pick up cross-route file-open intents (e.g. clicking a file in Search while on another project)
   useEffect(() => {
     const raw = localStorage.getItem('shipyard:pending-editor-file')
     if (!raw || !projectId) return
@@ -49,23 +61,26 @@ export function Workspace() {
       const pending = JSON.parse(raw)
       if (pending.projectId === projectId) {
         localStorage.removeItem('shipyard:pending-editor-file')
-        editor.openFile(pending.path, pending.name, pending.extension, '')
+        editor.openFile(pending.path, pending.name, pending.extension, '', {
+          diffMode: pending.diffMode,
+          subrepo: pending.subrepo,
+        })
         setWorkspaceMode('editor')
       }
     } catch {
       localStorage.removeItem('shipyard:pending-editor-file')
     }
-  }, [projectId, editor])
+  }, [projectId, editor, setWorkspaceMode])
 
-  const handleOpenInEditor = useCallback((path: string, name: string, extension: string) => {
-    editor.openFile(path, name, extension, '')
-    setWorkspaceMode('editor')
-  }, [editor])
-
-  const handleOpenDiffInEditor = useCallback((path: string, name: string, extension: string, diffMode: 'staged' | 'unstaged', subrepo?: string) => {
-    editor.openFile(path, name, extension, '', { diffMode, subrepo })
-    setWorkspaceMode('editor')
-  }, [editor])
+  // Auto-switch to editor mode whenever a file tab is opened from elsewhere
+  const activeTabPath = editor.activeTabPath
+  useEffect(() => {
+    if (activeTabPath && workspaceMode !== 'editor') {
+      setWorkspaceMode('editor')
+    }
+    // intentionally only react to activeTabPath changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTabPath])
 
   const openSettings = useCallback((tab?: string) => {
     setSettingsTab(tab)
@@ -79,8 +94,6 @@ export function Workspace() {
       </div>
     )
   }
-
-  const hasGit = project.isGitRepo || (project.subRepos && project.subRepos.length > 0)
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
@@ -111,7 +124,7 @@ export function Workspace() {
 
         <span className="text-[10px] text-muted-foreground/20 truncate hidden xl:block">{project.path}</span>
 
-        {/* Mode toggle - centered */}
+        {/* Mode toggle */}
         <div className="flex items-center ml-auto shrink-0">
           <div className="flex items-center h-7 rounded-md border bg-muted/30 p-0.5">
             <button
@@ -180,9 +193,8 @@ export function Workspace() {
 
       {/* ── Main content ── */}
       <div className="flex-1 overflow-hidden flex min-h-0">
-        {/* Left: TaskBoard or EditorPanel */}
         <div className={cn(
-          "flex-1 min-w-0 flex flex-col",
+          'flex-1 min-w-0 flex flex-col',
           workspaceMode === 'tasks' && 'overflow-y-auto px-4 py-4 lg:px-6 scrollbar-dark'
         )}>
           {workspaceMode === 'tasks' ? (
@@ -205,15 +217,6 @@ export function Workspace() {
               onMarkSaved={editor.markSaved}
               onInitContent={editor.initContent}
             />
-          )}
-        </div>
-
-        {/* Right sidebar */}
-        <div className="w-64 lg:w-72 xl:w-80 border-l overflow-y-auto p-3 space-y-4 shrink-0 scrollbar-dark">
-          <TerminalLauncher projectId={project.id} projectPath={project.path} projectName={project.name} />
-          <FileExplorer projectId={project.id} projectPath={project.path} onOpenInEditor={handleOpenInEditor} activeFilePath={editor.activeTabPath} />
-          {hasGit && (
-            <GitPanel projectId={project.id} subRepos={project.subRepos} isGitRepo={project.isGitRepo} onOpenInEditor={handleOpenInEditor} onOpenDiffInEditor={handleOpenDiffInEditor} activeFilePath={editor.activeTabPath} />
           )}
         </div>
       </div>

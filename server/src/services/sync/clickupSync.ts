@@ -329,7 +329,12 @@ export async function pullTasks(config: SyncConfig): Promise<PulledTask[]> {
   const out: PulledTask[] = [];
   for (const t of data.tasks ?? []) {
     const rawStatus = (t.status?.status || '').toLowerCase();
-    const status = STATUS_FROM_CLICKUP[rawStatus] ?? 'todo';
+    // ClickUp lets users rename their statuses freely. Treat any
+    // closed/done-like status as done (via type), then fall back to backlog
+    // so unknown custom statuses don't all pile into one wrong column.
+    const fromMap = STATUS_FROM_CLICKUP[rawStatus];
+    const fromType = t.status?.type === 'closed' ? 'done' : t.status?.type === 'done' ? 'done' : undefined;
+    const status: TaskStatus = fromMap ?? fromType ?? 'backlog';
 
     const priorityId = t.priority?.id ? Number(t.priority.id) : undefined;
     const priority = (priorityId && PRIORITY_FROM_NUM[priorityId]) ||

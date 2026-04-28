@@ -271,8 +271,11 @@ export function triggerAutoSync(projectId: string): void {
     try {
       const configs = await store.listProjectConfigs(projectId);
       for (const cfg of configs) {
-        if (!cfg.enabled || !cfg.autoSync) continue;
-        // If credentials are missing globally, skip silently.
+        // Sync runs whenever the integration is enabled. The legacy `autoSync`
+        // flag is treated as informational; if a user enabled the provider for
+        // a project, both push (on local mutation) and pull (via the periodic
+        // hook) should run.
+        if (!cfg.enabled) continue;
         const creds = await store.getProviderCredentials(cfg.providerId);
         if (!creds) continue;
         const key = `${projectId}:${cfg.providerId}`;
