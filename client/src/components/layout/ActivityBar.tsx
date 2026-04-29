@@ -1,6 +1,6 @@
-import { Link, useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import {
-  Files, Search, GitBranch, Sparkles, Settings, HelpCircle, ScrollText, FolderKanban, ListChecks, LayoutList,
+  Files, Search, GitBranch, Sparkles, Settings, HelpCircle, ScrollText, FolderKanban,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -8,7 +8,6 @@ import { useActivity, type ActivityId } from '@/hooks/useActivity'
 import { useTabs } from '@/hooks/useTabs'
 import { useProjects } from '@/hooks/useProjects'
 import { useGitStatus } from '@/hooks/useGit'
-import { useAllTasks } from '@/hooks/useTasks'
 import { useClaudeStatus } from '@/hooks/useClaude'
 
 interface ActivityItem {
@@ -107,33 +106,11 @@ export function ActivityBar() {
   const { data: projects } = useProjects()
   const project = projects?.find(p => p.id === activeTabId)
   const { data: gitStatus } = useGitStatus(project?.isGitRepo ? activeTabId ?? undefined : undefined)
-  const { data: tasks } = useAllTasks()
   const { data: claudeStatus } = useClaudeStatus()
-  const navigate = useNavigate()
-  const location = useLocation()
-
-  const projectTaskCount = activeTabId && tasks
-    ? tasks.filter(t => t.projectId === activeTabId && (t.status === 'backlog' || t.status === 'todo' || t.status === 'in_progress')).length
-    : 0
-
-  const showProjectTasks = () => {
-    if (!activeTabId) {
-      navigate('/tasks')
-      return
-    }
-    localStorage.setItem(`shipyard:workspace-mode:${activeTabId}`, 'tasks')
-    if (location.pathname !== `/project/${activeTabId}`) {
-      navigate(`/project/${activeTabId}`)
-    } else {
-      window.dispatchEvent(new CustomEvent('shipyard:workspace-mode', { detail: { mode: 'tasks' } }))
-    }
-  }
 
   const gitChanges = gitStatus
     ? (gitStatus.staged?.length || 0) + (gitStatus.modified?.length || 0) + (gitStatus.not_added?.length || 0)
     : 0
-
-  const totalActiveTasks = tasks?.filter(t => t.status === 'backlog' || t.status === 'todo' || t.status === 'in_progress').length || 0
 
   const items: ActivityItem[] = [
     { id: 'projects', label: 'Projects', icon: FolderKanban },
@@ -160,35 +137,6 @@ export function ActivityBar() {
             onClick={() => selectActivity(item.id)}
           />
         ))}
-
-        {/* Project Tasks shortcut — flips the active project's workspace to
-            its kanban without making the user hunt for the header toggle. */}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <button
-              onClick={showProjectTasks}
-              disabled={!activeTabId}
-              className={cn(
-                'relative flex items-center justify-center w-12 h-12 transition-colors group',
-                activeTabId
-                  ? 'text-muted-foreground/60 hover:text-foreground'
-                  : 'text-muted-foreground/20 cursor-not-allowed'
-              )}
-            >
-              <LayoutList className="h-5 w-5" />
-              {projectTaskCount > 0 && (
-                <span className="absolute top-1.5 right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-primary text-primary-foreground text-[9px] font-medium flex items-center justify-center">
-                  {projectTaskCount}
-                </span>
-              )}
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {activeTabId ? `${project?.name ?? 'Project'} — Tasks` : 'Open a project to see its tasks'}
-          </TooltipContent>
-        </Tooltip>
-
-        <NavLink to="/tasks" label="All Tasks" icon={ListChecks} badge={totalActiveTasks} />
       </nav>
 
       <div className="flex flex-col items-stretch py-1 border-t">

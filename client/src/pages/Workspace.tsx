@@ -1,10 +1,11 @@
 import { useState, useCallback, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { TaskBoard } from '@/components/tasks/TaskBoard'
-import { useProjects, useUpdateProject } from '@/hooks/useProjects'
+import { useProjects, useUpdateProject, useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
 import { Badge } from '@/components/ui/badge'
 import {
-  GitBranch, Star, ExternalLink, Link2, Settings, Code2, LayoutList
+  GitBranch, Star, ExternalLink, Link2, Settings, Code2, LayoutList,
+  Play, Monitor, FolderOpen, Sparkles,
 } from 'lucide-react'
 import { EditorPanel } from '@/components/editor/EditorPanel'
 import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog'
@@ -12,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
+import { toast } from 'sonner'
 
 export function Workspace() {
   const { projectId } = useParams<{ projectId: string }>()
@@ -51,6 +53,9 @@ export function Workspace() {
 
   const { milestoneId, setMilestoneId } = useActiveMilestone(projectId || '')
 
+  const launchTerminal = useLaunchTerminal()
+  const openFolder = useOpenFolder()
+
   const editor = useEditorTabsContext()
 
   // Pick up cross-route file-open intents (e.g. clicking a file in Search while on another project)
@@ -87,6 +92,19 @@ export function Workspace() {
     setSettingsOpen(true)
   }, [])
 
+  const handleLaunch = useCallback((type: string, label: string) => {
+    if (!projectId) return
+    launchTerminal.mutate(
+      { projectId, type },
+      { onSuccess: () => toast.success(`Launched ${label}`) }
+    )
+  }, [projectId, launchTerminal])
+
+  const handleOpenFolder = useCallback(() => {
+    if (!projectId) return
+    openFolder.mutate(projectId, { onSuccess: () => toast.success('Opened folder') })
+  }, [projectId, openFolder])
+
   if (!project) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
@@ -97,8 +115,9 @@ export function Workspace() {
 
   return (
     <div className="flex-1 overflow-hidden flex flex-col">
-      {/* ── Header bar ── */}
+      {/* ── Project toolbar ── */}
       <div className="h-10 px-4 flex items-center gap-2 border-b shrink-0 bg-card/30">
+        {/* Identity */}
         <button
           onClick={() => updateProject.mutate({ id: project.id, favorite: !project.favorite })}
           className="shrink-0"
@@ -154,8 +173,56 @@ export function Workspace() {
           </div>
         </div>
 
-        {/* Right: links + settings */}
-        <div className="flex items-center gap-0.5 shrink-0 ml-3">
+        {/* Quick actions (always-on for the active project) */}
+        <div className="flex items-center gap-0.5 shrink-0 ml-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => handleLaunch('dev', 'Dev Server')}
+                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-green-400 hover:bg-accent transition-colors"
+              >
+                <Play className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Dev Server</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => handleLaunch('shell', 'Shell')}
+                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <Monitor className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Shell</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={handleOpenFolder}
+                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <FolderOpen className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Open Folder</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => handleLaunch('claude', 'Claude Code')}
+                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-purple-400 hover:bg-accent transition-colors"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>Claude Code</TooltipContent>
+          </Tooltip>
+        </div>
+
+        {/* Links + settings */}
+        <div className="flex items-center gap-0.5 shrink-0 ml-2 pl-2 border-l">
           {project.gitRemoteUrl && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -167,23 +234,33 @@ export function Workspace() {
               <TooltipContent>Repository</TooltipContent>
             </Tooltip>
           )}
-          {project.externalLink && (
+          {project.externalLink ? (
             <Tooltip>
               <TooltipTrigger asChild>
                 <a href={project.externalLink} target="_blank" rel="noopener noreferrer"
-                  className="p-1.5 rounded-md text-blue-500/40 hover:text-blue-400 hover:bg-blue-500/10 transition-colors">
+                  className="p-1.5 rounded-md text-blue-500/50 hover:text-blue-400 hover:bg-blue-500/10 transition-colors">
                   <Link2 className="h-3.5 w-3.5" />
                 </a>
               </TooltipTrigger>
-              <TooltipContent>{project.externalLink}</TooltipContent>
+              <TooltipContent>Open Cloud — {project.externalLink}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => openSettings('links')}
+                  className="p-1.5 rounded-md text-muted-foreground/20 hover:text-blue-400 hover:bg-accent transition-colors"
+                >
+                  <Link2 className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Set cloud / external link…</TooltipContent>
             </Tooltip>
           )}
 
-          {(project.gitRemoteUrl || project.externalLink) && <div className="w-px h-4 bg-border mx-0.5" />}
-
           <button
             onClick={() => openSettings()}
-            className="p-1.5 rounded-md text-muted-foreground/30 hover:text-foreground hover:bg-accent transition-colors"
+            className="p-1.5 rounded-md text-muted-foreground/30 hover:text-foreground hover:bg-accent transition-colors ml-0.5"
             title="Project settings"
           >
             <Settings className="h-3.5 w-3.5" />
