@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { TaskBoard } from '@/components/tasks/TaskBoard'
 import { useProjects, useUpdateProject, useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
@@ -77,15 +77,31 @@ export function Workspace() {
     }
   }, [projectId, editor, setWorkspaceMode])
 
-  // Auto-switch to editor mode whenever a file tab is opened from elsewhere
+  // Auto-switch to editor mode only when a file tab is opened *after* mount
+  // (e.g. clicking a file in the file tree or git diff). We must NOT switch on
+  // the initial activeTabPath value, since it can come from persisted tabs and
+  // would override the user's last-selected workspace mode for this project.
   const activeTabPath = editor.activeTabPath
+  const lastSeenTabPath = useRef<string | null>(activeTabPath)
+  const lastSeenProjectId = useRef<string | undefined>(projectId)
   useEffect(() => {
-    if (activeTabPath && workspaceMode !== 'editor') {
+    // When switching projects, reset the baseline without auto-switching mode.
+    if (lastSeenProjectId.current !== projectId) {
+      lastSeenProjectId.current = projectId
+      lastSeenTabPath.current = activeTabPath
+      return
+    }
+    if (
+      activeTabPath &&
+      activeTabPath !== lastSeenTabPath.current &&
+      workspaceMode !== 'editor'
+    ) {
       setWorkspaceMode('editor')
     }
-    // intentionally only react to activeTabPath changes
+    lastSeenTabPath.current = activeTabPath
+    // intentionally only react to activeTabPath / projectId changes
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTabPath])
+  }, [activeTabPath, projectId])
 
   const openSettings = useCallback((tab?: string) => {
     setSettingsTab(tab)
