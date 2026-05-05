@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Folder, FolderOpen, Plus, Minus, Trash2, Eye } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, FolderOpen, Plus, Minus, Trash2, Eye, FileEdit } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useStageFile, useUnstageFile, useDiscardFile } from '@/hooks/useGit'
@@ -210,6 +210,15 @@ function FileRow({
               title="Preview"
             >
               <Eye className="h-3 w-3" />
+            </Button>
+          )}
+          {node.status !== 'D' && !isPreviewOnly && onOpenInEditor && (
+            <Button
+              variant="ghost" size="icon" className="h-5 w-5 shrink-0"
+              onClick={(e) => { e.stopPropagation(); onOpenInEditor(node.path, node.name, ext) }}
+              title="Open file"
+            >
+              <FileEdit className="h-3 w-3" />
             </Button>
           )}
           {staged ? (
