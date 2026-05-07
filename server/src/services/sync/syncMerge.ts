@@ -35,7 +35,13 @@ export function mergeRemoteIntoLocal(
   localTasks: Task[],
   remote: RemoteTask[],
   projectId: string,
+  milestoneId?: string,
 ): MergeResult {
+  // localTasks should already be filtered to the milestone we're syncing —
+  // we only stitch the merged result back into that milestone, leaving the
+  // rest of the project's tasks untouched. milestoneId is recorded on tasks
+  // newly pulled from the remote so they land in the right column.
+  const normalizedMilestone = milestoneId && milestoneId !== 'default' ? milestoneId : undefined;
   const byId = new Map(localTasks.map(t => [t.id, t]));
   const result: Task[] = localTasks.map(t => ({ ...t }));
   const idMapPatch: Record<string, string> = {};
@@ -76,6 +82,7 @@ export function mergeRemoteIntoLocal(
         order: result.length,
         createdAt: now,
         updatedAt: now,
+        ...(normalizedMilestone ? { milestoneId: normalizedMilestone } : {}),
         ...statusTimestamps(undefined, r.status, now),
       };
       result.push(newTask);

@@ -4,7 +4,7 @@ import * as log from '../logService.js';
 import * as trello from './trelloSync.js';
 import * as clickup from './clickupSync.js';
 import { mergeRemoteIntoLocal, type RemoteTask } from './syncMerge.js';
-import type { EffectiveConfig, SyncProviderId } from '../syncStore.js';
+import type { EffectiveConfig, SyncProviderId, ProjectSyncConfig } from '../syncStore.js';
 
 export interface SyncOperationResult {
   success: boolean;
@@ -17,16 +17,36 @@ export interface SyncOperationResult {
   remoteUrl?: string;
   matchedCount?: number;
   totalRemote?: number;
+  milestoneId?: string;
+}
+
+const DEFAULT_MILESTONE = 'default';
+
+function normalizeMilestone(milestoneId?: string): string {
+  return milestoneId && milestoneId !== '' ? milestoneId : DEFAULT_MILESTONE;
+}
+
+async function getMilestoneName(projectId: string, milestoneId: string): Promise<string | null> {
+  if (milestoneId === DEFAULT_MILESTONE) return null;
+  try {
+    const milestones = await taskStore.getMilestones(projectId);
+    const m = milestones.find(x => x.id === milestoneId);
+    return m?.name ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function buildEffective(
   providerId: SyncProviderId,
   projectId: string,
+  milestoneId: string,
   overrides?: Record<string, any>,
 ): EffectiveConfig {
   return {
     providerId,
     projectId,
+    milestoneId,
     settings: overrides ?? {},
     state: {},
     enabled: true,
@@ -40,18 +60,20 @@ function buildEffective(
 export async function testConnection(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId?: string,
   overrides?: Record<string, any>,
 ): Promise<{ ok: boolean; message: string }> {
+  const mid = normalizeMilestone(milestoneId);
   let config: EffectiveConfig | null = null;
   if (overrides && Object.keys(overrides).length > 0) {
     // Test with proposed credentials before they're saved globally.
-    const stored = await store.getEffectiveConfig(projectId, providerId);
+    const stored = await store.getEffectiveConfig(projectId, providerId, mid);
     config = {
-      ...(stored ?? buildEffective(providerId, projectId)),
+      ...(stored ?? buildEffective(providerId, projectId, mid)),
       settings: { ...(stored?.settings ?? {}), ...overrides },
     };
   } else {
-    config = await store.getEffectiveConfig(projectId, providerId);
+    config = await store.getEffectiveConfig(projectId, providerId, mid);
   }
   if (!config) return { ok: false, message: 'Not connected — add credentials first' };
 
@@ -63,81 +85,97 @@ export async function testConnection(
 async function ensureEnabled(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId: string,
 ): Promise<EffectiveConfig | { error: string }> {
-  const config = await store.getEffectiveConfig(projectId, providerId);
+  const config = await store.getEffectiveConfig(projectId, providerId, milestoneId);
   if (!config) return { error: `${providerId} not connected — add credentials in Settings` };
-  const project = await store.getProjectConfig(projectId, providerId);
-  if (!project?.enabled) return { error: `${providerId} not enabled for this project` };
+  const project = await store.getProjectConfig(projectId, providerId, milestoneId);
+  if (!project?.enabled) return { error: `${providerId} not enabled for this milestone` };
   return config;
+}
+
+function tasksForMilestone(milestoneId: string) {
+  // taskStore.getTasks expects 'default' to mean "tasks without milestoneId".
+  // Pass the milestoneId straight through; everything else is filtered server-side.
+  return milestoneId;
 }
 
 export async function pushAll(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId?: string,
 ): Promise<SyncOperationResult> {
-  const config = await ensureEnabled(projectId, providerId);
-  if ('error' in config) return { success: false, message: config.error };
+  const mid = normalizeMilestone(milestoneId);
+  const config = await ensureEnabled(projectId, providerId, mid);
+  if ('error' in config) return { success: false, message: config.error, milestoneId: mid };
 
-  const tasks = await taskStore.getTasks(projectId);
+  const tasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
 
   try {
     if (providerId === 'trello') {
       const r = await trello.pushTasks(config, tasks);
-      await store.patchStatus(projectId, providerId, { ok: r.errors.length === 0, error: r.errors[0] });
-      return toResult(r.errors, r.pushed, r.total, r.boardUrl);
+      await store.patchStatus(projectId, providerId, mid, { ok: r.errors.length === 0, error: r.errors[0] });
+      return { ...toResult(r.errors, r.pushed, r.total, r.boardUrl), milestoneId: mid };
     }
     if (providerId === 'clickup') {
       const r = await clickup.pushTasks(config, tasks);
-      await store.patchStatus(projectId, providerId, { ok: r.errors.length === 0, error: r.errors[0] });
-      return toResult(r.errors, r.pushed, r.total, r.listUrl);
+      await store.patchStatus(projectId, providerId, mid, { ok: r.errors.length === 0, error: r.errors[0] });
+      return { ...toResult(r.errors, r.pushed, r.total, r.listUrl), milestoneId: mid };
     }
-    return { success: false, message: `Unknown provider: ${providerId}` };
+    return { success: false, message: `Unknown provider: ${providerId}`, milestoneId: mid };
   } catch (err: any) {
     const message = err?.message ?? 'Push failed';
-    await store.patchStatus(projectId, providerId, { ok: false, error: message });
-    return { success: false, message };
+    await store.patchStatus(projectId, providerId, mid, { ok: false, error: message });
+    return { success: false, message, milestoneId: mid };
   }
 }
 
 export async function pullAll(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId?: string,
 ): Promise<SyncOperationResult> {
-  const config = await ensureEnabled(projectId, providerId);
-  if ('error' in config) return { success: false, message: config.error };
+  const mid = normalizeMilestone(milestoneId);
+  const config = await ensureEnabled(projectId, providerId, mid);
+  if ('error' in config) return { success: false, message: config.error, milestoneId: mid };
 
   try {
     const remote = await fetchRemote(config, providerId);
-    const localTasks = await taskStore.getTasks(projectId);
-    const { merged, created, updated, idMapPatch } = mergeRemoteIntoLocal(localTasks, remote, projectId);
+    const localTasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
+    const { merged, created, updated, idMapPatch } = mergeRemoteIntoLocal(localTasks, remote, projectId, mid);
 
     if (created > 0 || updated > 0) {
-      await taskStore.replaceTasks(projectId, merged);
+      // Scoped replace: only this milestone's tasks are rewritten; other
+      // milestones in the project are untouched.
+      await taskStore.replaceTasks(projectId, merged, mid);
       await mergeIdMap(config, providerId, idMapPatch);
     }
-    await store.patchStatus(projectId, providerId, { ok: true });
+    await store.patchStatus(projectId, providerId, mid, { ok: true });
 
     return {
       success: true,
       pulled: remote.length,
       created,
       updated,
+      milestoneId: mid,
       message: `Pulled ${remote.length} (${created} new, ${updated} updated)`,
     };
   } catch (err: any) {
     const message = err?.message ?? 'Pull failed';
-    await store.patchStatus(projectId, providerId, { ok: false, error: message });
-    return { success: false, message };
+    await store.patchStatus(projectId, providerId, mid, { ok: false, error: message });
+    return { success: false, message, milestoneId: mid };
   }
 }
 
 export async function mergeBoth(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId?: string,
 ): Promise<SyncOperationResult> {
-  const pull = await pullAll(projectId, providerId);
+  const mid = normalizeMilestone(milestoneId);
+  const pull = await pullAll(projectId, providerId, mid);
   if (!pull.success) return pull;
-  const push = await pushAll(projectId, providerId);
+  const push = await pushAll(projectId, providerId, mid);
   return {
     success: pull.success && push.success,
     pulled: pull.pulled,
@@ -146,6 +184,7 @@ export async function mergeBoth(
     pushed: push.pushed,
     errors: [...(pull.errors ?? []), ...(push.errors ?? [])],
     remoteUrl: push.remoteUrl,
+    milestoneId: mid,
     message: `${pull.message}; ${push.message}`,
   };
 }
@@ -155,34 +194,43 @@ export async function mergeBoth(
 export async function linkTrelloBoard(
   projectId: string,
   boardId: string,
+  milestoneId?: string,
 ): Promise<SyncOperationResult> {
-  const config = await store.getEffectiveConfig(projectId, 'trello');
+  const mid = normalizeMilestone(milestoneId);
+  const config = await store.getEffectiveConfig(projectId, 'trello', mid);
   if (!config) return { success: false, message: 'Trello not connected — add credentials first' };
 
   try {
-    const tasks = await taskStore.getTasks(projectId);
+    const tasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
+    const milestoneName = await getMilestoneName(projectId, mid);
     const { state, result } = await trello.linkToExistingBoard(config, boardId, tasks);
 
     await store.saveProjectConfig({
       projectId,
       providerId: 'trello',
+      milestoneId: mid,
       enabled: true,
-      settings: { projectName: config.settings.projectName ?? projectId },
+      autoSync: true,
+      settings: {
+        projectName: config.settings.projectName ?? projectId,
+        ...(milestoneName ? { milestoneName } : {}),
+      },
       state,
     });
-    await store.patchStatus(projectId, 'trello', { ok: true });
+    await store.patchStatus(projectId, 'trello', mid, { ok: true });
 
     return {
       success: true,
       remoteUrl: result.boardUrl,
       matchedCount: result.matchedCount,
       totalRemote: result.totalCards,
+      milestoneId: mid,
       message: `Linked to existing board — ${result.matchedCount} of ${tasks.length} local tasks matched by title (${result.listsCreated} lists + ${result.labelsCreated} labels created as needed)`,
     };
   } catch (err: any) {
     const message = err?.message ?? 'Link failed';
-    await store.patchStatus(projectId, 'trello', { ok: false, error: message });
-    return { success: false, message };
+    await store.patchStatus(projectId, 'trello', mid, { ok: false, error: message });
+    return { success: false, message, milestoneId: mid };
   }
 }
 
@@ -190,36 +238,46 @@ export async function linkClickupList(
   projectId: string,
   spaceId: string,
   listId: string,
+  milestoneId?: string,
 ): Promise<SyncOperationResult> {
-  const base = await store.getEffectiveConfig(projectId, 'clickup');
+  const mid = normalizeMilestone(milestoneId);
+  const base = await store.getEffectiveConfig(projectId, 'clickup', mid);
   if (!base) return { success: false, message: 'ClickUp not connected — add credentials first' };
 
   const config: EffectiveConfig = { ...base, settings: { ...base.settings, spaceId } };
 
   try {
-    const tasks = await taskStore.getTasks(projectId);
+    const tasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
+    const milestoneName = await getMilestoneName(projectId, mid);
     const { state, result } = await clickup.linkToExistingList(config, listId, tasks);
 
     await store.saveProjectConfig({
       projectId,
       providerId: 'clickup',
+      milestoneId: mid,
       enabled: true,
-      settings: { projectName: config.settings.projectName ?? projectId, spaceId },
+      autoSync: true,
+      settings: {
+        projectName: config.settings.projectName ?? projectId,
+        spaceId,
+        ...(milestoneName ? { milestoneName } : {}),
+      },
       state,
     });
-    await store.patchStatus(projectId, 'clickup', { ok: true });
+    await store.patchStatus(projectId, 'clickup', mid, { ok: true });
 
     return {
       success: true,
       remoteUrl: result.listUrl,
       matchedCount: result.matchedCount,
       totalRemote: result.totalTasks,
+      milestoneId: mid,
       message: `Linked to existing list — ${result.matchedCount} of ${tasks.length} local tasks matched by title`,
     };
   } catch (err: any) {
     const message = err?.message ?? 'Link failed';
-    await store.patchStatus(projectId, 'clickup', { ok: false, error: message });
-    return { success: false, message };
+    await store.patchStatus(projectId, 'clickup', mid, { ok: false, error: message });
+    return { success: false, message, milestoneId: mid };
   }
 }
 
@@ -243,10 +301,10 @@ async function mergeIdMap(
   if (Object.keys(patch).length === 0) return;
   if (providerId === 'trello') {
     const nextMap = { ...(config.state.cardMap ?? {}), ...patch };
-    await store.patchState(config.projectId, 'trello', { cardMap: nextMap });
+    await store.patchState(config.projectId, 'trello', config.milestoneId, { cardMap: nextMap });
   } else if (providerId === 'clickup') {
     const nextMap = { ...(config.state.taskMap ?? {}), ...patch };
-    await store.patchState(config.projectId, 'clickup', { taskMap: nextMap });
+    await store.patchState(config.projectId, 'clickup', config.milestoneId, { taskMap: nextMap });
   }
 }
 
@@ -262,6 +320,13 @@ function toResult(errors: string[], pushed: number, total: number, remoteUrl?: s
 }
 
 // ── Auto-sync scheduler ─────────────────────────────────────────────────
+//
+// Local task mutations debounce a push for every enabled (providerId, milestoneId)
+// pair on the project. We don't try to limit to "the milestone whose task
+// changed" because that requires task-level knowledge in the routes; pushing
+// every enabled milestone is correct (each push only writes that milestone's
+// own tasks), at the cost of a few extra API calls when many milestones are
+// connected.
 
 const timers = new Map<string, NodeJS.Timeout>();
 const DEBOUNCE_MS = 2500;
@@ -271,17 +336,15 @@ export function triggerAutoSync(projectId: string): void {
     try {
       const configs = await store.listProjectConfigs(projectId);
       for (const cfg of configs) {
-        // Sync runs whenever the integration is enabled. The legacy `autoSync`
-        // flag is treated as informational; if a user enabled the provider for
-        // a project, both push (on local mutation) and pull (via the periodic
-        // hook) should run.
         if (!cfg.enabled) continue;
         const creds = await store.getProviderCredentials(cfg.providerId);
         if (!creds) continue;
-        const key = `${projectId}:${cfg.providerId}`;
+        const key = `${projectId}:${cfg.providerId}:${cfg.milestoneId}`;
         const prev = timers.get(key);
         if (prev) clearTimeout(prev);
-        const timer = setTimeout(() => runAutoSync(projectId, cfg.providerId), DEBOUNCE_MS);
+        const milestoneId = cfg.milestoneId;
+        const providerId = cfg.providerId;
+        const timer = setTimeout(() => runAutoSync(projectId, providerId, milestoneId), DEBOUNCE_MS);
         timers.set(key, timer);
       }
     } catch (err: any) {
@@ -290,14 +353,17 @@ export function triggerAutoSync(projectId: string): void {
   })();
 }
 
-async function runAutoSync(projectId: string, providerId: SyncProviderId): Promise<void> {
+async function runAutoSync(projectId: string, providerId: SyncProviderId, milestoneId: string): Promise<void> {
   try {
-    const result = await pushAll(projectId, providerId);
+    const result = await pushAll(projectId, providerId, milestoneId);
     if (!result.success) {
-      log.warn('sync', `auto-sync push (${providerId}) failed: ${result.message}`, undefined, projectId);
+      log.warn('sync', `auto-sync push (${providerId}/${milestoneId}) failed: ${result.message}`, undefined, projectId);
     }
   } catch (err: any) {
-    log.error('sync', `auto-sync error (${providerId})`, err?.message ?? String(err), projectId);
-    await store.patchStatus(projectId, providerId, { ok: false, error: err?.message ?? 'unknown' });
+    log.error('sync', `auto-sync error (${providerId}/${milestoneId})`, err?.message ?? String(err), projectId);
+    await store.patchStatus(projectId, providerId, milestoneId, { ok: false, error: err?.message ?? 'unknown' });
   }
 }
+
+// Re-export for typings used by callers
+export type { ProjectSyncConfig };

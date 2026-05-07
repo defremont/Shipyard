@@ -130,7 +130,12 @@ export async function listLists(config: SyncConfig, spaceId: string): Promise<Di
 
 // ── Push / Pull ────────────────────────────────────────────────────────
 
-async function ensureList(config: SyncConfig, projectName: string): Promise<ClickUpState> {
+function buildListName(projectName: string, milestoneName?: string | null): string {
+  if (milestoneName) return `Shipyard · ${projectName} · ${milestoneName}`;
+  return `Shipyard · ${projectName}`;
+}
+
+async function ensureList(config: SyncConfig, projectName: string, milestoneName?: string | null): Promise<ClickUpState> {
   const state: ClickUpState = { ...(config.state ?? {}) };
   const spaceId = config.settings.spaceId;
   if (!spaceId) throw new Error('ClickUp Space is not selected');
@@ -141,11 +146,11 @@ async function ensureList(config: SyncConfig, projectName: string): Promise<Clic
       `/space/${spaceId}/list`,
       'POST',
       undefined,
-      { name: `Shipyard · ${projectName}`, content: 'Auto-created by Shipyard sync' },
+      { name: buildListName(projectName, milestoneName), content: 'Auto-created by Shipyard sync' },
     );
     state.listId = list.id;
     state.listUrl = list.url;
-    await patchState(config.projectId, 'clickup', state);
+    await patchState(config.projectId, 'clickup', config.milestoneId, state);
   }
   return state;
 }
@@ -197,7 +202,8 @@ export interface PushResult {
 
 export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<PushResult> {
   const projectName = config.settings.projectName || config.projectId;
-  const state = await ensureList(config, projectName);
+  const milestoneName = config.settings.milestoneName as string | undefined;
+  const state = await ensureList(config, projectName, milestoneName);
 
   const nextMap: Record<string, string> = { ...(state.taskMap ?? {}) };
   const errors: string[] = [];
@@ -226,7 +232,7 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
     delete nextMap[taskId];
   }
 
-  await patchState(config.projectId, 'clickup', { taskMap: nextMap });
+  await patchState(config.projectId, 'clickup', config.milestoneId, { taskMap: nextMap });
 
   return { pushed, total: tasks.length, errors, listUrl: state.listUrl };
 }

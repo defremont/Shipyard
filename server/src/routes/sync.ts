@@ -10,6 +10,12 @@ function parseProviderId(value: string): SyncProviderId | null {
   return value === 'trello' || value === 'clickup' ? value : null;
 }
 
+function pickMilestoneId(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length === 0 ? undefined : trimmed;
+}
+
 export async function syncRoutes(app: FastifyInstance) {
   // ── Legacy: Google Sheets proxy (stateless) ─────────────────────────
   app.post<{
@@ -122,11 +128,16 @@ export async function syncRoutes(app: FastifyInstance) {
     const providerId = parseProviderId(request.params.providerId);
     if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
     // We don't have a project here — use a synthetic id for the override path.
-    const result = await engine.testConnection('__global__', providerId, request.body?.overrides);
+    const result = await engine.testConnection('__global__', providerId, undefined, request.body?.overrides);
     return result;
   });
 
-  // ── Per-project endpoints ───────────────────────────────────────────
+  // ── Per-project / per-milestone endpoints ───────────────────────────
+  //
+  // Every config-touching endpoint accepts an optional `milestoneId` (body or
+  // query depending on method). When omitted it defaults to 'default' which
+  // represents the General milestone — matches Google Sheets sync semantics
+  // and keeps backward compatibility for callers that only have one milestone.
 
   app.get<{ Params: { projectId: string } }>(
     '/api/projects/:projectId/sync',
@@ -144,6 +155,7 @@ export async function syncRoutes(app: FastifyInstance) {
   app.post<{
     Params: { projectId: string; providerId: string };
     Body: {
+      milestoneId?: string;
       settings?: Record<string, any>;
       enabled?: boolean;
       autoSync?: boolean;
@@ -151,6 +163,7 @@ export async function syncRoutes(app: FastifyInstance) {
   }>('/api/projects/:projectId/sync/:providerId', async (request, reply) => {
     const providerId = parseProviderId(request.params.providerId);
     if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
+    const milestoneId = pickMilestoneId(request.body?.milestoneId);
 
     // If enabling, global creds are required — fail early with a clear error.
     if (request.body?.enabled) {
@@ -165,58 +178,86 @@ export async function syncRoutes(app: FastifyInstance) {
     const saved = await store.saveProjectConfig({
       projectId: request.params.projectId,
       providerId,
+      milestoneId,
       settings: request.body?.settings,
       enabled: request.body?.enabled,
       autoSync: request.body?.autoSync,
     });
-    log.info('sync', `Saved ${providerId} project config`, undefined, request.params.projectId);
+    log.info(
+      'sync',
+      `Saved ${providerId} project config (milestone ${saved.milestoneId})`,
+      undefined,
+      request.params.projectId,
+    );
     return { integration: store.sanitizeProject(saved) };
   });
 
-  app.delete<{ Params: { projectId: string; providerId: string } }>(
+  app.delete<{
+    Params: { projectId: string; providerId: string };
+    Querystring: { milestoneId?: string };
+  }>(
     '/api/projects/:projectId/sync/:providerId',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      const deleted = await store.deleteProjectConfig(request.params.projectId, providerId);
+      const milestoneId = pickMilestoneId(request.query.milestoneId);
+      const deleted = await store.deleteProjectConfig(request.params.projectId, providerId, milestoneId);
       return { deleted };
     },
   );
 
   app.post<{
     Params: { projectId: string; providerId: string };
-    Body: { overrides?: Record<string, any> };
+    Body: { milestoneId?: string; overrides?: Record<string, any> };
   }>('/api/projects/:projectId/sync/:providerId/test', async (request, reply) => {
     const providerId = parseProviderId(request.params.providerId);
     if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-    const result = await engine.testConnection(request.params.projectId, providerId, request.body?.overrides);
+    const milestoneId = pickMilestoneId(request.body?.milestoneId);
+    const result = await engine.testConnection(
+      request.params.projectId,
+      providerId,
+      milestoneId,
+      request.body?.overrides,
+    );
     return result;
   });
 
-  app.post<{ Params: { projectId: string; providerId: string } }>(
+  app.post<{
+    Params: { projectId: string; providerId: string };
+    Body: { milestoneId?: string };
+  }>(
     '/api/projects/:projectId/sync/:providerId/push',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      return engine.pushAll(request.params.projectId, providerId);
+      const milestoneId = pickMilestoneId(request.body?.milestoneId);
+      return engine.pushAll(request.params.projectId, providerId, milestoneId);
     },
   );
 
-  app.post<{ Params: { projectId: string; providerId: string } }>(
+  app.post<{
+    Params: { projectId: string; providerId: string };
+    Body: { milestoneId?: string };
+  }>(
     '/api/projects/:projectId/sync/:providerId/pull',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      return engine.pullAll(request.params.projectId, providerId);
+      const milestoneId = pickMilestoneId(request.body?.milestoneId);
+      return engine.pullAll(request.params.projectId, providerId, milestoneId);
     },
   );
 
-  app.post<{ Params: { projectId: string; providerId: string } }>(
+  app.post<{
+    Params: { projectId: string; providerId: string };
+    Body: { milestoneId?: string };
+  }>(
     '/api/projects/:projectId/sync/:providerId/merge',
     async (request, reply) => {
       const providerId = parseProviderId(request.params.providerId);
       if (!providerId) return reply.status(400).send({ error: 'Unknown provider' });
-      return engine.mergeBoth(request.params.projectId, providerId);
+      const milestoneId = pickMilestoneId(request.body?.milestoneId);
+      return engine.mergeBoth(request.params.projectId, providerId, milestoneId);
     },
   );
 
@@ -234,6 +275,7 @@ export async function syncRoutes(app: FastifyInstance) {
     const effective = {
       providerId: 'clickup' as const,
       projectId: '__global__',
+      milestoneId: 'default',
       settings: { token },
       state: {},
       enabled: true,
@@ -271,6 +313,7 @@ export async function syncRoutes(app: FastifyInstance) {
     const effective = {
       providerId: 'trello' as const,
       projectId: '__global__',
+      milestoneId: 'default',
       settings: creds.settings,
       state: {},
       enabled: true,
@@ -297,6 +340,7 @@ export async function syncRoutes(app: FastifyInstance) {
       const effective = {
         providerId: 'clickup' as const,
         projectId: '__global__',
+        milestoneId: 'default',
         settings: creds.settings,
         state: {},
         enabled: true,
@@ -314,26 +358,44 @@ export async function syncRoutes(app: FastifyInstance) {
     },
   );
 
-  app.post<{ Params: { projectId: string }; Body: { boardId?: string } }>(
+  app.post<{
+    Params: { projectId: string };
+    Body: { boardId?: string; milestoneId?: string };
+  }>(
     '/api/projects/:projectId/sync/trello/link',
     async (request, reply) => {
       const boardId = request.body?.boardId;
       if (!boardId) return reply.status(400).send({ error: 'boardId required' });
-      const result = await engine.linkTrelloBoard(request.params.projectId, boardId);
+      const milestoneId = pickMilestoneId(request.body?.milestoneId);
+      const result = await engine.linkTrelloBoard(request.params.projectId, boardId, milestoneId);
       if (!result.success) return reply.status(400).send({ error: result.message });
-      log.info('sync', `Linked trello board ${boardId}`, undefined, request.params.projectId);
+      log.info(
+        'sync',
+        `Linked trello board ${boardId} (milestone ${result.milestoneId})`,
+        undefined,
+        request.params.projectId,
+      );
       return result;
     },
   );
 
-  app.post<{ Params: { projectId: string }; Body: { spaceId?: string; listId?: string } }>(
+  app.post<{
+    Params: { projectId: string };
+    Body: { spaceId?: string; listId?: string; milestoneId?: string };
+  }>(
     '/api/projects/:projectId/sync/clickup/link',
     async (request, reply) => {
       const { spaceId, listId } = request.body || {};
       if (!spaceId || !listId) return reply.status(400).send({ error: 'spaceId and listId required' });
-      const result = await engine.linkClickupList(request.params.projectId, spaceId, listId);
+      const milestoneId = pickMilestoneId(request.body?.milestoneId);
+      const result = await engine.linkClickupList(request.params.projectId, spaceId, listId, milestoneId);
       if (!result.success) return reply.status(400).send({ error: result.message });
-      log.info('sync', `Linked clickup list ${listId} (space ${spaceId})`, undefined, request.params.projectId);
+      log.info(
+        'sync',
+        `Linked clickup list ${listId} (space ${spaceId}, milestone ${result.milestoneId})`,
+        undefined,
+        request.params.projectId,
+      );
       return result;
     },
   );

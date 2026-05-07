@@ -137,7 +137,12 @@ export function buildAuthorizeUrl(apiKey: string): string {
   return `https://trello.com/1/authorize?${params.toString()}`;
 }
 
-async function ensureBoard(config: SyncConfig, projectName: string): Promise<TrelloState> {
+function buildBoardName(projectName: string, milestoneName?: string | null): string {
+  if (milestoneName) return `Shipyard · ${projectName} · ${milestoneName}`;
+  return `Shipyard · ${projectName}`;
+}
+
+async function ensureBoard(config: SyncConfig, projectName: string, milestoneName?: string | null): Promise<TrelloState> {
   let state: TrelloState = { ...(config.state ?? {}) };
 
   if (!state.boardId) {
@@ -145,11 +150,11 @@ async function ensureBoard(config: SyncConfig, projectName: string): Promise<Tre
       config,
       '/boards/',
       'POST',
-      { name: `Shipyard · ${projectName}`, defaultLists: false, desc: 'Auto-created by Shipyard sync' },
+      { name: buildBoardName(projectName, milestoneName), defaultLists: false, desc: 'Auto-created by Shipyard sync' },
     );
     state.boardId = board.id;
     state.boardUrl = board.url;
-    await patchState(config.projectId, 'trello', state);
+    await patchState(config.projectId, 'trello', config.milestoneId, state);
   }
 
   if (!state.listIds || Object.keys(state.listIds).length !== STATUS_ORDER.length) {
@@ -163,7 +168,7 @@ async function ensureBoard(config: SyncConfig, projectName: string): Promise<Tre
       listIds[status] = list.id;
     }
     state.listIds = listIds;
-    await patchState(config.projectId, 'trello', { listIds });
+    await patchState(config.projectId, 'trello', config.milestoneId, { listIds });
   }
 
   if (!state.labelIds || Object.keys(state.labelIds).length !== 4) {
@@ -177,7 +182,7 @@ async function ensureBoard(config: SyncConfig, projectName: string): Promise<Tre
       labelIds[priority] = label.id;
     }
     state.labelIds = labelIds;
-    await patchState(config.projectId, 'trello', { labelIds });
+    await patchState(config.projectId, 'trello', config.milestoneId, { labelIds });
   }
 
   return state;
@@ -228,7 +233,8 @@ export interface PushResult {
 
 export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<PushResult> {
   const projectName = config.settings.projectName || config.projectId;
-  const state = await ensureBoard(config, projectName);
+  const milestoneName = config.settings.milestoneName as string | undefined;
+  const state = await ensureBoard(config, projectName, milestoneName);
 
   const nextMap: Record<string, string> = { ...(state.cardMap ?? {}) };
   const errors: string[] = [];
@@ -254,7 +260,7 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
     delete nextMap[taskId];
   }
 
-  await patchState(config.projectId, 'trello', { cardMap: nextMap });
+  await patchState(config.projectId, 'trello', config.milestoneId, { cardMap: nextMap });
 
   return { pushed, total: tasks.length, errors, boardUrl: state.boardUrl };
 }

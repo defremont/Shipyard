@@ -42,6 +42,7 @@ server/src/
 data/           # Persistencia (auto-criado)
   projects.json, settings.json, claude.json, .claude-key,
   mcp-config.json, mcp-auth.json, server.log,
+  sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
 
 electron/       # main.ts, preload.ts (desktop wrapper)
@@ -93,7 +94,13 @@ interface Project {
 **Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), WS /ws/terminal/:id
 **Claude AI**: GET /api/claude/status, POST config|config/test|chat(SSE)|analyze-task|summarize, DELETE config
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
-**Sync**: POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
+**Sync**:
+  POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
+  GET/POST/DELETE /api/sync/providers/:providerId (creds globais Trello/ClickUp)
+  GET /api/projects/:id/sync (lista integracoes desse projeto, uma por milestone)
+  POST/DELETE /api/projects/:id/sync/:providerId (body/query: milestoneId — default 'default'/General)
+  POST /api/projects/:id/sync/:providerId/push|pull|merge (body: { milestoneId? })
+  POST /api/projects/:id/sync/{trello,clickup}/link (body: { milestoneId?, ... })
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Sistema**: GET /api/settings, POST /api/browse
 
@@ -148,11 +155,27 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Centralizado em `server/src/services/dataDir.ts`
 - asar desabilitado, afterPack reinstala deps via npm (pnpm symlinks nao sobrevivem)
 
-### Google Sheets Sync
-- Config em **localStorage** apenas (`shipyard:sync:{projectId}`) — backend e proxy stateless
+### Sync — milestone-scoped (Google Sheets, Trello, ClickUp)
+Toda integracao de tasks e por **(projectId, providerId, milestoneId)**. Cada milestone tem
+sua propria sheet/board/list. O milestone "General" usa o id literal `'default'`.
+
+**Google Sheets** (cliente-only via Apps Script proxy):
+- Config em localStorage por milestone: `shipyard:sync:m:{projectId}:{milestoneId}`
 - URL validada: so permite `https://script.google.com/macros/s/...`
-- Auto-push: debounce 2s apos mutations; auto-pull: polling 30s com merge bidirecional
+- Auto-push: debounce 2s; auto-pull: polling 30s com merge bidirecional
 - Anti-loop: `lastPushAt` guard impede pull nos 10s apos push
+
+**Trello / ClickUp** (server-side, schema v3 em `data/sync-config.json`):
+- Creds globais em `providers[providerId]` (apiKey/token), config em `projects[id][provider][milestoneId]`
+- Push: server-side debounce 2.5s em mutations de task — empurra TODOS os milestones
+  habilitados do projeto, cada um para sua propria board/list
+- Pull: cliente faz merge a cada 30s via `useIntegrationAutoPull` (key inclui milestoneId)
+- Tasks novas vindas do remoto recebem `milestoneId` automaticamente no merge
+- Board/list e nomeada `Shipyard · {project} · {milestone}` (ou so `Shipyard · {project}`
+  para General)
+
+**Migracao v2 → v3**: integracoes Trello/ClickUp pre-existentes sao descartadas (creds
+globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 
 ### Milestones
 - "General" e virtual (nao armazenado) — tasks sem milestoneId pertencem a ele

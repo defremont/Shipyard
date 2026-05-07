@@ -30,11 +30,14 @@ export function useIntegrationAutoPull() {
         const { integrations } = await api.listIntegrations()
         const active = integrations.filter(i => i.enabled)
         for (const i of active) {
-          const key = `${i.projectId}:${i.providerId}`
+          // One key per (projectId, providerId, milestoneId) so each
+          // milestone's board/list pulls independently and concurrent merges
+          // don't trample each other's state.
+          const key = `${i.projectId}:${i.providerId}:${i.milestoneId}`
           if (running.has(key)) continue
           running.add(key)
           try {
-            const result = await api.mergeIntegration(i.projectId, i.providerId)
+            const result = await api.mergeIntegration(i.projectId, i.providerId, i.milestoneId)
             const created = result.created ?? 0
             const updated = result.updated ?? 0
             const pulled = result.pulled ?? 0

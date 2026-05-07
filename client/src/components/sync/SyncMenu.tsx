@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -14,17 +14,26 @@ import { cn } from '@/lib/utils'
 import { formatDistanceToNow } from 'date-fns'
 import { api, type SyncIntegration, type SyncProviderStatus } from '@/lib/api'
 import { SheetSyncPanel } from '@/components/tasks/SheetSyncPanel'
+import { useMilestones } from '@/hooks/useMilestones'
 import type { Task } from '@/hooks/useTasks'
 
-// A unified "Sync" menu that lives in the project toolbar. It keeps the
-// existing Google Sheets flow (milestone-scoped, with Apps Script wizard)
-// and adds per-project enable/auto-sync toggles for Trello + ClickUp.
+// A unified "Sync" menu that lives in the project toolbar. Every integration
+// is scoped to a single milestone — switching the active milestone in the
+// kanban changes which Trello board / ClickUp list / Google Sheet this menu
+// configures. The default milestone uses id 'default' (the General column).
 //
 // Credentials for Trello/ClickUp are held globally in the server store
-// (Settings → Integrations). This menu only toggles whether *this* project
-// participates and, for ClickUp, which Space the tasks go into.
+// (Settings → Integrations). This menu only toggles whether *this* milestone
+// of *this* project participates and, for ClickUp, which Space the tasks
+// go into.
 
 type ProviderId = 'trello' | 'clickup'
+
+const DEFAULT_MILESTONE = 'default'
+
+function normalizeMilestone(milestoneId?: string): string {
+  return milestoneId && milestoneId !== '' ? milestoneId : DEFAULT_MILESTONE
+}
 
 interface Props {
   projectId: string
@@ -35,6 +44,7 @@ interface Props {
 
 export function SyncMenu({ projectId, projectName, milestoneId, tasks }: Props) {
   const [open, setOpen] = useState(false)
+  const activeMilestone = normalizeMilestone(milestoneId)
 
   const { data: providersData } = useQuery({
     queryKey: ['sync', 'providers'],
@@ -46,17 +56,28 @@ export function SyncMenu({ projectId, projectName, milestoneId, tasks }: Props) 
     queryFn: () => api.listIntegrations(projectId),
     enabled: open,
   })
+  const { data: milestones } = useMilestones(projectId)
 
   const providers = providersData?.providers ?? []
   const integrations = integrationsData?.integrations ?? []
 
-  const trelloInt = integrations.find(i => i.providerId === 'trello')
-  const clickupInt = integrations.find(i => i.providerId === 'clickup')
+  const milestoneName = useMemo(() => {
+    if (activeMilestone === DEFAULT_MILESTONE) return 'General'
+    return milestones?.find(m => m.id === activeMilestone)?.name ?? activeMilestone
+  }, [activeMilestone, milestones])
+
+  // Find the integration for the active milestone (one record per milestone now).
+  const findIntegration = (providerId: ProviderId): SyncIntegration | undefined =>
+    integrations.find(i => i.providerId === providerId && i.milestoneId === activeMilestone)
+
+  const trelloInt = findIntegration('trello')
+  const clickupInt = findIntegration('clickup')
   const trelloProv = providers.find(p => p.providerId === 'trello')
   const clickupProv = providers.find(p => p.providerId === 'clickup')
 
-  const anyEnabled =
-    !!trelloInt?.enabled || !!clickupInt?.enabled
+  // "Any enabled" used to color the toolbar icon — count any milestone of this
+  // project, so the icon stays lit when the user isn't on the active one.
+  const anyEnabled = integrations.some(i => i.enabled)
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -73,14 +94,19 @@ export function SyncMenu({ projectId, projectName, milestoneId, tasks }: Props) 
       </Tooltip>
       <PopoverContent className="w-[420px] p-0" align="end">
         <div className="p-3 border-b">
-          <div className="text-xs font-semibold">Sync integrations</div>
+          <div className="text-xs font-semibold flex items-center gap-2">
+            Sync integrations
+            <Badge variant="outline" className="text-[9px] px-1 py-0 text-muted-foreground">
+              Milestone: {milestoneName}
+            </Badge>
+          </div>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            Choose where {projectName}'s tasks go.
+            Each milestone gets its own board / list / sheet. Switch milestone in the kanban toolbar to configure another.
           </p>
         </div>
 
         <div className="p-3 space-y-3 max-h-[60vh] overflow-y-auto">
-          {/* Google Sheets keeps its own self-contained panel */}
+          {/* Google Sheets keeps its own self-contained panel (already milestone-scoped) */}
           <div className="space-y-1.5">
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium">Google Sheets</span>
@@ -104,6 +130,8 @@ export function SyncMenu({ projectId, projectName, milestoneId, tasks }: Props) 
             integration={trelloInt}
             projectId={projectId}
             projectName={projectName}
+            milestoneId={activeMilestone}
+            milestoneName={milestoneName}
             onChanged={refetchIntegrations}
           />
 
@@ -118,6 +146,8 @@ export function SyncMenu({ projectId, projectName, milestoneId, tasks }: Props) 
             integration={clickupInt}
             projectId={projectId}
             projectName={projectName}
+            milestoneId={activeMilestone}
+            milestoneName={milestoneName}
             onChanged={refetchIntegrations}
           />
         </div>
@@ -135,6 +165,8 @@ function ProjectProviderRow({
   integration,
   projectId,
   projectName,
+  milestoneId,
+  milestoneName,
   onChanged,
 }: {
   providerId: ProviderId
@@ -145,6 +177,8 @@ function ProjectProviderRow({
   integration?: SyncIntegration
   projectId: string
   projectName: string
+  milestoneId: string
+  milestoneName: string
   onChanged: () => void
 }) {
   const queryClient = useQueryClient()
@@ -167,7 +201,7 @@ function ProjectProviderRow({
 
   const saveMutation = useMutation({
     mutationFn: (body: { settings?: Record<string, any>; enabled?: boolean; autoSync?: boolean }) =>
-      api.saveIntegration(projectId, providerId, body),
+      api.saveIntegration(projectId, providerId, { ...body, milestoneId }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sync', 'integrations'] })
       onChanged()
@@ -176,11 +210,11 @@ function ProjectProviderRow({
   })
 
   const disableMutation = useMutation({
-    mutationFn: () => api.deleteIntegration(projectId, providerId),
+    mutationFn: () => api.deleteIntegration(projectId, providerId, milestoneId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sync', 'integrations'] })
       onChanged()
-      toast.success(`${providerLabel} disabled for this project`)
+      toast.success(`${providerLabel} disabled for ${milestoneName}`)
     },
   })
 
@@ -205,10 +239,13 @@ function ProjectProviderRow({
       autoSync: true,
       settings: {
         projectName,
+        // Pass the milestone name so the auto-created board/list is named
+        // "Shipyard · Project · Milestone" instead of just "Shipyard · Project".
+        ...(milestoneId !== 'default' ? { milestoneName } : {}),
         ...(providerId === 'clickup' ? { spaceId } : {}),
       },
     })
-    toast.success(`${providerLabel} enabled — bidirectional sync is on`)
+    toast.success(`${providerLabel} enabled for ${milestoneName} — bidirectional sync is on`)
   }
 
   async function enterLinkMode() {
@@ -240,8 +277,8 @@ function ProjectProviderRow({
     setLinking(true)
     try {
       const result = providerId === 'trello'
-        ? await api.linkTrelloBoard(projectId, pickedLinkId)
-        : await api.linkClickupList(projectId, spaceId, pickedLinkId)
+        ? await api.linkTrelloBoard(projectId, pickedLinkId, milestoneId)
+        : await api.linkClickupList(projectId, spaceId, pickedLinkId, milestoneId)
       toast.success(result.message || `Linked to existing ${providerLabel}`)
       setLinkMode(false)
       queryClient.invalidateQueries({ queryKey: ['sync', 'integrations'] })
@@ -261,7 +298,7 @@ function ProjectProviderRow({
         kind === 'push' ? api.pushIntegration :
         kind === 'pull' ? api.pullIntegration :
         api.mergeIntegration
-      const result = await call(projectId, providerId)
+      const result = await call(projectId, providerId, milestoneId)
       if (result.success) toast.success(result.message)
       else toast.error(result.message)
       if (kind !== 'push') {
@@ -295,7 +332,7 @@ function ProjectProviderRow({
         {connected && enabled && (
           <Badge variant="outline" className="text-[9px] px-1 py-0 text-emerald-500 border-emerald-500/30">
             <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
-            enabled
+            enabled · {milestoneName}
           </Badge>
         )}
         {integration?.lastSyncStatus === 'error' && (
@@ -334,11 +371,11 @@ function ProjectProviderRow({
               className="mt-0.5 h-3.5 w-3.5"
             />
             <div className="flex-1">
-              <div className="text-xs font-medium">Enable sync for this project</div>
+              <div className="text-xs font-medium">Enable sync for {milestoneName}</div>
               <p className="text-[10px] text-muted-foreground">
                 {providerId === 'trello'
-                  ? 'Creates a dedicated Trello board on first push.'
-                  : 'Creates a dedicated ClickUp list inside the selected space.'}
+                  ? `Creates a dedicated Trello board on first push: "Shipyard · ${projectName}${milestoneId !== 'default' ? ` · ${milestoneName}` : ''}".`
+                  : `Creates a dedicated ClickUp list inside the selected space: "Shipyard · ${projectName}${milestoneId !== 'default' ? ` · ${milestoneName}` : ''}".`}
               </p>
             </div>
           </label>
@@ -357,7 +394,7 @@ function ProjectProviderRow({
           {linkMode && (
             <div className="space-y-2 p-2 rounded-md border bg-accent/30">
               <div className="text-[11px] font-medium">
-                Link to existing {providerId === 'trello' ? 'board' : 'list'}
+                Link {milestoneName} to existing {providerId === 'trello' ? 'board' : 'list'}
               </div>
               {linkLoading ? (
                 <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -381,7 +418,7 @@ function ProjectProviderRow({
                 </Select>
               )}
               <p className="text-[10px] text-muted-foreground">
-                Local tasks matching remote items by title will be re-linked. Unmatched remote items can be pulled as new tasks.
+                Local tasks of this milestone matching remote items by title will be re-linked. Unmatched remote items can be pulled as new tasks (assigned to {milestoneName}).
               </p>
               <div className="flex items-center gap-1.5">
                 <Button

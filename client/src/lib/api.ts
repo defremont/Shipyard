@@ -14,6 +14,7 @@ export interface SyncProviderStatus {
 export interface SyncIntegration {
   providerId: 'trello' | 'clickup';
   projectId: string;
+  milestoneId: string;
   enabled: boolean;
   autoSync: boolean;
   settings: Record<string, any>;
@@ -34,6 +35,7 @@ export interface SyncOperationResult {
   updated?: number;
   errors?: string[];
   remoteUrl?: string;
+  milestoneId?: string;
 }
 
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
@@ -141,23 +143,28 @@ export const api = {
     request<{ lists: Array<{ id: string; name: string; url?: string }> }>(
       `/sync/clickup/lists?spaceId=${encodeURIComponent(spaceId)}`,
     ),
-  linkTrelloBoard: (projectId: string, boardId: string) =>
-    request<SyncOperationResult & { matchedCount?: number; totalRemote?: number }>(
+  linkTrelloBoard: (projectId: string, boardId: string, milestoneId?: string) =>
+    request<SyncOperationResult & { matchedCount?: number; totalRemote?: number; milestoneId?: string }>(
       `/projects/${projectId}/sync/trello/link`,
-      { method: 'POST', body: JSON.stringify({ boardId }) },
+      { method: 'POST', body: JSON.stringify({ boardId, milestoneId }) },
     ),
-  linkClickupList: (projectId: string, spaceId: string, listId: string) =>
-    request<SyncOperationResult & { matchedCount?: number; totalRemote?: number }>(
+  linkClickupList: (projectId: string, spaceId: string, listId: string, milestoneId?: string) =>
+    request<SyncOperationResult & { matchedCount?: number; totalRemote?: number; milestoneId?: string }>(
       `/projects/${projectId}/sync/clickup/link`,
-      { method: 'POST', body: JSON.stringify({ spaceId, listId }) },
+      { method: 'POST', body: JSON.stringify({ spaceId, listId, milestoneId }) },
     ),
 
-  // Per-project sync configs
+  // Per-(project, milestone) sync configs.
+  // The list endpoints return one entry per (projectId, providerId, milestoneId);
+  // mutating endpoints take milestoneId in the body/query and default to
+  // 'default' (the General milestone) when omitted, which keeps callers that
+  // don't yet know about milestones working.
   listIntegrations: (projectId?: string) =>
     request<{ integrations: SyncIntegration[] }>(
       projectId ? `/projects/${projectId}/sync` : '/sync/integrations',
     ),
   saveIntegration: (projectId: string, providerId: 'trello' | 'clickup', body: {
+    milestoneId?: string;
     settings?: Record<string, any>;
     enabled?: boolean;
     autoSync?: boolean;
@@ -166,30 +173,30 @@ export const api = {
       `/projects/${projectId}/sync/${providerId}`,
       { method: 'POST', body: JSON.stringify(body) },
     ),
-  deleteIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+  deleteIntegration: (projectId: string, providerId: 'trello' | 'clickup', milestoneId?: string) =>
     request<{ deleted: boolean }>(
-      `/projects/${projectId}/sync/${providerId}`,
+      `/projects/${projectId}/sync/${providerId}${milestoneId ? `?milestoneId=${encodeURIComponent(milestoneId)}` : ''}`,
       { method: 'DELETE' },
     ),
-  testIntegration: (projectId: string, providerId: 'trello' | 'clickup', overrides?: Record<string, any>) =>
+  testIntegration: (projectId: string, providerId: 'trello' | 'clickup', milestoneId?: string, overrides?: Record<string, any>) =>
     request<{ ok: boolean; message: string }>(
       `/projects/${projectId}/sync/${providerId}/test`,
-      { method: 'POST', body: JSON.stringify({ overrides }) },
+      { method: 'POST', body: JSON.stringify({ milestoneId, overrides }) },
     ),
-  pushIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+  pushIntegration: (projectId: string, providerId: 'trello' | 'clickup', milestoneId?: string) =>
     request<SyncOperationResult>(
       `/projects/${projectId}/sync/${providerId}/push`,
-      { method: 'POST', body: JSON.stringify({}) },
+      { method: 'POST', body: JSON.stringify({ milestoneId }) },
     ),
-  pullIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+  pullIntegration: (projectId: string, providerId: 'trello' | 'clickup', milestoneId?: string) =>
     request<SyncOperationResult>(
       `/projects/${projectId}/sync/${providerId}/pull`,
-      { method: 'POST', body: JSON.stringify({}) },
+      { method: 'POST', body: JSON.stringify({ milestoneId }) },
     ),
-  mergeIntegration: (projectId: string, providerId: 'trello' | 'clickup') =>
+  mergeIntegration: (projectId: string, providerId: 'trello' | 'clickup', milestoneId?: string) =>
     request<SyncOperationResult>(
       `/projects/${projectId}/sync/${providerId}/merge`,
-      { method: 'POST', body: JSON.stringify({}) },
+      { method: 'POST', body: JSON.stringify({ milestoneId }) },
     ),
 
   // Git

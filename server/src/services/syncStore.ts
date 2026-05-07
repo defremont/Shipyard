@@ -4,18 +4,18 @@ import { DATA_DIR } from './dataDir.js';
 
 // Server-side sync store.
 //
-// Data model (v2):
+// Data model (v3):
 //   - providers: one record per provider holding GLOBAL credentials
-//     (apiKey, token) that apply across all projects. The user configures
-//     them once.
-//   - projects: per-project toggle + per-project non-shared settings
-//     (e.g. ClickUp spaceId) + non-sensitive state (boardId, cardMap, ...).
+//     (apiKey, token) that apply across all projects.
+//   - projects: nested by milestone — each (projectId, providerId, milestoneId)
+//     gets its own integration record (board/list state, settings, status).
+//     The default milestone uses the literal id 'default'.
 //
-// v1 → v2 migration: the old shape combined credentials and per-project
-// state in a single entry. The first provider entry we see donates its
-// apiKey/token to the global provider record; every project entry becomes
-// a `projects[id][providerId]` row with its own state/settings (minus the
-// credentials).
+// v2 → v3 migration: per-project integration records are discarded so users
+// reconnect manually (Trello/ClickUp didn't have milestone awareness before;
+// the old single-board-per-project state would be wrong if we mapped it onto
+// a single milestone). Global provider credentials are preserved so users
+// don't have to paste API tokens again.
 
 const STORE_FILE = join(DATA_DIR, 'sync-config.json');
 
@@ -25,6 +25,12 @@ const SECRET_KEYS: Record<SyncProviderId, string[]> = {
   trello: ['apiKey', 'token'],
   clickup: ['token'],
 };
+
+export const DEFAULT_MILESTONE = 'default';
+
+function normalizeMilestone(milestoneId?: string): string {
+  return milestoneId && milestoneId !== '' ? milestoneId : DEFAULT_MILESTONE;
+}
 
 // ── Types ───────────────────────────────────────────────────────────────
 
@@ -38,9 +44,10 @@ export interface ProviderCredentials {
 export interface ProjectSyncConfig {
   providerId: SyncProviderId;
   projectId: string;
+  milestoneId: string;
   enabled: boolean;
   autoSync: boolean;
-  settings: Record<string, any>; // per-project, e.g. spaceId for ClickUp
+  settings: Record<string, any>; // per-project, e.g. spaceId for ClickUp, milestoneName for board naming
   state: Record<string, any>;
   lastSyncAt: string | null;
   lastSyncStatus: 'ok' | 'error' | null;
@@ -49,99 +56,56 @@ export interface ProjectSyncConfig {
   updatedAt: string;
 }
 
+interface StoreV3 {
+  version: 3;
+  providers: Partial<Record<SyncProviderId, ProviderCredentials>>;
+  // projects[projectId][providerId][milestoneId]
+  projects: Record<string, Partial<Record<SyncProviderId, Record<string, ProjectSyncConfig>>>>;
+}
+
+// v2 shape (kept only for migration discard).
 interface StoreV2 {
   version: 2;
   providers: Partial<Record<SyncProviderId, ProviderCredentials>>;
-  projects: Record<string, Partial<Record<SyncProviderId, ProjectSyncConfig>>>;
-}
-
-// v1 shape, kept only for migration.
-interface StoreV1 {
-  version: 1;
-  entries: Record<string, {
-    providerId: SyncProviderId;
-    projectId: string;
-    enabled: boolean;
-    autoSync: boolean;
-    settings: Record<string, any>;
-    state: Record<string, any>;
-    lastSyncAt: string | null;
-    lastSyncStatus: 'ok' | 'error' | null;
-    lastSyncError: string | null;
-    createdAt: string;
-    updatedAt: string;
-  }>;
+  projects: Record<string, Partial<Record<SyncProviderId, any>>>;
 }
 
 // ── Low-level IO + migration ────────────────────────────────────────────
 
-async function readStore(): Promise<StoreV2> {
+async function readStore(): Promise<StoreV3> {
   try {
     const data = await readFile(STORE_FILE, 'utf-8');
     const parsed = JSON.parse(data);
-    if (parsed?.version === 2 && parsed.projects && parsed.providers) {
+    if (parsed?.version === 3 && parsed.projects && parsed.providers) {
       return parsed;
     }
-    if (parsed?.version === 1 && parsed.entries) {
-      return migrateFromV1(parsed as StoreV1);
+    if (parsed?.version === 2 && parsed.providers) {
+      return migrateFromV2(parsed as StoreV2);
     }
-    return { version: 2, providers: {}, projects: {} };
+    if (parsed?.version === 1) {
+      // Anything pre-v2 is even older — discard project state, no creds to keep.
+      return { version: 3, providers: {}, projects: {} };
+    }
+    return { version: 3, providers: {}, projects: {} };
   } catch {
-    return { version: 2, providers: {}, projects: {} };
+    return { version: 3, providers: {}, projects: {} };
   }
 }
 
-function migrateFromV1(v1: StoreV1): StoreV2 {
-  const v2: StoreV2 = { version: 2, providers: {}, projects: {} };
-  const now = new Date().toISOString();
-
-  for (const entry of Object.values(v1.entries)) {
-    // Extract credentials the first time we see this provider.
-    const providerId = entry.providerId;
-    const secretKeys = SECRET_KEYS[providerId];
-    if (!v2.providers[providerId]) {
-      const creds: Record<string, any> = {};
-      for (const k of secretKeys) {
-        if (entry.settings[k]) creds[k] = entry.settings[k];
-      }
-      if (Object.keys(creds).length > 0) {
-        v2.providers[providerId] = {
-          providerId,
-          settings: creds,
-          createdAt: entry.createdAt ?? now,
-          updatedAt: entry.updatedAt ?? now,
-        };
-      }
-    }
-
-    // Per-project config keeps everything except the credentials.
-    const projectSettings: Record<string, any> = {};
-    for (const [k, v] of Object.entries(entry.settings)) {
-      if (!secretKeys.includes(k)) projectSettings[k] = v;
-    }
-
-    v2.projects[entry.projectId] ??= {};
-    v2.projects[entry.projectId][providerId] = {
-      providerId,
-      projectId: entry.projectId,
-      enabled: entry.enabled,
-      autoSync: entry.autoSync,
-      settings: projectSettings,
-      state: entry.state ?? {},
-      lastSyncAt: entry.lastSyncAt,
-      lastSyncStatus: entry.lastSyncStatus,
-      lastSyncError: entry.lastSyncError,
-      createdAt: entry.createdAt ?? now,
-      updatedAt: entry.updatedAt ?? now,
-    };
-  }
-
-  // Persist the migrated shape immediately so we never re-migrate.
-  void writeStore(v2);
-  return v2;
+function migrateFromV2(v2: StoreV2): StoreV3 {
+  // Keep global credentials; discard per-project records so the user reconnects
+  // each project/milestone fresh under the new schema. Persist immediately so
+  // we never re-migrate.
+  const v3: StoreV3 = {
+    version: 3,
+    providers: v2.providers ?? {},
+    projects: {},
+  };
+  void writeStore(v3);
+  return v3;
 }
 
-async function writeStore(store: StoreV2): Promise<void> {
+async function writeStore(store: StoreV3): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
   await writeFile(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
 }
@@ -177,13 +141,17 @@ export async function deleteProviderCredentials(providerId: SyncProviderId): Pro
   const store = await readStore();
   if (!store.providers[providerId]) return false;
   delete store.providers[providerId];
-  // Disable every project config that depended on these credentials.
+  // Disable every milestone integration that depended on these credentials.
   for (const projectId of Object.keys(store.projects)) {
-    const entry = store.projects[projectId][providerId];
-    if (!entry) continue;
-    entry.enabled = false;
-    entry.autoSync = false;
-    entry.updatedAt = new Date().toISOString();
+    const byProvider = store.projects[projectId][providerId];
+    if (!byProvider) continue;
+    for (const mid of Object.keys(byProvider)) {
+      const entry = byProvider[mid];
+      if (!entry) continue;
+      entry.enabled = false;
+      entry.autoSync = false;
+      entry.updatedAt = new Date().toISOString();
+    }
   }
   await writeStore(store);
   return true;
@@ -213,19 +181,22 @@ export async function listProviderStatus(): Promise<Array<{
   });
 }
 
-// ── Per-project config API ──────────────────────────────────────────────
+// ── Per-(project, milestone) config API ────────────────────────────────
 
 export async function getProjectConfig(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId?: string,
 ): Promise<ProjectSyncConfig | null> {
+  const mid = normalizeMilestone(milestoneId);
   const store = await readStore();
-  return store.projects[projectId]?.[providerId] ?? null;
+  return store.projects[projectId]?.[providerId]?.[mid] ?? null;
 }
 
 export interface SaveProjectInput {
   projectId: string;
   providerId: SyncProviderId;
+  milestoneId?: string;
   settings?: Record<string, any>;
   state?: Record<string, any>;
   enabled?: boolean;
@@ -233,9 +204,12 @@ export interface SaveProjectInput {
 }
 
 export async function saveProjectConfig(input: SaveProjectInput): Promise<ProjectSyncConfig> {
+  const mid = normalizeMilestone(input.milestoneId);
   const store = await readStore();
   store.projects[input.projectId] ??= {};
-  const existing = store.projects[input.projectId][input.providerId];
+  store.projects[input.projectId][input.providerId] ??= {};
+  const byMilestone = store.projects[input.projectId][input.providerId]!;
+  const existing = byMilestone[mid];
   const now = new Date().toISOString();
 
   // Strip any secret keys that slipped in — those belong to the provider scope.
@@ -245,6 +219,7 @@ export async function saveProjectConfig(input: SaveProjectInput): Promise<Projec
   const next: ProjectSyncConfig = {
     providerId: input.providerId,
     projectId: input.projectId,
+    milestoneId: mid,
     enabled: input.enabled ?? existing?.enabled ?? true,
     autoSync: input.autoSync ?? existing?.autoSync ?? false,
     settings: { ...(existing?.settings ?? {}), ...cleaned },
@@ -255,7 +230,7 @@ export async function saveProjectConfig(input: SaveProjectInput): Promise<Projec
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
-  store.projects[input.projectId][input.providerId] = next;
+  byMilestone[mid] = next;
   await writeStore(store);
   return next;
 }
@@ -263,10 +238,12 @@ export async function saveProjectConfig(input: SaveProjectInput): Promise<Projec
 export async function patchState(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId: string | undefined,
   patch: Record<string, any>,
 ): Promise<void> {
+  const mid = normalizeMilestone(milestoneId);
   const store = await readStore();
-  const entry = store.projects[projectId]?.[providerId];
+  const entry = store.projects[projectId]?.[providerId]?.[mid];
   if (!entry) return;
   entry.state = { ...entry.state, ...patch };
   entry.updatedAt = new Date().toISOString();
@@ -276,10 +253,12 @@ export async function patchState(
 export async function patchStatus(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId: string | undefined,
   status: { ok: boolean; error?: string },
 ): Promise<void> {
+  const mid = normalizeMilestone(milestoneId);
   const store = await readStore();
-  const entry = store.projects[projectId]?.[providerId];
+  const entry = store.projects[projectId]?.[providerId]?.[mid];
   if (!entry) return;
   entry.lastSyncAt = new Date().toISOString();
   entry.lastSyncStatus = status.ok ? 'ok' : 'error';
@@ -291,24 +270,40 @@ export async function patchStatus(
 export async function deleteProjectConfig(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId?: string,
 ): Promise<boolean> {
+  const mid = normalizeMilestone(milestoneId);
   const store = await readStore();
-  if (!store.projects[projectId]?.[providerId]) return false;
-  delete store.projects[projectId][providerId];
-  if (Object.keys(store.projects[projectId]).length === 0) delete store.projects[projectId];
+  const byProvider = store.projects[projectId]?.[providerId];
+  if (!byProvider?.[mid]) return false;
+  delete byProvider[mid];
+  if (Object.keys(byProvider).length === 0) {
+    delete store.projects[projectId][providerId];
+  }
+  if (Object.keys(store.projects[projectId]).length === 0) {
+    delete store.projects[projectId];
+  }
   await writeStore(store);
   return true;
 }
 
-/** List every per-project config (optionally filtered to one project). */
+/**
+ * List every per-milestone config (optionally filtered to one project).
+ * Each returned entry is one (projectId, providerId, milestoneId) record.
+ */
 export async function listProjectConfigs(projectId?: string): Promise<ProjectSyncConfig[]> {
   const store = await readStore();
   const out: ProjectSyncConfig[] = [];
-  const entries = projectId ? [[projectId, store.projects[projectId]]] as const : Object.entries(store.projects);
-  for (const [, byProvider] of entries) {
+  const projectEntries = projectId
+    ? ([[projectId, store.projects[projectId]]] as Array<[string, StoreV3['projects'][string] | undefined]>)
+    : Object.entries(store.projects);
+  for (const [, byProvider] of projectEntries) {
     if (!byProvider) continue;
-    for (const entry of Object.values(byProvider)) {
-      if (entry) out.push(entry);
+    for (const byMilestone of Object.values(byProvider)) {
+      if (!byMilestone) continue;
+      for (const entry of Object.values(byMilestone)) {
+        if (entry) out.push(entry);
+      }
     }
   }
   return out;
@@ -319,6 +314,7 @@ export async function listProjectConfigs(projectId?: string): Promise<ProjectSyn
 export interface EffectiveConfig {
   providerId: SyncProviderId;
   projectId: string;
+  milestoneId: string;
   settings: Record<string, any>; // merged: provider creds + per-project settings
   state: Record<string, any>;
   enabled: boolean;
@@ -330,20 +326,23 @@ export interface EffectiveConfig {
 
 /**
  * Build the config the provider implementation actually uses: global creds
- * from the provider record, per-project options/state layered on top.
+ * from the provider record, per-(project, milestone) options/state on top.
  */
 export async function getEffectiveConfig(
   projectId: string,
   providerId: SyncProviderId,
+  milestoneId?: string,
 ): Promise<EffectiveConfig | null> {
+  const mid = normalizeMilestone(milestoneId);
   const store = await readStore();
   const creds = store.providers[providerId];
   if (!creds) return null;
-  const project = store.projects[projectId]?.[providerId];
+  const project = store.projects[projectId]?.[providerId]?.[mid];
 
   return {
     providerId,
     projectId,
+    milestoneId: mid,
     settings: { ...creds.settings, ...(project?.settings ?? {}) },
     state: project?.state ?? {},
     enabled: project?.enabled ?? false,
@@ -359,6 +358,7 @@ export function sanitizeProject(config: ProjectSyncConfig) {
   return {
     providerId: config.providerId,
     projectId: config.projectId,
+    milestoneId: config.milestoneId,
     enabled: config.enabled,
     autoSync: config.autoSync,
     settings: config.settings,

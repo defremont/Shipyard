@@ -11,8 +11,10 @@ import { EditorPanel } from '@/components/editor/EditorPanel'
 import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
+import { useTerminalStatus } from '@/hooks/useTerminal'
 import { toast } from 'sonner'
 
 export function Workspace() {
@@ -26,6 +28,13 @@ export function Workspace() {
     const saved = localStorage.getItem(`shipyard:workspace-mode:${projectId}`)
     return saved === 'editor' ? 'editor' : 'tasks'
   })
+  // Shared with TerminalLauncher via the same localStorage key — the launcher
+  // sidebar and the toolbar agree on whether `--dangerously-skip-permissions`
+  // is on for Claude Code launches in this project.
+  const [skipPermissions, setSkipPermissions] = useState(() => {
+    try { return localStorage.getItem('shipyard:skipPermissions') === 'true' } catch { return false }
+  })
+  const [claudePopoverOpen, setClaudePopoverOpen] = useState(false)
 
   const setWorkspaceMode = useCallback((mode: 'tasks' | 'editor') => {
     _setWorkspaceMode(mode)
@@ -55,6 +64,8 @@ export function Workspace() {
 
   const launchTerminal = useLaunchTerminal()
   const openFolder = useOpenFolder()
+  const { data: terminalStatus } = useTerminalStatus()
+  const hasIntegrated = terminalStatus?.available ?? false
 
   const editor = useEditorTabsContext()
 
@@ -82,12 +93,19 @@ export function Workspace() {
   // the initial activeTabPath value, since it can come from persisted tabs and
   // would override the user's last-selected workspace mode for this project.
   const activeTabPath = editor.activeTabPath
-  const lastSeenTabPath = useRef<string | null>(activeTabPath)
-  const lastSeenProjectId = useRef<string | undefined>(projectId)
+  // `undefined` = baseline not yet captured for the current project. After a
+  // project change, useEditorTabs lags one render before activeTabPath reflects
+  // the new project's persisted value, so we discard that first observation
+  // instead of treating it as a user file-open.
+  const lastSeenTabPath = useRef<string | null | undefined>(undefined)
+  const lastSeenProjectId = useRef<string | undefined>(undefined)
   useEffect(() => {
-    // When switching projects, reset the baseline without auto-switching mode.
     if (lastSeenProjectId.current !== projectId) {
       lastSeenProjectId.current = projectId
+      lastSeenTabPath.current = undefined
+      return
+    }
+    if (lastSeenTabPath.current === undefined) {
       lastSeenTabPath.current = activeTabPath
       return
     }
@@ -110,11 +128,15 @@ export function Workspace() {
 
   const handleLaunch = useCallback((type: string, label: string) => {
     if (!projectId) return
+    if (hasIntegrated) {
+      window.dispatchEvent(new CustomEvent('shipyard:open-terminal', { detail: { projectId, type } }))
+      return
+    }
     launchTerminal.mutate(
       { projectId, type },
       { onSuccess: () => toast.success(`Launched ${label}`) }
     )
-  }, [projectId, launchTerminal])
+  }, [projectId, launchTerminal, hasIntegrated])
 
   const handleOpenFolder = useCallback(() => {
     if (!projectId) return
@@ -224,17 +246,59 @@ export function Workspace() {
             </TooltipTrigger>
             <TooltipContent>Open Folder</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
+          <Popover open={claudePopoverOpen} onOpenChange={setClaudePopoverOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <button
+                    className={cn(
+                      'p-1.5 rounded-md hover:bg-accent transition-colors relative',
+                      skipPermissions
+                        ? 'text-amber-400/80 hover:text-amber-300'
+                        : 'text-muted-foreground/40 hover:text-purple-400',
+                    )}
+                  >
+                    <Sparkles className="h-3.5 w-3.5" />
+                    {skipPermissions && (
+                      <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold text-amber-400 leading-none">Y</span>
+                    )}
+                  </button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{skipPermissions ? 'Claude Code (YOLO)' : 'Claude Code'}</TooltipContent>
+            </Tooltip>
+            <PopoverContent className="w-56 p-2" align="end">
               <button
-                onClick={() => handleLaunch('claude', 'Claude Code')}
-                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-purple-400 hover:bg-accent transition-colors"
+                onClick={() => {
+                  setClaudePopoverOpen(false)
+                  handleLaunch(skipPermissions ? 'claude-yolo' : 'claude', 'Claude Code')
+                }}
+                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-accent transition-colors"
               >
-                <Sparkles className="h-3.5 w-3.5" />
+                <Sparkles className={cn('h-3.5 w-3.5', skipPermissions ? 'text-amber-400' : 'text-purple-400')} />
+                <span className="font-medium">Open Claude Code{skipPermissions ? ' (YOLO)' : ''}</span>
               </button>
-            </TooltipTrigger>
-            <TooltipContent>Claude Code</TooltipContent>
-          </Tooltip>
+              <div className="border-t my-1" />
+              <label className="flex items-start gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-accent cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={skipPermissions}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                    setSkipPermissions(next)
+                    try { localStorage.setItem('shipyard:skipPermissions', String(next)) } catch { /* ignore */ }
+                  }}
+                  className="mt-0.5 h-3.5 w-3.5"
+                />
+                <div className="flex-1">
+                  <div className="font-medium">YOLO mode</div>
+                  <div className="text-[10px] text-muted-foreground">
+                    Launches Claude with <code>--dangerously-skip-permissions</code>.
+                  </div>
+                </div>
+              </label>
+            </PopoverContent>
+          </Popover>
         </div>
 
         {/* Links + settings */}
