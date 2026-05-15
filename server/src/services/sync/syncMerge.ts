@@ -31,6 +31,10 @@ export interface MergeResult {
   idMapPatch: Record<string, string>; // localTaskId -> remoteId (for newly linked tasks)
 }
 
+function normalizeTitle(s: string): string {
+  return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 export function mergeRemoteIntoLocal(
   localTasks: Task[],
   remote: RemoteTask[],
@@ -42,34 +46,74 @@ export function mergeRemoteIntoLocal(
   // rest of the project's tasks untouched. milestoneId is recorded on tasks
   // newly pulled from the remote so they land in the right column.
   const normalizedMilestone = milestoneId && milestoneId !== 'default' ? milestoneId : undefined;
-  const byId = new Map(localTasks.map(t => [t.id, t]));
   const result: Task[] = localTasks.map(t => ({ ...t }));
   const idMapPatch: Record<string, string> = {};
   let created = 0;
   let updated = 0;
 
+  // Title fallback: when the cardMap is stale (race with a concurrent push,
+  // or the user linked to an existing remote board after creating local
+  // tasks with matching titles), match remote → local by normalized title
+  // before creating a duplicate. Tracks which local ids we've already
+  // adopted so two remote items with the same title can't both grab the
+  // same local task.
+  const titleToLocal = new Map<string, string>();
+  for (const t of result) {
+    const key = normalizeTitle(t.title);
+    if (key && !titleToLocal.has(key)) titleToLocal.set(key, t.id);
+  }
+  const adoptedLocalIds = new Set<string>();
+
   for (const r of remote) {
-    const localIdx = r.taskId ? result.findIndex(t => t.id === r.taskId) : -1;
+    let localIdx = r.taskId ? result.findIndex(t => t.id === r.taskId) : -1;
+
+    // Title-match fallback when we have no id link or it points to a
+    // deleted task. This is what stops the same task from being created
+    // twice when push/pull race.
+    if (localIdx < 0) {
+      const candidate = titleToLocal.get(normalizeTitle(r.title));
+      if (candidate && !adoptedLocalIds.has(candidate)) {
+        const idx = result.findIndex(t => t.id === candidate);
+        if (idx >= 0) {
+          localIdx = idx;
+          adoptedLocalIds.add(candidate);
+          // Record the new link so the caller persists it into cardMap/taskMap.
+          // We only emit a patch if the existing link is missing or stale.
+          idMapPatch[candidate] = r.remoteId;
+        }
+      }
+    }
 
     if (localIdx >= 0) {
       const local = result[localIdx];
       const remoteNewer = new Date(r.updatedAt).getTime() > new Date(local.updatedAt).getTime();
       if (remoteNewer) {
-        result[localIdx] = {
-          ...local,
-          title: r.title || local.title,
-          description: r.description ?? local.description,
-          prompt: r.prompt ?? local.prompt,
-          status: r.status,
-          priority: r.priority,
-          updatedAt: r.updatedAt,
-          ...statusTimestamps(local, r.status, r.updatedAt),
-        };
-        updated++;
+        const fieldsChanged =
+          (r.title || local.title) !== local.title ||
+          (r.description ?? local.description) !== local.description ||
+          (r.prompt ?? local.prompt) !== local.prompt ||
+          r.status !== local.status ||
+          r.priority !== local.priority;
+        // Skip when only the remote timestamp moved (our own push bumped
+        // Trello's dateLastActivity, no real change). Otherwise we'd churn
+        // a pull→push loop every 30s with no actual data change.
+        if (fieldsChanged) {
+          result[localIdx] = {
+            ...local,
+            title: r.title || local.title,
+            description: r.description ?? local.description,
+            prompt: r.prompt ?? local.prompt,
+            status: r.status,
+            priority: r.priority,
+            updatedAt: r.updatedAt,
+            ...statusTimestamps(local, r.status, r.updatedAt),
+          };
+          updated++;
+        }
       }
     } else {
-      // No link — treat as a new remote task (happens when someone creates a
-      // card/task directly on Trello/ClickUp).
+      // No link and no title match — treat as a genuinely new remote task
+      // (created directly on Trello/ClickUp by the user).
       const now = r.updatedAt || new Date().toISOString();
       const newTask: Task = {
         id: nanoid(10),
@@ -86,12 +130,16 @@ export function mergeRemoteIntoLocal(
         ...statusTimestamps(undefined, r.status, now),
       };
       result.push(newTask);
+      // Reserve this title so a subsequent remote item with the same title
+      // doesn't also grab the same local entry.
+      const k = normalizeTitle(newTask.title);
+      if (k && !titleToLocal.has(k)) titleToLocal.set(k, newTask.id);
+      adoptedLocalIds.add(newTask.id);
       idMapPatch[newTask.id] = r.remoteId;
       created++;
     }
   }
 
-  void byId;
   return { merged: result, created, updated, idMapPatch };
 }
 

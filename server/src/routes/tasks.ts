@@ -111,6 +111,30 @@ export async function taskRoutes(app: FastifyInstance) {
     }
   );
 
+  // Bulk update — single atomic write for column-level "move all" actions.
+  app.post<{ Params: { projectId: string }; Body: { taskIds: string[]; data: Record<string, any> } }>(
+    '/api/projects/:projectId/tasks/bulk-update',
+    async (request) => {
+      const { taskIds, data } = request.body || ({} as any);
+      const result = await taskStore.bulkUpdateTasks(request.params.projectId, taskIds || [], data || {});
+      log.info('tasks', `Bulk updated ${result.updated} tasks`, JSON.stringify(data), request.params.projectId);
+      triggerAutoSync(request.params.projectId);
+      return result;
+    }
+  );
+
+  // Bulk delete — single atomic write for column-level "delete all" actions.
+  app.post<{ Params: { projectId: string }; Body: { taskIds: string[] } }>(
+    '/api/projects/:projectId/tasks/bulk-delete',
+    async (request) => {
+      const taskIds = request.body?.taskIds || [];
+      const result = await taskStore.bulkDeleteTasks(request.params.projectId, taskIds);
+      log.info('tasks', `Bulk deleted ${result.deleted} tasks`, undefined, request.params.projectId);
+      triggerAutoSync(request.params.projectId);
+      return result;
+    }
+  );
+
   // Import tasks into a project
   app.post<{ Params: { projectId: string }; Body: { tasks: any[] } }>(
     '/api/projects/:projectId/tasks/import',

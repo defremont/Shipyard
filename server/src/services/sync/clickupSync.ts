@@ -166,18 +166,55 @@ function buildTaskPayload(task: Task) {
   };
 }
 
+interface RemoteTaskSummary {
+  id: string;
+  name: string;
+  date_updated?: string;
+}
+
+interface UpsertContext {
+  byId: Map<string, RemoteTaskSummary>;
+  byTitle: Map<string, RemoteTaskSummary>;
+  adoptedRemoteIds: Set<string>;
+}
+
 async function upsertTask(
   config: SyncConfig,
   state: ClickUpState,
   task: Task,
-): Promise<{ clickupId: string }> {
-  const existing = state.taskMap?.[task.id];
+  ctx: UpsertContext,
+): Promise<{ clickupId: string; skipped: boolean }> {
+  let existing = state.taskMap?.[task.id];
   const payload = buildTaskPayload(task);
 
+  // Drop stale mapping if the remote task is gone.
+  if (existing && !ctx.byId.has(existing)) {
+    existing = undefined;
+  }
+
+  // Title-match fallback to avoid creating duplicate ClickUp tasks when the
+  // taskMap is stale (race with pull, or a recently adopted list).
+  if (!existing) {
+    const candidate = ctx.byTitle.get(normalizeTitle(task.title));
+    if (candidate && !ctx.adoptedRemoteIds.has(candidate.id)) {
+      existing = candidate.id;
+      ctx.adoptedRemoteIds.add(candidate.id);
+    }
+  }
+
   if (existing) {
+    const remote = ctx.byId.get(existing);
+    if (remote?.date_updated) {
+      const remoteTs = Number(remote.date_updated);
+      const localTs = new Date(task.updatedAt).getTime();
+      if (Number.isFinite(remoteTs) && Number.isFinite(localTs) && remoteTs > localTs) {
+        // Remote is fresher than us — let pull reconcile, don't overwrite.
+        return { clickupId: existing, skipped: true };
+      }
+    }
     try {
       await clickupRequest(config, `/task/${existing}`, 'PUT', undefined, payload);
-      return { clickupId: existing };
+      return { clickupId: existing, skipped: false };
     } catch (err: any) {
       if (!/not found|404/i.test(String(err?.message))) throw err;
     }
@@ -190,7 +227,7 @@ async function upsertTask(
     undefined,
     payload,
   );
-  return { clickupId: created.id };
+  return { clickupId: created.id, skipped: false };
 }
 
 export interface PushResult {
@@ -205,13 +242,34 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
   const milestoneName = config.settings.milestoneName as string | undefined;
   const state = await ensureList(config, projectName, milestoneName);
 
+  // Snapshot list contents once so smart-push can compare timestamps and
+  // do title-match fallback for stale taskMap entries.
+  const remote = await clickupRequest<{ tasks: RemoteTaskSummary[] }>(
+    config,
+    `/list/${state.listId}/task`,
+    'GET',
+    { archived: false, subtasks: false },
+  );
+  const byId = new Map<string, RemoteTaskSummary>();
+  const byTitle = new Map<string, RemoteTaskSummary>();
+  for (const t of remote.tasks ?? []) {
+    byId.set(t.id, t);
+    const key = normalizeTitle(t.name);
+    if (key && !byTitle.has(key)) byTitle.set(key, t);
+  }
+  const adoptedRemoteIds = new Set<string>();
+  for (const cid of Object.values(state.taskMap ?? {})) {
+    if (byId.has(cid)) adoptedRemoteIds.add(cid);
+  }
+  const ctx: UpsertContext = { byId, byTitle, adoptedRemoteIds };
+
   const nextMap: Record<string, string> = { ...(state.taskMap ?? {}) };
   const errors: string[] = [];
   let pushed = 0;
 
   for (const task of tasks) {
     try {
-      const { clickupId } = await upsertTask(config, state, task);
+      const { clickupId } = await upsertTask(config, state, task, ctx);
       nextMap[task.id] = clickupId;
       pushed++;
     } catch (err: any) {
@@ -219,10 +277,15 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
     }
   }
 
-  // Archive orphan tasks
+  // Archive orphans we owned; never touch tasks that exist on ClickUp but
+  // were never linked to one of ours.
   const liveIds = new Set(tasks.map(t => t.id));
   for (const [taskId, clickupId] of Object.entries(state.taskMap ?? {})) {
     if (liveIds.has(taskId)) continue;
+    if (Object.values(nextMap).includes(clickupId) && nextMap[taskId] !== clickupId) {
+      delete nextMap[taskId];
+      continue;
+    }
     try {
       await clickupRequest(config, `/task/${clickupId}`, 'PUT', undefined, {
         status: STATUS_MAP.done,

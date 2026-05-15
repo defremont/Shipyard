@@ -194,14 +194,51 @@ function renderDesc(task: Task): string {
   return desc + prompt;
 }
 
+interface RemoteCardSummary {
+  id: string;
+  name: string;
+  dateLastActivity: string;
+  closed?: boolean;
+}
+
+interface UpsertContext {
+  byId: Map<string, RemoteCardSummary>;
+  byTitle: Map<string, RemoteCardSummary>;
+  adoptedRemoteIds: Set<string>;
+}
+
+function normalizeTitle(s: string): string {
+  return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
 async function upsertCard(
   config: SyncConfig,
   state: TrelloState,
   task: Task,
-): Promise<{ cardId: string }> {
+  ctx: UpsertContext,
+): Promise<{ cardId: string; skipped: boolean }> {
   const listId = state.listIds![task.status];
   const labelId = state.labelIds![task.priority];
-  const existingCardId = state.cardMap?.[task.id];
+  let existingCardId = state.cardMap?.[task.id];
+
+  // If cardMap points at a card that no longer exists on the board, drop the
+  // stale mapping so we can either adopt by title or create a fresh card —
+  // without this, a deleted-in-Trello card would force a 404 on every push.
+  if (existingCardId && !ctx.byId.has(existingCardId)) {
+    existingCardId = undefined;
+  }
+
+  // Title-match fallback when this task has no link yet. Stops push from
+  // creating a second card for a task that already has one on the board
+  // (e.g. after a pull/push race, or when the user manually renamed a card
+  // before we got around to mapping it).
+  if (!existingCardId) {
+    const candidate = ctx.byTitle.get(normalizeTitle(task.title));
+    if (candidate && !ctx.adoptedRemoteIds.has(candidate.id)) {
+      existingCardId = candidate.id;
+      ctx.adoptedRemoteIds.add(candidate.id);
+    }
+  }
 
   const payload = {
     name: task.title,
@@ -212,16 +249,28 @@ async function upsertCard(
   };
 
   if (existingCardId) {
+    const remote = ctx.byId.get(existingCardId);
+    // Skip the PUT when Trello has a newer modification than our local
+    // task — otherwise this push would clobber whatever the user just
+    // changed on Trello. The next pull will reconcile their change.
+    if (remote) {
+      const remoteTs = new Date(remote.dateLastActivity).getTime();
+      const localTs = new Date(task.updatedAt).getTime();
+      if (Number.isFinite(remoteTs) && Number.isFinite(localTs) && remoteTs > localTs) {
+        return { cardId: existingCardId, skipped: true };
+      }
+    }
     try {
       await trelloRequest(config, `/cards/${existingCardId}`, 'PUT', undefined, payload);
-      return { cardId: existingCardId };
+      return { cardId: existingCardId, skipped: false };
     } catch (err: any) {
       if (!/not found|404/i.test(String(err?.message))) throw err;
+      // Card vanished between our fetch and PUT — fall through to create.
     }
   }
 
   const card = await trelloRequest<{ id: string }>(config, '/cards', 'POST', undefined, payload);
-  return { cardId: card.id };
+  return { cardId: card.id, skipped: false };
 }
 
 export interface PushResult {
@@ -236,13 +285,40 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
   const milestoneName = config.settings.milestoneName as string | undefined;
   const state = await ensureBoard(config, projectName, milestoneName);
 
+  // Snapshot remote state once at the start of the push so we can: (a) skip
+  // PUTs when Trello has fresher data than us, (b) fall back to title
+  // matching when cardMap is stale, and (c) detect cards already deleted in
+  // Trello before we PUT them.
+  const remoteCards = await trelloRequest<RemoteCardSummary[]>(
+    config,
+    `/boards/${state.boardId}/cards`,
+    'GET',
+    { fields: 'name,dateLastActivity,closed' },
+  );
+  const byId = new Map<string, RemoteCardSummary>();
+  const byTitle = new Map<string, RemoteCardSummary>();
+  for (const c of remoteCards) {
+    if (c.closed) continue;
+    byId.set(c.id, c);
+    const key = normalizeTitle(c.name);
+    if (key && !byTitle.has(key)) byTitle.set(key, c);
+  }
+  // Don't let two local tasks adopt the same remote card by title.
+  const adoptedRemoteIds = new Set<string>();
+  // Prime adopted set with cardMap entries so title-match doesn't try to
+  // re-adopt a card we already track for a different task.
+  for (const cid of Object.values(state.cardMap ?? {})) {
+    if (byId.has(cid)) adoptedRemoteIds.add(cid);
+  }
+  const ctx: UpsertContext = { byId, byTitle, adoptedRemoteIds };
+
   const nextMap: Record<string, string> = { ...(state.cardMap ?? {}) };
   const errors: string[] = [];
   let pushed = 0;
 
   for (const task of tasks) {
     try {
-      const { cardId } = await upsertCard(config, state, task);
+      const { cardId } = await upsertCard(config, state, task, ctx);
       nextMap[task.id] = cardId;
       pushed++;
     } catch (err: any) {
@@ -250,10 +326,18 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
     }
   }
 
-  // Archive cards whose local task no longer exists
+  // Archive cards whose local task no longer exists. Only touch cards we
+  // actually owned (in the old cardMap) — never archive cards we found on
+  // the board but never linked to, since those may belong to the user.
   const liveIds = new Set(tasks.map(t => t.id));
   for (const [taskId, cardId] of Object.entries(state.cardMap ?? {})) {
     if (liveIds.has(taskId)) continue;
+    // Skip archive if we re-adopted this card under a different local task
+    // (rare but possible after id churn).
+    if (Object.values(nextMap).includes(cardId) && nextMap[taskId] !== cardId) {
+      delete nextMap[taskId];
+      continue;
+    }
     try {
       await trelloRequest(config, `/cards/${cardId}`, 'PUT', undefined, { closed: true });
     } catch { /* ignore */ }
@@ -375,10 +459,6 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
 }
 
 // ── Link to existing board ─────────────────────────────────────────────
-
-function normalizeTitle(s: string): string {
-  return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
-}
 
 export interface LinkBoardResult {
   boardId: string;

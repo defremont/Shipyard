@@ -99,6 +99,10 @@ export const api = {
     request<{ updated: number; created: number; removed: number }>(`/projects/${projectId}/tasks/csv-apply`, { method: 'POST', body: JSON.stringify(changes) }),
   replaceTasks: (projectId: string, tasks: any[], milestoneId?: string) =>
     request<{ tasks: any[] }>(`/projects/${projectId}/tasks/replace`, { method: 'POST', body: JSON.stringify({ tasks, milestoneId }) }),
+  bulkUpdateTasks: (projectId: string, taskIds: string[], data: Record<string, any>) =>
+    request<{ updated: number }>(`/projects/${projectId}/tasks/bulk-update`, { method: 'POST', body: JSON.stringify({ taskIds, data }) }),
+  bulkDeleteTasks: (projectId: string, taskIds: string[]) =>
+    request<{ deleted: number }>(`/projects/${projectId}/tasks/bulk-delete`, { method: 'POST', body: JSON.stringify({ taskIds }) }),
 
   // Sync (stateless proxy)
   syncProxy: (url: string, method: 'GET' | 'POST', payload?: unknown, action?: string) =>

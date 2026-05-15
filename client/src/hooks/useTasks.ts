@@ -115,6 +115,32 @@ export function useDeleteTask() {
   })
 }
 
+export function useBulkUpdateTasks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, taskIds, data }: { projectId: string; taskIds: string[]; data: Record<string, any> }) =>
+      api.bulkUpdateTasks(projectId, taskIds, data),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      scheduleAutoSyncPush(variables.projectId)
+    },
+  })
+}
+
+export function useBulkDeleteTasks() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, taskIds }: { projectId: string; taskIds: string[] }) =>
+      api.bulkDeleteTasks(projectId, taskIds),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      scheduleAutoSyncPush(variables.projectId)
+    },
+  })
+}
+
 export function useImportTasks() {
   const queryClient = useQueryClient()
   return useMutation({

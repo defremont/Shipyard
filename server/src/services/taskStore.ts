@@ -15,11 +15,23 @@ function getTasksFilePath(projectId: string): string {
 }
 
 async function readFile_(projectId: string): Promise<TasksFile> {
+  let data: string;
   try {
-    const data = await readFile(getTasksFilePath(projectId), 'utf-8');
-    return JSON.parse(data);
+    data = await readFile(getTasksFilePath(projectId), 'utf-8');
   } catch {
+    // File doesn't exist yet — fresh project.
     return { tasks: [] };
+  }
+  try {
+    return JSON.parse(data);
+  } catch (err) {
+    // The file exists but is unparseable. Returning an empty list here would
+    // cause the next write to overwrite the corrupted file with [], destroying
+    // the user's data. Side-step that by snapshotting the broken content for
+    // recovery and refusing the read so callers surface an error instead.
+    const backup = `${getTasksFilePath(projectId)}.corrupt-${Date.now()}.bak`;
+    try { await writeFile(backup, data, 'utf-8'); } catch { /* best effort */ }
+    throw new Error(`Tasks file for "${projectId}" is corrupted (snapshot saved at ${backup}): ${(err as Error).message}`);
   }
 }
 
@@ -38,6 +50,25 @@ async function writeTasks(projectId: string, tasks: Task[]): Promise<void> {
   const file = await readFile_(projectId);
   file.tasks = tasks;
   await writeFile_(projectId, file);
+}
+
+// Per-project mutation lock. Without this, parallel mutations (especially
+// bulk operations driven from the client) read-modify-write the same JSON
+// file concurrently — overlapping writes can interleave bytes and corrupt
+// the file. Every public mutation below should run inside withLock(projectId).
+const locks = new Map<string, Promise<unknown>>();
+async function withLock<T>(projectId: string, fn: () => Promise<T>): Promise<T> {
+  const prev = locks.get(projectId) ?? Promise.resolve();
+  let release: () => void;
+  const next = new Promise<void>(res => { release = res; });
+  locks.set(projectId, prev.then(() => next));
+  try {
+    await prev;
+    return await fn();
+  } finally {
+    release!();
+    if (locks.get(projectId) === next) locks.delete(projectId);
+  }
 }
 
 function getNextNumber(tasks: Task[]): number {
@@ -77,9 +108,14 @@ export async function getTasks(projectId: string, milestoneId?: string): Promise
     if (!t.createdAt) t.createdAt = t.updatedAt || new Date().toISOString();
     if (t.order == null) t.order = 0;
   }
-  // Backfill numbers for tasks that don't have one yet
+  // Backfill numbers for tasks that don't have one yet — re-read inside the
+  // lock so we don't clobber a concurrent mutation with stale data.
   if (backfillNumbers(tasks)) {
-    await writeTasks(projectId, tasks);
+    await withLock(projectId, async () => {
+      const fresh = await readTasks(projectId);
+      if (backfillNumbers(fresh)) await writeTasks(projectId, fresh);
+    });
+    return filterByMilestone(await readTasks(projectId), milestoneId);
   }
   return filterByMilestone(tasks, milestoneId);
 }
@@ -126,99 +162,144 @@ function buildCascadingTimestamps(status: Task['status'], now: string, existing?
   return ts
 }
 
-export async function createTask(projectId: string, data: Omit<Task, 'id' | 'projectId' | 'createdAt' | 'updatedAt' | 'order' | 'inboxAt' | 'inProgressAt' | 'doneAt'>): Promise<Task> {
-  const tasks = await readTasks(projectId);
-  const now = new Date().toISOString();
-  const status = data.status || 'todo';
-  const task: Task = {
-    ...data,
-    status,
-    id: nanoid(10),
-    number: getNextNumber(tasks),
-    projectId,
-    createdAt: now,
-    updatedAt: now,
-    order: tasks.length,
-    ...buildCascadingTimestamps(status, now),
-  };
-  tasks.push(task);
-  await writeTasks(projectId, tasks);
-  return task;
-}
-
-export async function updateTask(projectId: string, taskId: string, data: Partial<Omit<Task, 'id' | 'projectId' | 'createdAt'>>): Promise<Task | null> {
-  const tasks = await readTasks(projectId);
-  const idx = tasks.findIndex(t => t.id === taskId);
-  if (idx === -1) return null;
-
-  const now = new Date().toISOString();
-  const oldStatus = tasks[idx].status;
-  const newStatus = data.status;
-
-  // Track status change timestamps (cascading: later stages fill in missing earlier ones)
-  const statusTimestamps: Partial<Task> = {};
-  if (newStatus && newStatus !== oldStatus) {
-    const existing = tasks[idx];
-    if (newStatus === 'backlog' || newStatus === 'todo') {
-      statusTimestamps.inboxAt = now;
-    } else if (newStatus === 'in_progress') {
-      if (!existing.inboxAt) statusTimestamps.inboxAt = now;
-      statusTimestamps.inProgressAt = now;
-    } else if (newStatus === 'done') {
-      if (!existing.inboxAt) statusTimestamps.inboxAt = now;
-      if (!existing.inProgressAt) statusTimestamps.inProgressAt = now;
-      statusTimestamps.doneAt = now;
-    }
+function applyStatusTimestamps(existing: Task, newStatus: Task['status'] | undefined, now: string): Partial<Task> {
+  if (!newStatus || newStatus === existing.status) return {};
+  const ts: Partial<Task> = {};
+  if (newStatus === 'backlog' || newStatus === 'todo') {
+    ts.inboxAt = now;
+  } else if (newStatus === 'in_progress') {
+    if (!existing.inboxAt) ts.inboxAt = now;
+    ts.inProgressAt = now;
+  } else if (newStatus === 'done') {
+    if (!existing.inboxAt) ts.inboxAt = now;
+    if (!existing.inProgressAt) ts.inProgressAt = now;
+    ts.doneAt = now;
   }
-
-  tasks[idx] = {
-    ...tasks[idx],
-    ...data,
-    ...statusTimestamps,
-    updatedAt: now,
-  };
-  await writeTasks(projectId, tasks);
-  return tasks[idx];
+  return ts;
 }
 
-export async function deleteTask(projectId: string, taskId: string): Promise<boolean> {
-  const tasks = await readTasks(projectId);
-  const filtered = tasks.filter(t => t.id !== taskId);
-  if (filtered.length === tasks.length) return false;
-  await writeTasks(projectId, filtered);
-  return true;
-}
-
-export async function importTasks(projectId: string, importedTasks: Partial<Task>[]): Promise<number> {
-  const existing = await readTasks(projectId);
-  const now = new Date().toISOString();
-  const created: Task[] = [];
-
-  let nextNum = getNextNumber(existing);
-  for (const t of importedTasks) {
-    const status = (t.status as Task['status']) || 'todo';
-    created.push({
-      title: t.title || 'Untitled',
-      description: t.description || '',
-      priority: (t.priority as Task['priority']) || 'medium',
+export function createTask(projectId: string, data: Omit<Task, 'id' | 'projectId' | 'createdAt' | 'updatedAt' | 'order' | 'inboxAt' | 'inProgressAt' | 'doneAt'>): Promise<Task> {
+  return withLock(projectId, async () => {
+    const tasks = await readTasks(projectId);
+    const now = new Date().toISOString();
+    const status = data.status || 'todo';
+    const task: Task = {
+      ...data,
       status,
-      prompt: t.prompt,
-      milestoneId: t.milestoneId,
       id: nanoid(10),
-      number: nextNum++,
+      number: getNextNumber(tasks),
       projectId,
-      createdAt: t.createdAt || now,
+      createdAt: now,
       updatedAt: now,
-      order: existing.length + created.length,
-      ...buildCascadingTimestamps(status, now, { inboxAt: t.inboxAt, inProgressAt: t.inProgressAt, doneAt: t.doneAt }),
-    });
-  }
-
-  await writeTasks(projectId, [...existing, ...created]);
-  return created.length;
+      order: tasks.length,
+      ...buildCascadingTimestamps(status, now),
+    };
+    tasks.push(task);
+    await writeTasks(projectId, tasks);
+    return task;
+  });
 }
 
-export async function applyCsvChanges(
+export function updateTask(projectId: string, taskId: string, data: Partial<Omit<Task, 'id' | 'projectId' | 'createdAt'>>): Promise<Task | null> {
+  return withLock(projectId, async () => {
+    const tasks = await readTasks(projectId);
+    const idx = tasks.findIndex(t => t.id === taskId);
+    if (idx === -1) return null;
+    const now = new Date().toISOString();
+    tasks[idx] = {
+      ...tasks[idx],
+      ...data,
+      ...applyStatusTimestamps(tasks[idx], data.status, now),
+      updatedAt: now,
+    };
+    await writeTasks(projectId, tasks);
+    return tasks[idx];
+  });
+}
+
+export function deleteTask(projectId: string, taskId: string): Promise<boolean> {
+  return withLock(projectId, async () => {
+    const tasks = await readTasks(projectId);
+    const filtered = tasks.filter(t => t.id !== taskId);
+    if (filtered.length === tasks.length) return false;
+    await writeTasks(projectId, filtered);
+    return true;
+  });
+}
+
+// Bulk operations: do the read-modify-write in a single locked pass so that
+// large kanban-level actions (move all / delete all) hit the disk as one
+// atomic write instead of N concurrent writes that race and corrupt the file.
+export function bulkUpdateTasks(
+  projectId: string,
+  taskIds: string[],
+  data: Partial<Omit<Task, 'id' | 'projectId' | 'createdAt'>>,
+): Promise<{ updated: number }> {
+  return withLock(projectId, async () => {
+    if (taskIds.length === 0) return { updated: 0 };
+    const tasks = await readTasks(projectId);
+    const idSet = new Set(taskIds);
+    const now = new Date().toISOString();
+    let updated = 0;
+    for (let i = 0; i < tasks.length; i++) {
+      if (!idSet.has(tasks[i].id)) continue;
+      tasks[i] = {
+        ...tasks[i],
+        ...data,
+        ...applyStatusTimestamps(tasks[i], data.status, now),
+        updatedAt: now,
+      };
+      updated++;
+    }
+    if (updated > 0) await writeTasks(projectId, tasks);
+    return { updated };
+  });
+}
+
+export function bulkDeleteTasks(projectId: string, taskIds: string[]): Promise<{ deleted: number }> {
+  return withLock(projectId, async () => {
+    if (taskIds.length === 0) return { deleted: 0 };
+    const tasks = await readTasks(projectId);
+    const idSet = new Set(taskIds);
+    const filtered = tasks.filter(t => !idSet.has(t.id));
+    const deleted = tasks.length - filtered.length;
+    if (deleted > 0) await writeTasks(projectId, filtered);
+    return { deleted };
+  });
+}
+
+export function importTasks(projectId: string, importedTasks: Partial<Task>[]): Promise<number> {
+  return withLock(projectId, async () => {
+    const existing = await readTasks(projectId);
+    const now = new Date().toISOString();
+    const created: Task[] = [];
+
+    let nextNum = getNextNumber(existing);
+    for (const t of importedTasks) {
+      const status = (t.status as Task['status']) || 'todo';
+      created.push({
+        title: t.title || 'Untitled',
+        description: t.description || '',
+        priority: (t.priority as Task['priority']) || 'medium',
+        status,
+        prompt: t.prompt,
+        milestoneId: t.milestoneId,
+        id: nanoid(10),
+        number: nextNum++,
+        projectId,
+        createdAt: t.createdAt || now,
+        updatedAt: now,
+        order: existing.length + created.length,
+        ...buildCascadingTimestamps(status, now, { inboxAt: t.inboxAt, inProgressAt: t.inProgressAt, doneAt: t.doneAt }),
+      });
+    }
+
+    await writeTasks(projectId, [...existing, ...created]);
+    return created.length;
+  });
+}
+
+export function applyCsvChanges(
   projectId: string,
   changes: {
     update: Array<{ id: string } & Partial<Omit<Task, 'id' | 'projectId' | 'createdAt'>>>;
@@ -226,134 +307,120 @@ export async function applyCsvChanges(
     remove: string[];
   }
 ): Promise<{ updated: number; created: number; removed: number }> {
-  let tasks = await readTasks(projectId);
-  const now = new Date().toISOString();
+  return withLock(projectId, async () => {
+    let tasks = await readTasks(projectId);
+    const now = new Date().toISOString();
 
-  // Remove
-  const removeSet = new Set(changes.remove);
-  const removedCount = tasks.filter(t => removeSet.has(t.id)).length;
-  tasks = tasks.filter(t => !removeSet.has(t.id));
+    const removeSet = new Set(changes.remove);
+    const removedCount = tasks.filter(t => removeSet.has(t.id)).length;
+    tasks = tasks.filter(t => !removeSet.has(t.id));
 
-  // Update
-  let updatedCount = 0;
-  for (const upd of changes.update) {
-    const idx = tasks.findIndex(t => t.id === upd.id);
-    if (idx !== -1) {
-      const existing = tasks[idx];
-      const oldStatus = existing.status;
-      const newStatus = upd.status;
-      const statusTimestamps: Partial<Task> = {};
-      if (newStatus && newStatus !== oldStatus) {
-        if (newStatus === 'backlog' || newStatus === 'todo') {
-          statusTimestamps.inboxAt = now;
-        } else if (newStatus === 'in_progress') {
-          if (!existing.inboxAt) statusTimestamps.inboxAt = now;
-          statusTimestamps.inProgressAt = now;
-        } else if (newStatus === 'done') {
-          if (!existing.inboxAt) statusTimestamps.inboxAt = now;
-          if (!existing.inProgressAt) statusTimestamps.inProgressAt = now;
-          statusTimestamps.doneAt = now;
-        }
+    let updatedCount = 0;
+    for (const upd of changes.update) {
+      const idx = tasks.findIndex(t => t.id === upd.id);
+      if (idx !== -1) {
+        tasks[idx] = {
+          ...tasks[idx],
+          ...upd,
+          ...applyStatusTimestamps(tasks[idx], upd.status, now),
+          updatedAt: now,
+        };
+        updatedCount++;
       }
-      tasks[idx] = { ...tasks[idx], ...upd, ...statusTimestamps, updatedAt: now };
-      updatedCount++;
     }
-  }
 
-  // Create
-  let csvNextNum = getNextNumber(tasks);
-  for (const newTask of changes.create) {
-    const status = (newTask.status as Task['status']) || 'todo';
-    tasks.push({
-      title: newTask.title || 'Untitled',
-      description: newTask.description || '',
-      priority: (newTask.priority as Task['priority']) || 'medium',
-      status,
-      prompt: newTask.prompt,
-      id: nanoid(10),
-      number: csvNextNum++,
-      projectId,
-      createdAt: now,
-      updatedAt: now,
-      order: tasks.length,
-      ...buildCascadingTimestamps(status, now),
-    });
-  }
+    let csvNextNum = getNextNumber(tasks);
+    for (const newTask of changes.create) {
+      const status = (newTask.status as Task['status']) || 'todo';
+      tasks.push({
+        title: newTask.title || 'Untitled',
+        description: newTask.description || '',
+        priority: (newTask.priority as Task['priority']) || 'medium',
+        status,
+        prompt: newTask.prompt,
+        id: nanoid(10),
+        number: csvNextNum++,
+        projectId,
+        createdAt: now,
+        updatedAt: now,
+        order: tasks.length,
+        ...buildCascadingTimestamps(status, now),
+      });
+    }
 
-  await writeTasks(projectId, tasks);
-  return { updated: updatedCount, created: changes.create.length, removed: removedCount };
-}
-
-export async function replaceTasks(projectId: string, incoming: Partial<Task>[], milestoneId?: string): Promise<Task[]> {
-  // Read existing tasks to preserve timestamps that aren't in the incoming data
-  // (sync payloads like SheetRow don't carry createdAt/inboxAt/inProgressAt/doneAt)
-  const existingTasks = await readTasks(projectId);
-  const existingMap = new Map(existingTasks.map(t => [t.id, t]));
-  const now = new Date().toISOString();
-
-  // Compute next number from both existing and incoming tasks that already have numbers
-  const allNumbers = [...existingTasks, ...incoming].map(t => t.number || 0);
-  let replaceNextNum = Math.max(0, ...allNumbers) + 1;
-  const tasks: Task[] = incoming.map((t, i) => {
-    const status = (t.status as Task['status']) || 'todo';
-    const existing = t.id ? existingMap.get(t.id) : undefined;
-    const number = t.number || existing?.number || replaceNextNum++;
-    return {
-      title: t.title || 'Untitled',
-      description: t.description || '',
-      priority: (t.priority as Task['priority']) || 'medium',
-      status,
-      prompt: t.prompt,
-      milestoneId: t.milestoneId || milestoneId || existing?.milestoneId,
-      id: t.id || nanoid(10),
-      number,
-      projectId,
-      createdAt: t.createdAt || existing?.createdAt || now,
-      updatedAt: t.updatedAt || now,
-      order: t.order ?? i,
-      ...buildCascadingTimestamps(status, now, {
-        inboxAt: t.inboxAt || existing?.inboxAt,
-        inProgressAt: t.inProgressAt || existing?.inProgressAt,
-        doneAt: t.doneAt || existing?.doneAt,
-      }),
-    };
-  });
-
-  if (milestoneId && milestoneId !== 'default') {
-    // Scoped replace: only replace tasks for this milestone, keep others
-    const otherTasks = existingTasks.filter(t => t.milestoneId !== milestoneId);
-    await writeTasks(projectId, [...otherTasks, ...tasks]);
-  } else if (milestoneId === 'default') {
-    // Scoped replace: only replace tasks with no milestoneId
-    const otherTasks = existingTasks.filter(t => t.milestoneId && t.milestoneId !== 'default');
-    await writeTasks(projectId, [...otherTasks, ...tasks]);
-  } else {
     await writeTasks(projectId, tasks);
-  }
-  return tasks;
+    return { updated: updatedCount, created: changes.create.length, removed: removedCount };
+  });
 }
 
-export async function reorderTasks(projectId: string, taskIds: string[]): Promise<Task[]> {
-  const tasks = await readTasks(projectId);
-  const reordered: Task[] = [];
+export function replaceTasks(projectId: string, incoming: Partial<Task>[], milestoneId?: string): Promise<Task[]> {
+  return withLock(projectId, async () => {
+    const existingTasks = await readTasks(projectId);
+    const existingMap = new Map(existingTasks.map(t => [t.id, t]));
+    const now = new Date().toISOString();
 
-  for (let i = 0; i < taskIds.length; i++) {
-    const task = tasks.find(t => t.id === taskIds[i]);
-    if (task) {
-      reordered.push({ ...task, order: i, updatedAt: new Date().toISOString() });
+    const allNumbers = [...existingTasks, ...incoming].map(t => t.number || 0);
+    let replaceNextNum = Math.max(0, ...allNumbers) + 1;
+    const tasks: Task[] = incoming.map((t, i) => {
+      const status = (t.status as Task['status']) || 'todo';
+      const existing = t.id ? existingMap.get(t.id) : undefined;
+      const number = t.number || existing?.number || replaceNextNum++;
+      return {
+        title: t.title || 'Untitled',
+        description: t.description || '',
+        priority: (t.priority as Task['priority']) || 'medium',
+        status,
+        prompt: t.prompt,
+        milestoneId: t.milestoneId || milestoneId || existing?.milestoneId,
+        id: t.id || nanoid(10),
+        number,
+        projectId,
+        createdAt: t.createdAt || existing?.createdAt || now,
+        updatedAt: t.updatedAt || now,
+        order: t.order ?? i,
+        ...buildCascadingTimestamps(status, now, {
+          inboxAt: t.inboxAt || existing?.inboxAt,
+          inProgressAt: t.inProgressAt || existing?.inProgressAt,
+          doneAt: t.doneAt || existing?.doneAt,
+        }),
+      };
+    });
+
+    if (milestoneId && milestoneId !== 'default') {
+      const otherTasks = existingTasks.filter(t => t.milestoneId !== milestoneId);
+      await writeTasks(projectId, [...otherTasks, ...tasks]);
+    } else if (milestoneId === 'default') {
+      const otherTasks = existingTasks.filter(t => t.milestoneId && t.milestoneId !== 'default');
+      await writeTasks(projectId, [...otherTasks, ...tasks]);
+    } else {
+      await writeTasks(projectId, tasks);
     }
-  }
+    return tasks;
+  });
+}
 
-  // Add any tasks not in the reorder list at the end
-  const reorderedIds = new Set(taskIds);
-  for (const task of tasks) {
-    if (!reorderedIds.has(task.id)) {
-      reordered.push({ ...task, order: reordered.length });
+export function reorderTasks(projectId: string, taskIds: string[]): Promise<Task[]> {
+  return withLock(projectId, async () => {
+    const tasks = await readTasks(projectId);
+    const reordered: Task[] = [];
+
+    for (let i = 0; i < taskIds.length; i++) {
+      const task = tasks.find(t => t.id === taskIds[i]);
+      if (task) {
+        reordered.push({ ...task, order: i, updatedAt: new Date().toISOString() });
+      }
     }
-  }
 
-  await writeTasks(projectId, reordered);
-  return reordered;
+    const reorderedIds = new Set(taskIds);
+    for (const task of tasks) {
+      if (!reorderedIds.has(task.id)) {
+        reordered.push({ ...task, order: reordered.length });
+      }
+    }
+
+    await writeTasks(projectId, reordered);
+    return reordered;
+  });
 }
 
 // ── Milestone CRUD ─────────────────────────────────────────

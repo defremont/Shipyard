@@ -26,6 +26,40 @@ function normalizeMilestone(milestoneId?: string): string {
   return milestoneId && milestoneId !== '' ? milestoneId : DEFAULT_MILESTONE;
 }
 
+// Per-integration serialization. Without this, the 30s auto-pull tick and
+// the 2.5s mutation-debounced push can run in parallel for the same
+// (project, provider, milestone). The pull reads cardMap from a stale
+// snapshot, sees the card the parallel push just created as unmapped, and
+// creates a duplicate local task; the next push then creates a second card
+// for the original task. Locking prevents that race.
+const integrationLocks = new Map<string, Promise<unknown>>();
+
+function lockKey(projectId: string, providerId: SyncProviderId, milestoneId: string): string {
+  return `${projectId}:${providerId}:${milestoneId}`;
+}
+
+async function withIntegrationLock<T>(
+  projectId: string,
+  providerId: SyncProviderId,
+  milestoneId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = lockKey(projectId, providerId, milestoneId);
+  const prev = integrationLocks.get(key);
+  const run = (async () => {
+    if (prev) {
+      try { await prev; } catch { /* prior failure must not block our turn */ }
+    }
+    return fn();
+  })();
+  integrationLocks.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (integrationLocks.get(key) === run) integrationLocks.delete(key);
+  }
+}
+
 async function getMilestoneName(projectId: string, milestoneId: string): Promise<string | null> {
   if (milestoneId === DEFAULT_MILESTONE) return null;
   try {
@@ -106,28 +140,30 @@ export async function pushAll(
   milestoneId?: string,
 ): Promise<SyncOperationResult> {
   const mid = normalizeMilestone(milestoneId);
-  const config = await ensureEnabled(projectId, providerId, mid);
-  if ('error' in config) return { success: false, message: config.error, milestoneId: mid };
+  return withIntegrationLock(projectId, providerId, mid, async () => {
+    const config = await ensureEnabled(projectId, providerId, mid);
+    if ('error' in config) return { success: false, message: config.error, milestoneId: mid };
 
-  const tasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
+    const tasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
 
-  try {
-    if (providerId === 'trello') {
-      const r = await trello.pushTasks(config, tasks);
-      await store.patchStatus(projectId, providerId, mid, { ok: r.errors.length === 0, error: r.errors[0] });
-      return { ...toResult(r.errors, r.pushed, r.total, r.boardUrl), milestoneId: mid };
+    try {
+      if (providerId === 'trello') {
+        const r = await trello.pushTasks(config, tasks);
+        await store.patchStatus(projectId, providerId, mid, { ok: r.errors.length === 0, error: r.errors[0] });
+        return { ...toResult(r.errors, r.pushed, r.total, r.boardUrl), milestoneId: mid };
+      }
+      if (providerId === 'clickup') {
+        const r = await clickup.pushTasks(config, tasks);
+        await store.patchStatus(projectId, providerId, mid, { ok: r.errors.length === 0, error: r.errors[0] });
+        return { ...toResult(r.errors, r.pushed, r.total, r.listUrl), milestoneId: mid };
+      }
+      return { success: false, message: `Unknown provider: ${providerId}`, milestoneId: mid };
+    } catch (err: any) {
+      const message = err?.message ?? 'Push failed';
+      await store.patchStatus(projectId, providerId, mid, { ok: false, error: message });
+      return { success: false, message, milestoneId: mid };
     }
-    if (providerId === 'clickup') {
-      const r = await clickup.pushTasks(config, tasks);
-      await store.patchStatus(projectId, providerId, mid, { ok: r.errors.length === 0, error: r.errors[0] });
-      return { ...toResult(r.errors, r.pushed, r.total, r.listUrl), milestoneId: mid };
-    }
-    return { success: false, message: `Unknown provider: ${providerId}`, milestoneId: mid };
-  } catch (err: any) {
-    const message = err?.message ?? 'Push failed';
-    await store.patchStatus(projectId, providerId, mid, { ok: false, error: message });
-    return { success: false, message, milestoneId: mid };
-  }
+  });
 }
 
 export async function pullAll(
@@ -136,35 +172,41 @@ export async function pullAll(
   milestoneId?: string,
 ): Promise<SyncOperationResult> {
   const mid = normalizeMilestone(milestoneId);
-  const config = await ensureEnabled(projectId, providerId, mid);
-  if ('error' in config) return { success: false, message: config.error, milestoneId: mid };
+  return withIntegrationLock(projectId, providerId, mid, async () => {
+    const config = await ensureEnabled(projectId, providerId, mid);
+    if ('error' in config) return { success: false, message: config.error, milestoneId: mid };
 
-  try {
-    const remote = await fetchRemote(config, providerId);
-    const localTasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
-    const { merged, created, updated, idMapPatch } = mergeRemoteIntoLocal(localTasks, remote, projectId, mid);
+    try {
+      const remote = await fetchRemote(config, providerId);
+      const localTasks = await taskStore.getTasks(projectId, tasksForMilestone(mid));
+      const { merged, created, updated, idMapPatch } = mergeRemoteIntoLocal(localTasks, remote, projectId, mid);
 
-    if (created > 0 || updated > 0) {
-      // Scoped replace: only this milestone's tasks are rewritten; other
-      // milestones in the project are untouched.
-      await taskStore.replaceTasks(projectId, merged, mid);
-      await mergeIdMap(config, providerId, idMapPatch);
+      if (created > 0 || updated > 0 || Object.keys(idMapPatch).length > 0) {
+        // Scoped replace: only this milestone's tasks are rewritten; other
+        // milestones in the project are untouched.
+        if (created > 0 || updated > 0) {
+          await taskStore.replaceTasks(projectId, merged, mid);
+        }
+        // Always persist new title-match links — even when no fields changed —
+        // so the next push won't re-create a card we already adopted.
+        await mergeIdMap(config, providerId, idMapPatch);
+      }
+      await store.patchStatus(projectId, providerId, mid, { ok: true });
+
+      return {
+        success: true,
+        pulled: remote.length,
+        created,
+        updated,
+        milestoneId: mid,
+        message: `Pulled ${remote.length} (${created} new, ${updated} updated)`,
+      };
+    } catch (err: any) {
+      const message = err?.message ?? 'Pull failed';
+      await store.patchStatus(projectId, providerId, mid, { ok: false, error: message });
+      return { success: false, message, milestoneId: mid };
     }
-    await store.patchStatus(projectId, providerId, mid, { ok: true });
-
-    return {
-      success: true,
-      pulled: remote.length,
-      created,
-      updated,
-      milestoneId: mid,
-      message: `Pulled ${remote.length} (${created} new, ${updated} updated)`,
-    };
-  } catch (err: any) {
-    const message = err?.message ?? 'Pull failed';
-    await store.patchStatus(projectId, providerId, mid, { ok: false, error: message });
-    return { success: false, message, milestoneId: mid };
-  }
+  });
 }
 
 export async function mergeBoth(
@@ -173,6 +215,11 @@ export async function mergeBoth(
   milestoneId?: string,
 ): Promise<SyncOperationResult> {
   const mid = normalizeMilestone(milestoneId);
+  // pullAll + pushAll each take the same lock, so they're already serialized
+  // against other operations on this integration. The sequencing here is just
+  // to compose the result; we still hand both off to their own lock acquisition
+  // (recursion on the same async chain re-enters cleanly because each call
+  // awaits the prior promise stored under the same key).
   const pull = await pullAll(projectId, providerId, mid);
   if (!pull.success) return pull;
   const push = await pushAll(projectId, providerId, mid);

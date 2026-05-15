@@ -23,6 +23,7 @@ import { TaskViewer } from './TaskViewer'
 import { TaskListView } from './TaskListView'
 import { CsvReviewDialog } from './CsvReviewDialog'
 import { BulkImportDialog } from './BulkImportDialog'
+import { ColumnBulkMenu } from './ColumnBulkMenu'
 import { SyncMenu } from '@/components/sync/SyncMenu'
 import { MilestoneSelector } from './MilestoneSelector'
 import { ReportDialog } from '@/components/reports/ReportDialog'
@@ -257,7 +258,7 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, mil
   )
 }
 
-function BacklogSubHeader({ count, children }: { count: number; children: React.ReactNode }) {
+function BacklogSubHeader({ count, headerExtra, children }: { count: number; headerExtra?: React.ReactNode; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: BACKLOG_DROP_ID })
   return (
     <div
@@ -270,6 +271,7 @@ function BacklogSubHeader({ count, children }: { count: number; children: React.
       <div className="flex items-center gap-1.5 px-0.5 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
         <span>Backlog</span>
         <span className="text-muted-foreground/50">({count})</span>
+        {headerExtra && <div className="ml-auto">{headerExtra}</div>}
       </div>
       <div className="space-y-2">
         {children}
@@ -641,6 +643,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           <div className="grid grid-cols-3 gap-2 lg:gap-3 2xl:gap-4">
             {columns.map(col => {
               const isDoneCol = col.key === 'done'
+              const isInboxCol = col.key === 'inbox'
               const colTasks = grouped[col.key] || []
               // For done column: show unread tasks, optionally show read tasks
               const visibleUnread = isDoneCol ? unreadDone : colTasks
@@ -652,6 +655,13 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                 ? [...visibleTasks, ...readDone]
                 : visibleTasks
               const taskIds = allVisibleTasks.map(t => t.id)
+              // For inbox column header, the bulk menu acts only on the To Do
+              // subset — backlog has its own menu inside the sub-section.
+              const inboxTodoTasks = isInboxCol ? colTasks.filter(t => t.status !== 'backlog') : []
+              const allDoneTasks = isDoneCol ? grouped.done || [] : []
+              const bulkScopeTasks = isInboxCol ? inboxTodoTasks : isDoneCol ? allDoneTasks : colTasks
+              const bulkScope = isInboxCol ? 'inbox' : col.key as 'in_progress' | 'done'
+              const bulkScopeLabel = isInboxCol ? 'To Do' : col.label
               return (
                 <DroppableColumn
                   key={col.key} col={col} count={colTasks.length} taskIds={taskIds}
@@ -662,25 +672,45 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                   onAddingChange={(adding) => setAddingInColumn(adding ? col.key : null)}
                   hiddenCount={hiddenCount}
                   onShowMore={() => handleShowMore(col.key)}
-                  headerExtra={isDoneCol && unreadDone.length > 0 ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={handleMarkAllRead}
-                          className="text-muted-foreground/40 hover:text-green-500 transition-colors"
-                        >
-                          <CheckCheck className="h-3.5 w-3.5" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>Mark all as read</TooltipContent>
-                    </Tooltip>
-                  ) : undefined}
+                  headerExtra={
+                    <>
+                      {isDoneCol && unreadDone.length > 0 && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              onClick={handleMarkAllRead}
+                              className="text-muted-foreground/40 hover:text-green-500 transition-colors"
+                            >
+                              <CheckCheck className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent>Mark all as read</TooltipContent>
+                        </Tooltip>
+                      )}
+                      <ColumnBulkMenu
+                        projectId={projectId}
+                        scope={bulkScope}
+                        scopeLabel={bulkScopeLabel}
+                        tasks={bulkScopeTasks}
+                      />
+                    </>
+                  }
                 >
                   {allVisibleTasks.length > 0 ? (
                     <>
                       {col.key === 'inbox' && inboxSplit.backlogCount > 0 ? (
                         <>
-                          <BacklogSubHeader count={inboxSplit.backlogCount}>
+                          <BacklogSubHeader
+                            count={inboxSplit.backlogCount}
+                            headerExtra={
+                              <ColumnBulkMenu
+                                projectId={projectId}
+                                scope="backlog"
+                                scopeLabel="Backlog"
+                                tasks={colTasks.filter(t => t.status === 'backlog')}
+                              />
+                            }
+                          >
                             {visibleTasks
                               .filter(t => t.status === 'backlog')
                               .map(task => (
