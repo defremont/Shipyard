@@ -1,8 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { join } from 'path';
 import * as gitService from '../services/gitService.js';
-import * as claudeCliService from '../services/claudeCliService.js';
-import * as claudeService from '../services/claudeService.js';
+import * as aiBackend from '../services/aiBackend.js';
 import { getProjects } from '../services/projectDiscovery.js';
 import * as log from '../services/logService.js';
 
@@ -349,43 +348,21 @@ export async function gitRoutes(app: FastifyInstance) {
 
           const cleanMsg = (s: string) => s.replace(/^["'`]+|["'`]+$/g, '').replace(/^```\w*\n?|\n?```$/g, '').trim();
 
-          // Priority 1: CLI OAuth token → direct API call (fastest, uses Max subscription)
-          const oauthToken = await claudeCliService.getOAuthToken();
-          if (oauthToken) {
-            try {
-              const text = await claudeCliService.callApiWithOAuth(
-                systemPrompt,
-                compactDiff,
-                { model: 'claude-haiku-4-5-20251001', maxTokens: 256, timeout: 20_000 }
-              );
-              return { message: cleanMsg(text), source: 'cli' as const };
-            } catch (oauthErr: any) {
-              log.warn('git', `Commit message OAuth failed: ${oauthErr.message}`, undefined, request.params.projectId);
+          // Unified backend: CLI OAuth → CLI subprocess → configured API key
+          try {
+            const result = await aiBackend.generateText(systemPrompt, compactDiff, {
+              maxTokens: 256,
+              timeout: 25_000,
+              cwd: path,
+            });
+            return { message: cleanMsg(result.text), source: result.source };
+          } catch (aiErr: any) {
+            if (aiErr instanceof aiBackend.NoAiAvailableError) {
+              reply.status(503).send({ error: aiErr.message });
+              return null;
             }
+            throw aiErr;
           }
-
-          // Priority 2: Configured API key (not env key)
-          const apiKey = (await claudeService.loadClaudeConfig())?.apiKey;
-          if (apiKey) {
-            try {
-              const { default: Anthropic } = await import('@anthropic-ai/sdk');
-              const client = new Anthropic({ apiKey, timeout: 20_000 });
-              const response = await client.messages.create({
-                model: 'claude-haiku-4-5-20251001',
-                max_tokens: 256,
-                system: systemPrompt,
-                messages: [{ role: 'user', content: compactDiff }],
-              });
-              const text = response.content[0].type === 'text' ? response.content[0].text : '';
-              return { message: cleanMsg(text), source: 'api' as const };
-            } catch (apiErr: any) {
-              log.error('git', 'Commit message API also failed', apiErr.message, request.params.projectId);
-              throw apiErr;
-            }
-          }
-
-          reply.status(503).send({ error: 'No AI available. Install Claude CLI or configure API key.' });
-          return null;
         })()]);
 
         if (result) return result;

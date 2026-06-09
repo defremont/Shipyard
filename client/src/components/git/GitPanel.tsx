@@ -44,22 +44,19 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
     return <div className="text-sm text-muted-foreground p-4">Loading git status...</div>
   }
 
-  const staged = status.staged || []
-  const modified = status.modified || []
-  const notAdded = status.not_added || []
-  const deleted = status.deleted || []
-  const created = status.created || []
+  // Derive both lists from the porcelain XY codes (index char = staging area,
+  // working_dir char = working tree). A file can legitimately appear in both —
+  // e.g. staged then deleted on disk ('AD') shows as staged 'A' AND unstaged 'D',
+  // matching VS Code. Deriving unstaged from the legacy arrays hid those files.
+  const files = (status.files || []) as Array<{ path: string; index?: string; working_dir?: string }>
 
-  const stagedFiles = (status.files || [])
-    .filter((f: any) => f.index && f.index !== ' ' && f.index !== '?')
-    .map((f: any) => ({ file: f.path, status: f.index as string }))
+  const stagedFiles = files
+    .filter(f => f.index && f.index !== ' ' && f.index !== '?')
+    .map(f => ({ file: f.path, status: f.index as string }))
 
-  const unstagedFiles = [
-    ...modified.filter((f: string) => !staged.includes(f)).map((f: string) => ({ file: f, status: 'M' })),
-    ...deleted.filter((f: string) => !staged.includes(f)).map((f: string) => ({ file: f, status: 'D' })),
-    ...notAdded.map((f: string) => ({ file: f, status: '?' })),
-    ...created.filter((f: string) => !staged.includes(f)).map((f: string) => ({ file: f, status: 'A' })),
-  ]
+  const unstagedFiles = files
+    .filter(f => f.working_dir && f.working_dir !== ' ')
+    .map(f => ({ file: f.path, status: f.working_dir as string }))
 
   const hasStagedChanges = stagedFiles.length > 0
   const ahead = status.ahead || 0

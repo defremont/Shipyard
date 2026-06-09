@@ -799,11 +799,32 @@ function SectionClaude() {
     <>
       <H2>Claude AI Integration</H2>
       <P>
-        Shipyard integrates with the Anthropic Claude API to provide AI-powered features
-        directly in your dashboard. This requires an Anthropic API key (pay-per-use billing).
+        Shipyard provides AI-powered features (chat, commit messages, task analysis, bulk
+        organize, AI task resolution) through a single standardized backend. There are two
+        ways to connect — pick whichever you prefer; if both are configured, the CLI always
+        takes priority:
       </P>
+      <Bullet title="1. Claude CLI (recommended, no extra cost)">
+        Uses your existing Claude subscription (Pro/Max). All AI features run through it at
+        no per-token cost.
+      </Bullet>
+      <Bullet title="2. Anthropic API key (optional fallback)">
+        Pay-per-use billing. Only used when the CLI is not available.
+      </Bullet>
 
-      <H3>Setup</H3>
+      <H3>Option 1 — Connect via Claude CLI (recommended)</H3>
+      <Bullet title="Install">
+        Run <code className="bg-muted px-1 rounded">npm install -g @anthropic-ai/claude-code</code> (requires Node.js 18+).
+      </Bullet>
+      <Bullet title="Log in">
+        Run <code className="bg-muted px-1 rounded">claude</code> once in any terminal and follow the login flow with your Claude account.
+      </Bullet>
+      <Bullet title="Done">
+        Shipyard detects the CLI automatically — check Settings &gt; Claude AI for the green "CLI" badge
+        and the active backend indicator. No key, no configuration.
+      </Bullet>
+
+      <H3>Option 2 — Connect via API key</H3>
       <Bullet title="Get an API Key">
         Sign up at <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">console.anthropic.com</a> and create an API key in Settings &gt; API Keys.
       </Bullet>
@@ -812,7 +833,16 @@ function SectionClaude() {
       </Bullet>
       <Bullet title="Security">
         Your API key is encrypted with AES-256-GCM and stored server-side only. It never reaches the browser.
+        Shipyard never reads the <code className="bg-muted px-1 rounded">ANTHROPIC_API_KEY</code> environment
+        variable — that belongs to other tools.
       </Bullet>
+
+      <H3>How the backend is chosen</H3>
+      <P>
+        Every AI feature uses the same priority order: Claude CLI session (subscription) →
+        Claude CLI subprocess → configured API key. The currently active backend is shown in
+        Settings &gt; Claude AI.
+      </P>
 
       <H3>Chat Panel</H3>
       <P>

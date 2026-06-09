@@ -340,7 +340,9 @@ export async function getProjects(): Promise<Project[]> {
 export async function refreshGitStatus(): Promise<Project[]> {
   const updated = await Promise.all(
     projectsCache.map(async (p) => {
-      if (!p.isGitRepo && (!p.subRepos || p.subRepos.length === 0)) return p;
+      // Also re-check non-git projects: detectGitInfo is cheap for them (one
+      // .git existence check + shallow sub-repo scan), and it's what picks up
+      // a `git init` done after the project was added.
       try {
         const gitInfo = await detectGitInfo(p.path);
         return { ...p, ...gitInfo };

@@ -35,7 +35,7 @@ server/src/
   routes/       # projects, tasks, git, terminals, terminalWs, claude, mcp,
                 # files, logs, sync, settings
   services/     # projectDiscovery, gitService, taskStore, terminalLauncher,
-                # terminalService, claudeService, claudeContextBuilder,
+                # terminalService, aiBackend, claudeService, claudeContextBuilder,
                 # claudeCliService, aiResolvePrompt, aiManagePrompt,
                 # mcpServer, mcpAuth, logService, settingsStore, dataDir
 
@@ -142,6 +142,17 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - **macOS**: `osascript` (Terminal.app)
 - Terminal integrado: xterm.js + node-pty (optional dep) + WebSocket
 
+### AI Backend (CLI-first, padronizado)
+- `aiBackend.ts` e o UNICO ponto de entrada para features de IA server-side
+  (chat, commit message, analyze-task, bulk-organize, manage-tasks)
+- Prioridade fixa: **1)** token OAuth do Claude CLI (`~/.claude/.credentials.json`,
+  usa assinatura — chamada direta a API com `Authorization: Bearer` +
+  `anthropic-beta: oauth-2025-04-20`, NUNCA `x-api-key`) → **2)** subprocess
+  `claude -p` → **3)** API key configurada no Shipyard
+- NUNCA ler `process.env.ANTHROPIC_API_KEY` — pertence a outras ferramentas
+- `generateText()` para one-shot, `streamText()` para chat SSE
+- Novas features de IA DEVEM usar aiBackend, nao chamar Anthropic direto
+
 ### AI Task Management (Claude CLI)
 - `claudeCliService.ts`: detecta e executa Claude CLI (`claude`) como subprocess
 - `aiResolvePrompt.ts`: monta prompt para Claude resolver UMA tarefa (inclui contexto do projeto + task + MCP tools disponiveis)
@@ -149,8 +160,22 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Auto-close: TerminalPanel detecta quando sessao AI termina e marca task como done se Claude nao o fez
 - Prompt reforça que Claude DEVE atualizar status da task via MCP ao concluir
 
+### Stores JSON (concorrencia)
+- `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)
+  e gravam atomicamente (tmp + rename). Leitura corrompida usa ultima copia boa
+  em memoria + backup `.corrupt-*.bak` — nunca retorna store vazio sobre dados existentes
+- Novos stores JSON DEVEM seguir esse padrao (read-modify-write sem lock corrompe dados)
+
 ### Electron
 - Server roda como child process via spawn (`ELECTRON_RUN_AS_NODE=1`)
+- Menu de aplicacao em `createApplicationMenu()` (main.ts) envia acoes via IPC
+  `menu-action` → preload expoe `electronAPI.onMenuAction` → hook `useElectronMenu`
+  roteia (`navigate:<path>`) ou redispara CustomEvents (`shipyard:toggle-search`,
+  `shipyard:toggle-file-search`, `shipyard:toggle-terminal`)
+- Atalhos Ctrl+K / Ctrl+Shift+F / Ctrl+` sao do renderer; itens de menu usam
+  `registerAccelerator: false` para mostrar o hint sem duplicar o handler
+- Terminal integrado (xterm) repassa esses atalhos globais via
+  `attachCustomKeyEventHandler` (return false) em IntegratedTerminal.tsx
 - Data path: `SHIPYARD_DATA_DIR` env var → AppData em prod, ./data em dev
 - Centralizado em `server/src/services/dataDir.ts`
 - asar desabilitado, afterPack reinstala deps via npm (pnpm symlinks nao sobrevivem)

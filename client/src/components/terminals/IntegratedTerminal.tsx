@@ -154,6 +154,16 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
 
     // Clipboard: Ctrl+C (copy if selection), Ctrl+Shift+C (always copy), Ctrl+V / Ctrl+Shift+V (paste)
     term.attachCustomKeyEventHandler((ev) => {
+      // Global app shortcuts must keep working while the terminal has focus.
+      // Returning false stops xterm from consuming the key; the event still
+      // bubbles to the document/window listeners that implement each shortcut.
+      // Ctrl+K (global search), Ctrl+Shift+F (file content search), Ctrl+` (toggle terminal)
+      if (ev.ctrlKey && ev.type === 'keydown') {
+        const key = ev.key.toLowerCase()
+        if ((key === 'k' && !ev.shiftKey) || (key === 'f' && ev.shiftKey) || ev.key === '`') {
+          return false
+        }
+      }
       // Ctrl+C: copy if there's a selection, otherwise let terminal handle (SIGINT)
       if (ev.ctrlKey && !ev.shiftKey && ev.key === 'c' && ev.type === 'keydown') {
         const sel = term.getSelection()

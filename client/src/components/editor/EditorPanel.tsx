@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { FileCode, Loader2, Eye, Code, GitCompareArrows } from 'lucide-react'
 import { toast } from 'sonner'
 import Markdown from 'react-markdown'
@@ -7,7 +8,8 @@ import rehypeRaw from 'rehype-raw'
 import { EditorTabBar } from './EditorTabBar'
 import { CodeMirrorEditor } from './CodeMirrorEditor'
 import { DiffEditor } from './DiffEditor'
-import { useFileContent, useSaveFile } from '@/hooks/useFiles'
+import { useSaveFile } from '@/hooks/useFiles'
+import { api } from '@/lib/api'
 import { useGitFileAtRef } from '@/hooks/useGit'
 import type { EditorTab } from '@/hooks/useEditorTabs'
 
@@ -25,22 +27,38 @@ interface EditorPanelProps {
 }
 
 function TabContentLoader({ projectId, tab, onInit }: { projectId: string; tab: EditorTab; onInit: (path: string, content: string) => void }) {
-  const { data, isLoading, error } = useFileContent(projectId, tab.needsFetch ? tab.path : null)
+  const queryClient = useQueryClient()
+  const [isLoading, setIsLoading] = useState(tab.needsFetch)
+  const [error, setError] = useState<Error | null>(null)
 
+  // Always fetch fresh from disk, bypassing the react-query cache. Relying on
+  // the cached query meant files edited externally (e.g. by Claude Code) kept
+  // showing stale content even after closing and reopening the tab.
   useEffect(() => {
-    if (data && tab.needsFetch) {
-      onInit(tab.path, data.content)
-    }
-  }, [data, tab.needsFetch, tab.path, onInit])
-
-  // For diff-mode tabs (staged/unstaged), a missing file just means "no working
-  // tree content" — typically a deleted file. Treat the fetch as empty so the
-  // diff view can still render the original side from git.
-  useEffect(() => {
-    if (error && tab.needsFetch && tab.diffMode) {
-      onInit(tab.path, '')
-    }
-  }, [error, tab.needsFetch, tab.diffMode, tab.path, onInit])
+    if (!tab.needsFetch) return
+    let cancelled = false
+    setIsLoading(true)
+    setError(null)
+    api.getFileContent(projectId, tab.path)
+      .then((data) => {
+        if (cancelled) return
+        queryClient.setQueryData(['files', 'content', projectId, tab.path], data)
+        onInit(tab.path, data.content)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        // For diff-mode tabs (staged/unstaged), a missing file just means "no
+        // working tree content" — typically a deleted file. Treat the fetch as
+        // empty so the diff view can still render the original side from git.
+        if (tab.diffMode) {
+          onInit(tab.path, '')
+        } else {
+          setError(err as Error)
+        }
+      })
+      .finally(() => { if (!cancelled) setIsLoading(false) })
+    return () => { cancelled = true }
+  }, [projectId, tab.path, tab.needsFetch, tab.diffMode, onInit, queryClient])
 
   if (isLoading) {
     return (

@@ -9,9 +9,11 @@ import { ActivityProvider } from '@/hooks/useActivity'
 import { EditorTabsProvider } from '@/hooks/useEditorTabsContext'
 import { TerminalPanel } from '@/components/terminals/TerminalPanel'
 import { useIntegrationAutoPull } from '@/hooks/useIntegrationAutoPull'
+import { useElectronMenu } from '@/hooks/useElectronMenu'
 
 function LayoutInner() {
   useIntegrationAutoPull()
+  useElectronMenu()
   return (
     <div className="flex h-screen overflow-hidden">
       <ActivityBar />

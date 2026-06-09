@@ -42,26 +42,33 @@ export function FileContentSearch() {
     return match?.[1] || undefined
   }, [open])
 
-  // Listen for Ctrl+Shift+F
+  // Listen for Ctrl+Shift+F and the Electron menu action
   useEffect(() => {
+    const toggle = () => {
+      setOpen(prev => {
+        if (!prev) {
+          setQuery('')
+          setResults([])
+          setTotalMatches(0)
+          setSelectedIndex(0)
+          setCollapsedFiles(new Set())
+        }
+        return !prev
+      })
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'f' || e.key === 'F')) {
         e.preventDefault()
         e.stopPropagation()
-        setOpen(prev => {
-          if (!prev) {
-            setQuery('')
-            setResults([])
-            setTotalMatches(0)
-            setSelectedIndex(0)
-            setCollapsedFiles(new Set())
-          }
-          return !prev
-        })
+        toggle()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('shipyard:toggle-file-search', toggle)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('shipyard:toggle-file-search', toggle)
+    }
   }, [])
 
   // Focus input when opened

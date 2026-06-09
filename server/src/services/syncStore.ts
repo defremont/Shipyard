@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir, unlink } from 'fs/promises';
+import { readFile, writeFile, mkdir, unlink, rename, copyFile } from 'fs/promises';
 import { join } from 'path';
 import { DATA_DIR } from './dataDir.js';
 
@@ -71,24 +71,50 @@ interface StoreV2 {
 }
 
 // ── Low-level IO + migration ────────────────────────────────────────────
+//
+// All mutations are serialized through a single mutex and writes are atomic
+// (tmp file + rename). Without this, concurrent read-modify-write cycles
+// (auto-push debounce, 30s client pulls, status patches) could interleave and
+// silently drop provider credentials / project links — which surfaced as
+// "Trello keeps disconnecting". A read that hits a corrupt/partial file falls
+// back to the last good in-memory copy instead of an empty store, so a bad
+// read can never wipe existing connections on the next write.
+
+let storeLock: Promise<unknown> = Promise.resolve();
+function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
+  const next = storeLock.then(fn, fn);
+  storeLock = next.catch(() => {});
+  return next;
+}
+
+let lastGoodStore: StoreV3 | null = null;
 
 async function readStore(): Promise<StoreV3> {
+  let data: string;
   try {
-    const data = await readFile(STORE_FILE, 'utf-8');
+    data = await readFile(STORE_FILE, 'utf-8');
+  } catch {
+    // File doesn't exist yet — genuinely empty store
+    return lastGoodStore ?? { version: 3, providers: {}, projects: {} };
+  }
+
+  try {
     const parsed = JSON.parse(data);
     if (parsed?.version === 3 && parsed.projects && parsed.providers) {
+      lastGoodStore = parsed;
       return parsed;
     }
     if (parsed?.version === 2 && parsed.providers) {
       return migrateFromV2(parsed as StoreV2);
     }
-    if (parsed?.version === 1) {
-      // Anything pre-v2 is even older — discard project state, no creds to keep.
-      return { version: 3, providers: {}, projects: {} };
-    }
+    // v1 or unknown shape — discard project state, no creds worth keeping
     return { version: 3, providers: {}, projects: {} };
-  } catch {
-    return { version: 3, providers: {}, projects: {} };
+  } catch (err) {
+    // Corrupt file (e.g. partial write). Keep a backup for recovery and use
+    // the last good copy so we never wipe existing connections.
+    console.error('[syncStore] sync-config.json is corrupt, using last good copy:', (err as Error).message);
+    try { await copyFile(STORE_FILE, `${STORE_FILE}.corrupt-${Date.now()}.bak`); } catch {}
+    return lastGoodStore ?? { version: 3, providers: {}, projects: {} };
   }
 }
 
@@ -101,13 +127,18 @@ function migrateFromV2(v2: StoreV2): StoreV3 {
     providers: v2.providers ?? {},
     projects: {},
   };
+  lastGoodStore = v3;
   void writeStore(v3);
   return v3;
 }
 
 async function writeStore(store: StoreV3): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(STORE_FILE, JSON.stringify(store, null, 2), 'utf-8');
+  // Atomic write: a reader can never observe a partially written file
+  const tmp = `${STORE_FILE}.tmp`;
+  await writeFile(tmp, JSON.stringify(store, null, 2), 'utf-8');
+  await rename(tmp, STORE_FILE);
+  lastGoodStore = store;
 }
 
 // ── Provider (global) API ───────────────────────────────────────────────
@@ -123,38 +154,42 @@ export async function saveProviderCredentials(
   providerId: SyncProviderId,
   patch: Record<string, any>,
 ): Promise<ProviderCredentials> {
-  const store = await readStore();
-  const existing = store.providers[providerId];
-  const now = new Date().toISOString();
-  const next: ProviderCredentials = {
-    providerId,
-    settings: { ...(existing?.settings ?? {}), ...patch },
-    createdAt: existing?.createdAt ?? now,
-    updatedAt: now,
-  };
-  store.providers[providerId] = next;
-  await writeStore(store);
-  return next;
+  return withStoreLock(async () => {
+    const store = await readStore();
+    const existing = store.providers[providerId];
+    const now = new Date().toISOString();
+    const next: ProviderCredentials = {
+      providerId,
+      settings: { ...(existing?.settings ?? {}), ...patch },
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    };
+    store.providers[providerId] = next;
+    await writeStore(store);
+    return next;
+  });
 }
 
 export async function deleteProviderCredentials(providerId: SyncProviderId): Promise<boolean> {
-  const store = await readStore();
-  if (!store.providers[providerId]) return false;
-  delete store.providers[providerId];
-  // Disable every milestone integration that depended on these credentials.
-  for (const projectId of Object.keys(store.projects)) {
-    const byProvider = store.projects[projectId][providerId];
-    if (!byProvider) continue;
-    for (const mid of Object.keys(byProvider)) {
-      const entry = byProvider[mid];
-      if (!entry) continue;
-      entry.enabled = false;
-      entry.autoSync = false;
-      entry.updatedAt = new Date().toISOString();
+  return withStoreLock(async () => {
+    const store = await readStore();
+    if (!store.providers[providerId]) return false;
+    delete store.providers[providerId];
+    // Disable every milestone integration that depended on these credentials.
+    for (const projectId of Object.keys(store.projects)) {
+      const byProvider = store.projects[projectId][providerId];
+      if (!byProvider) continue;
+      for (const mid of Object.keys(byProvider)) {
+        const entry = byProvider[mid];
+        if (!entry) continue;
+        entry.enabled = false;
+        entry.autoSync = false;
+        entry.updatedAt = new Date().toISOString();
+      }
     }
-  }
-  await writeStore(store);
-  return true;
+    await writeStore(store);
+    return true;
+  });
 }
 
 /** Which providers have credentials saved? Safe to send to the client. */
@@ -204,6 +239,7 @@ export interface SaveProjectInput {
 }
 
 export async function saveProjectConfig(input: SaveProjectInput): Promise<ProjectSyncConfig> {
+  return withStoreLock(async () => {
   const mid = normalizeMilestone(input.milestoneId);
   const store = await readStore();
   store.projects[input.projectId] ??= {};
@@ -233,6 +269,7 @@ export async function saveProjectConfig(input: SaveProjectInput): Promise<Projec
   byMilestone[mid] = next;
   await writeStore(store);
   return next;
+  });
 }
 
 export async function patchState(
@@ -241,13 +278,15 @@ export async function patchState(
   milestoneId: string | undefined,
   patch: Record<string, any>,
 ): Promise<void> {
-  const mid = normalizeMilestone(milestoneId);
-  const store = await readStore();
-  const entry = store.projects[projectId]?.[providerId]?.[mid];
-  if (!entry) return;
-  entry.state = { ...entry.state, ...patch };
-  entry.updatedAt = new Date().toISOString();
-  await writeStore(store);
+  return withStoreLock(async () => {
+    const mid = normalizeMilestone(milestoneId);
+    const store = await readStore();
+    const entry = store.projects[projectId]?.[providerId]?.[mid];
+    if (!entry) return;
+    entry.state = { ...entry.state, ...patch };
+    entry.updatedAt = new Date().toISOString();
+    await writeStore(store);
+  });
 }
 
 export async function patchStatus(
@@ -256,15 +295,17 @@ export async function patchStatus(
   milestoneId: string | undefined,
   status: { ok: boolean; error?: string },
 ): Promise<void> {
-  const mid = normalizeMilestone(milestoneId);
-  const store = await readStore();
-  const entry = store.projects[projectId]?.[providerId]?.[mid];
-  if (!entry) return;
-  entry.lastSyncAt = new Date().toISOString();
-  entry.lastSyncStatus = status.ok ? 'ok' : 'error';
-  entry.lastSyncError = status.ok ? null : (status.error ?? 'unknown error');
-  entry.updatedAt = entry.lastSyncAt;
-  await writeStore(store);
+  return withStoreLock(async () => {
+    const mid = normalizeMilestone(milestoneId);
+    const store = await readStore();
+    const entry = store.projects[projectId]?.[providerId]?.[mid];
+    if (!entry) return;
+    entry.lastSyncAt = new Date().toISOString();
+    entry.lastSyncStatus = status.ok ? 'ok' : 'error';
+    entry.lastSyncError = status.ok ? null : (status.error ?? 'unknown error');
+    entry.updatedAt = entry.lastSyncAt;
+    await writeStore(store);
+  });
 }
 
 export async function deleteProjectConfig(
@@ -272,19 +313,21 @@ export async function deleteProjectConfig(
   providerId: SyncProviderId,
   milestoneId?: string,
 ): Promise<boolean> {
-  const mid = normalizeMilestone(milestoneId);
-  const store = await readStore();
-  const byProvider = store.projects[projectId]?.[providerId];
-  if (!byProvider?.[mid]) return false;
-  delete byProvider[mid];
-  if (Object.keys(byProvider).length === 0) {
-    delete store.projects[projectId][providerId];
-  }
-  if (Object.keys(store.projects[projectId]).length === 0) {
-    delete store.projects[projectId];
-  }
-  await writeStore(store);
-  return true;
+  return withStoreLock(async () => {
+    const mid = normalizeMilestone(milestoneId);
+    const store = await readStore();
+    const byProvider = store.projects[projectId]?.[providerId];
+    if (!byProvider?.[mid]) return false;
+    delete byProvider[mid];
+    if (Object.keys(byProvider).length === 0) {
+      delete store.projects[projectId][providerId];
+    }
+    if (Object.keys(store.projects[projectId]).length === 0) {
+      delete store.projects[projectId];
+    }
+    await writeStore(store);
+    return true;
+  });
 }
 
 /**
@@ -372,5 +415,8 @@ export function sanitizeProject(config: ProjectSyncConfig) {
 }
 
 export async function clearAll(): Promise<void> {
-  try { await unlink(STORE_FILE); } catch { /* already gone */ }
+  return withStoreLock(async () => {
+    lastGoodStore = null;
+    try { await unlink(STORE_FILE); } catch { /* already gone */ }
+  });
 }

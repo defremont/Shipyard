@@ -1,19 +1,10 @@
 import { FastifyInstance } from 'fastify';
 import * as claudeService from '../services/claudeService.js';
-import * as claudeCliService from '../services/claudeCliService.js';
+import * as aiBackend from '../services/aiBackend.js';
 import { buildProjectContext, buildTaskContext } from '../services/claudeContextBuilder.js';
 import * as taskStore from '../services/taskStore.js';
 import { getProjects } from '../services/projectDiscovery.js';
 import * as log from '../services/logService.js';
-
-// Helper: try CLI first, fallback to API. Returns null if neither available.
-async function getAiBackend(): Promise<'cli' | 'api' | null> {
-  const cliOk = await claudeCliService.getCliStatus();
-  if (cliOk) return 'cli';
-  const config = await claudeService.loadClaudeConfig();
-  if (config) return 'api';
-  return null;
-}
 
 async function getProjectPath(projectId: string): Promise<string | undefined> {
   const projects = await getProjects();
@@ -100,16 +91,14 @@ function extractBracketedContent(text: string): string | null {
 export async function claudeRoutes(app: FastifyInstance) {
   // Get Claude status (never exposes the API key)
   app.get('/api/claude/status', async () => {
-    const config = await claudeService.loadClaudeConfig();
-    const cliAvailable = await claudeCliService.getCliStatus();
-    const oauthAvailable = !!(await claudeCliService.getOAuthToken());
-    const envKeyAvailable = !!process.env.ANTHROPIC_API_KEY;
+    const status = await aiBackend.getBackendStatus();
     return {
-      configured: !!config,
-      cliAvailable: cliAvailable || oauthAvailable,
-      envKeyAvailable,
-      model: config?.model || null,
-      maxTokens: config?.maxTokens || null,
+      configured: status.apiConfigured,
+      cliAvailable: status.cliAvailable || status.oauthAvailable,
+      oauthAvailable: status.oauthAvailable,
+      activeBackend: status.activeBackend,
+      model: status.model,
+      maxTokens: status.maxTokens,
     };
   });
 
@@ -171,76 +160,34 @@ export async function claudeRoutes(app: FastifyInstance) {
       systemPrompt += `\n\n${systemContext}`;
     }
 
-    const config = await claudeService.loadClaudeConfig();
-    const cliOk = await claudeCliService.getCliStatus();
-
-    // If API is configured, use streaming
-    if (config) {
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
-
-      try {
-        for await (const chunk of claudeService.streamChat(config, messages, systemPrompt)) {
-          reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: chunk })}\n\n`);
-        }
-        reply.raw.write(`data: ${JSON.stringify({ type: 'done', source: 'api' })}\n\n`);
-      } catch (err: any) {
-        log.error('claude', 'Chat stream failed (API)', err.message, projectId);
-        reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Stream failed' })}\n\n`);
-      }
-
-      reply.raw.end();
-      return;
+    // CLI-first via the unified backend: OAuth stream → CLI subprocess → API key
+    let handle: aiBackend.StreamHandle;
+    try {
+      const cwd = projectId ? await getProjectPath(projectId) : undefined;
+      handle = await aiBackend.streamText(systemPrompt, messages, { cwd });
+    } catch (err: any) {
+      const status = err instanceof aiBackend.NoAiAvailableError ? 503 : 500;
+      return reply.status(status).send({ error: err.message });
     }
 
-    // CLI fallback — streaming via stdout chunks
-    if (cliOk) {
-      reply.raw.writeHead(200, {
-        'Content-Type': 'text/event-stream',
-        'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
-        'X-Accel-Buffering': 'no',
-      });
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
 
-      try {
-        // Build conversation context for CLI (single-turn)
-        const conversationParts: string[] = [];
-        if (messages.length > 1) {
-          conversationParts.push('Previous conversation:');
-          for (const msg of messages.slice(0, -1)) {
-            conversationParts.push(`${msg.role === 'user' ? 'User' : 'Assistant'}: ${msg.content}`);
-          }
-          conversationParts.push('');
-        }
-        const lastMsg = messages[messages.length - 1];
-        conversationParts.push(`User: ${lastMsg.content}`);
-
-        const fullPrompt = `${systemPrompt}\n\n${conversationParts.join('\n')}`;
-        const cwd = projectId ? await getProjectPath(projectId) : undefined;
-
-        for await (const chunk of claudeCliService.streamPrompt(fullPrompt, {
-          model: 'sonnet',
-          timeout: 300000,
-          cwd,
-        })) {
-          reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: chunk })}\n\n`);
-        }
-
-        reply.raw.write(`data: ${JSON.stringify({ type: 'done', source: 'cli' })}\n\n`);
-      } catch (err: any) {
-        log.error('claude', 'Chat stream failed (CLI)', err.message, projectId);
-        reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'CLI failed' })}\n\n`);
+    try {
+      for await (const chunk of handle.stream) {
+        reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: chunk })}\n\n`);
       }
-
-      reply.raw.end();
-      return;
+      reply.raw.write(`data: ${JSON.stringify({ type: 'done', source: handle.source })}\n\n`);
+    } catch (err: any) {
+      log.error('claude', `Chat stream failed (${handle.source})`, err.message, projectId);
+      reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Stream failed' })}\n\n`);
     }
 
-    return reply.status(400).send({ error: 'No AI available. Install Claude CLI or configure API key.' });
+    reply.raw.end();
   });
 
   // Analyze task — CLI-first (uses Max subscription), configured API key fallback
@@ -266,39 +213,21 @@ export async function claudeRoutes(app: FastifyInstance) {
 
     const systemInstructions = `You are a developer improving task descriptions. Project context: ${context}\n\nRespond ONLY with JSON: { "title": "concise action-oriented title", "description": "what needs to be done", "prompt": "technical details, files, approach" }\nNo markdown fences. Keep it concise.`;
 
-    // Priority 1: OAuth token → direct API call (fastest, uses Max subscription)
-    const oauthToken = await claudeCliService.getOAuthToken();
-    if (oauthToken) {
+    try {
+      const result = await aiBackend.generateText(systemInstructions, userMessage, { maxTokens: 1024 });
       try {
-        const result = await claudeCliService.callApiWithOAuth(
-          systemInstructions, userMessage,
-          { model: 'claude-haiku-4-5-20251001', maxTokens: 1024, timeout: 30_000 },
-        );
-        try {
-          const parsed = parseJsonResponse(result);
-          return { title: parsed.title || title, description: parsed.description || '', prompt: parsed.prompt || '' };
-        } catch {
-          log.warn('claude', 'Analyze task OAuth response was not valid JSON', undefined, projectId);
-          return { title, description: result.trim(), prompt: '' };
-        }
-      } catch (err: any) {
-        if (err.status === 429) return reply.status(429).send({ error: 'Rate limit reached. Please wait a moment and try again.' });
-        log.warn('claude', `Analyze task OAuth failed: ${err.message}`, undefined, projectId);
+        const parsed = parseJsonResponse(result.text);
+        return { title: parsed.title || title, description: parsed.description || '', prompt: parsed.prompt || '' };
+      } catch {
+        log.warn('claude', 'Analyze task response was not valid JSON', undefined, projectId);
+        return { title, description: result.text.trim(), prompt: '' };
       }
+    } catch (err: any) {
+      if (err.status === 429) return reply.status(429).send({ error: 'Rate limit reached. Please wait a moment and try again.' });
+      const status = err instanceof aiBackend.NoAiAvailableError ? 503 : 500;
+      log.error('claude', 'Analyze task failed', err.message, projectId);
+      return reply.status(status).send({ error: err.message });
     }
-
-    // Priority 2: Configured API key (not env key)
-    const config = await claudeService.loadClaudeConfig();
-    if (config) {
-      try {
-        return await claudeService.analyzeTask(config, context, title, existingDescription);
-      } catch (err: any) {
-        log.error('claude', 'Analyze task API also failed', err.message, projectId);
-        return reply.status(500).send({ error: `AI analysis failed: ${err.message}` });
-      }
-    }
-
-    return reply.status(400).send({ error: 'No AI available. Install Claude CLI or configure API key.' });
   });
 
   // Bulk organize tasks — CLI-first, API fallback
@@ -326,29 +255,16 @@ For each task, generate:
 Respond ONLY with valid JSON array, no markdown fences. Example:
 [{"title":"...","description":"...","prompt":"...","priority":"medium","status":"todo"}]`;
 
-    // Priority 1: OAuth token → direct API call
-    const oauthToken = await claudeCliService.getOAuthToken();
-    if (oauthToken) {
-      try {
-        const result = await claudeCliService.callApiWithOAuth(
-          systemInstructions, rawText,
-          { model: 'claude-haiku-4-5-20251001', maxTokens: 4096, timeout: 30_000 },
-        );
-        const parsed = parseJsonResponse(result);
-        return { tasks: Array.isArray(parsed) ? parsed : [] };
-      } catch (err: any) {
-        if (err.status === 429) return reply.status(429).send({ error: 'Rate limit reached. Please wait a moment and try again.' });
-        log.warn('claude', `Bulk organize OAuth failed: ${err.message}`, undefined, projectId);
-      }
+    try {
+      const result = await aiBackend.generateText(systemInstructions, rawText, { maxTokens: 4096, timeout: 60_000 });
+      const parsed = parseJsonResponse(result.text);
+      return { tasks: Array.isArray(parsed) ? parsed : [] };
+    } catch (err: any) {
+      if (err.status === 429) return reply.status(429).send({ error: 'Rate limit reached. Please wait a moment and try again.' });
+      const status = err instanceof aiBackend.NoAiAvailableError ? 503 : 500;
+      log.error('claude', 'Bulk organize failed', err.message, projectId);
+      return reply.status(status).send({ error: err.message });
     }
-
-    // Priority 2: Configured API key
-    const config = await claudeService.loadClaudeConfig();
-    if (!config) {
-      return reply.status(400).send({ error: 'No AI available. Install Claude CLI or configure API key.' });
-    }
-    const tasks = await claudeService.bulkOrganizeTasks(config, context, rawText);
-    return { tasks };
   });
 
   // Manage tasks — smart AI tool: create, update, deduplicate, organize
@@ -404,33 +320,19 @@ Respond ONLY with valid JSON (no markdown fences):
   "summary": "Brief summary of what was done"
 }`;
 
-    // Priority 1: OAuth token → direct API call
-    const oauthToken = await claudeCliService.getOAuthToken();
-    if (oauthToken) {
-      try {
-        const result = await claudeCliService.callApiWithOAuth(
-          systemInstructions, rawText,
-          { model: 'claude-haiku-4-5-20251001', maxTokens: 4096, timeout: 30_000 },
-        );
-        const parsed = parseJsonResponse(result);
-        return {
-          actions: Array.isArray(parsed.actions) ? parsed.actions : [],
-          summary: parsed.summary || '',
-        };
-      } catch (err: any) {
-        if (err.status === 429) return reply.status(429).send({ error: 'Rate limit reached. Please wait a moment and try again.' });
-        log.warn('claude', `Manage tasks OAuth failed: ${err.message}`, undefined, projectId);
-      }
+    try {
+      const result = await aiBackend.generateText(systemInstructions, rawText, { maxTokens: 4096, timeout: 60_000 });
+      const parsed = parseJsonResponse(result.text);
+      return {
+        actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+        summary: parsed.summary || '',
+      };
+    } catch (err: any) {
+      if (err.status === 429) return reply.status(429).send({ error: 'Rate limit reached. Please wait a moment and try again.' });
+      const status = err instanceof aiBackend.NoAiAvailableError ? 503 : 500;
+      log.error('claude', 'Manage tasks failed', err.message, projectId);
+      return reply.status(status).send({ error: err.message });
     }
-
-    // Priority 2: Configured API key
-    const config = await claudeService.loadClaudeConfig();
-    if (!config) {
-      return reply.status(400).send({ error: 'No AI available. Install Claude CLI or configure API key.' });
-    }
-
-    const result = await claudeService.manageTasks(config, systemInstructions, rawText);
-    return result;
   });
 
 }

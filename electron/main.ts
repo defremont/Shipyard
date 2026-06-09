@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, type MenuItemConstructorOptions } from 'electron';
 import { join, resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { spawn, execSync, type ChildProcess } from 'child_process';
@@ -291,6 +291,77 @@ function createWindow() {
   });
 }
 
+// ── Application menu ───────────────────────────────────────────────
+
+/** Send a menu action to the renderer (shows the window first if hidden) */
+function sendMenuAction(action: string) {
+  if (!mainWindow) return;
+  mainWindow.show();
+  mainWindow.focus();
+  mainWindow.webContents.send('menu-action', action);
+}
+
+function createApplicationMenu() {
+  const isMac = process.platform === 'darwin';
+
+  // Shortcuts like Ctrl+K / Ctrl+Shift+F / Ctrl+` are already handled by the
+  // renderer's keydown listeners. registerAccelerator: false (Win/Linux) keeps
+  // the hint visible in the menu without double-triggering; clicking the menu
+  // item itself sends the action over IPC.
+  const template: MenuItemConstructorOptions[] = [
+    ...(isMac ? [{ role: 'appMenu' as const }] : []),
+    {
+      label: 'File',
+      submenu: [
+        { label: 'Dashboard', accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenuAction('navigate:/') },
+        { label: 'Tasks', click: () => sendMenuAction('navigate:/tasks') },
+        { type: 'separator' },
+        { label: 'Settings', accelerator: 'CmdOrCtrl+,', click: () => sendMenuAction('navigate:/settings') },
+        { type: 'separator' },
+        isMac ? { role: 'close' as const } : {
+          label: 'Quit',
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => { isQuitting = true; app.quit(); },
+        },
+      ],
+    },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { label: 'Global Search', accelerator: 'CmdOrCtrl+K', registerAccelerator: false, click: () => sendMenuAction('toggle-search') },
+        { label: 'Search in Files', accelerator: 'CmdOrCtrl+Shift+F', registerAccelerator: false, click: () => sendMenuAction('toggle-file-search') },
+        { label: 'Toggle Terminal', accelerator: 'CmdOrCtrl+`', registerAccelerator: false, click: () => sendMenuAction('toggle-terminal') },
+        { type: 'separator' },
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    {
+      label: 'Help',
+      submenu: [
+        { label: 'Help & Documentation', click: () => sendMenuAction('navigate:/help') },
+        { label: 'Logs', click: () => sendMenuAction('navigate:/logs') },
+        { type: 'separator' },
+        {
+          label: 'GitHub Repository',
+          click: () => { shell.openExternal('https://github.com/defremont/Shipyard'); },
+        },
+        { label: `Shipyard v${app.getVersion()}`, enabled: false },
+      ],
+    },
+  ];
+
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
 // ── Tray ───────────────────────────────────────────────────────────
 
 function createTray() {
@@ -350,6 +421,7 @@ if (!gotTheLock) {
     try {
       await startServer();
       createWindow();
+      createApplicationMenu();
       createTray();
     } catch (err) {
       console.error('[Electron] Failed to start:', err);

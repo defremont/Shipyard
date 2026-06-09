@@ -301,7 +301,7 @@ export function TerminalPanel() {
     }
   }, [isVisible, tabs.length, handleNewTab])
 
-  // Keyboard shortcut: Ctrl+` to toggle terminal
+  // Keyboard shortcut: Ctrl+` to toggle terminal (also via Electron menu action)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.key === '`') {
@@ -310,7 +310,11 @@ export function TerminalPanel() {
       }
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('shipyard:toggle-terminal', togglePanel)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('shipyard:toggle-terminal', togglePanel)
+    }
   }, [togglePanel])
 
   // Toggle split mode

@@ -61,25 +61,32 @@ export function GlobalSearch() {
   const { data: projects } = useProjects()
   const { data: tasks } = useAllTasks()
 
-  // Listen for Ctrl+K
+  // Listen for Ctrl+K and the Electron menu action
   useEffect(() => {
+    const toggle = () => {
+      setOpen(prev => {
+        if (!prev) {
+          setQuery('')
+          setActiveFilter('all')
+          setSelectedIndex(0)
+          setFileResults([])
+        }
+        return !prev
+      })
+    }
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
         e.preventDefault()
         e.stopPropagation()
-        setOpen(prev => {
-          if (!prev) {
-            setQuery('')
-            setActiveFilter('all')
-            setSelectedIndex(0)
-            setFileResults([])
-          }
-          return !prev
-        })
+        toggle()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
+    window.addEventListener('shipyard:toggle-search', toggle)
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('shipyard:toggle-search', toggle)
+    }
   }, [])
 
   // Focus input when opened

@@ -73,6 +73,17 @@ export async function getOAuthToken(): Promise<string | null> {
   }
 }
 
+// OAuth access tokens are NOT API keys: they must be sent as a Bearer token
+// with the oauth beta header. Sending them via x-api-key returns 401.
+function oauthHeaders(token: string): Record<string, string> {
+  return {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${token}`,
+    'anthropic-version': '2023-06-01',
+    'anthropic-beta': 'oauth-2025-04-20',
+  };
+}
+
 /**
  * Call the Anthropic API directly using the CLI's OAuth token.
  * This is faster and more reliable than spawning the CLI process,
@@ -93,11 +104,7 @@ export async function callApiWithOAuth(
   try {
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': token,
-        'anthropic-version': '2023-06-01',
-      },
+      headers: oauthHeaders(token),
       body: JSON.stringify({
         model: options?.model ?? 'claude-haiku-4-5-20251001',
         max_tokens: options?.maxTokens ?? 1024,
@@ -110,7 +117,10 @@ export async function callApiWithOAuth(
     if (!response.ok) {
       const body = await response.text();
       // Preserve status code in error so callers can distinguish rate limits (429)
-      const err = new Error(`API error ${response.status}: ${body.slice(0, 200)}`);
+      const message = response.status === 429
+        ? 'Rate limit reached on your Claude subscription. Wait a moment and try again.'
+        : `API error ${response.status}: ${body.slice(0, 200)}`;
+      const err = new Error(message);
       (err as any).status = response.status;
       throw err;
     }
@@ -118,6 +128,84 @@ export async function callApiWithOAuth(
     const data = await response.json() as any;
     const text = data.content?.[0]?.type === 'text' ? data.content[0].text : '';
     return text.trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Stream a response from the Anthropic API using the CLI's OAuth token.
+ * Yields text fragments as they arrive (SSE `content_block_delta` events).
+ * Lets chat use the Max subscription with real streaming instead of
+ * spawning the CLI process.
+ */
+export async function* streamApiWithOAuth(
+  systemPrompt: string,
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>,
+  options?: { model?: string; maxTokens?: number; timeout?: number }
+): AsyncGenerator<string> {
+  const token = await getOAuthToken();
+  if (!token) throw new Error('No OAuth token available');
+
+  const controller = new AbortController();
+  // Activity timeout: aborts if no bytes arrive for `timeout` ms
+  const timeout = options?.timeout ?? 60_000;
+  let timer = setTimeout(() => controller.abort(), timeout);
+  const resetTimer = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => controller.abort(), timeout);
+  };
+
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: oauthHeaders(token),
+      body: JSON.stringify({
+        model: options?.model ?? 'claude-sonnet-4-5-20250929',
+        max_tokens: options?.maxTokens ?? 4096,
+        system: systemPrompt,
+        messages,
+        stream: true,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok || !response.body) {
+      const body = await response.text().catch(() => '');
+      const message = response.status === 429
+        ? 'Rate limit reached on your Claude subscription. Wait a moment and try again.'
+        : `API error ${response.status}: ${body.slice(0, 200)}`;
+      const err = new Error(message);
+      (err as any).status = response.status;
+      throw err;
+    }
+
+    // Parse the SSE stream: lines of `data: {...}` separated by blank lines
+    const decoder = new TextDecoder();
+    let buffer = '';
+    for await (const chunk of response.body as any) {
+      resetTimer();
+      buffer += decoder.decode(chunk as Uint8Array, { stream: true });
+      let idx: number;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx).trim();
+        buffer = buffer.slice(idx + 1);
+        if (!line.startsWith('data:')) continue;
+        const payload = line.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        try {
+          const event = JSON.parse(payload);
+          if (event.type === 'content_block_delta' && event.delta?.type === 'text_delta') {
+            yield event.delta.text as string;
+          } else if (event.type === 'error') {
+            throw new Error(event.error?.message || 'Stream error');
+          }
+        } catch (err) {
+          if (err instanceof SyntaxError) continue; // partial/malformed line — skip
+          throw err;
+        }
+      }
+    }
   } finally {
     clearTimeout(timer);
   }

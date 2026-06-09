@@ -31,7 +31,10 @@ export function useFileContent(projectId: string, relPath: string | null) {
     queryKey: ['files', 'content', projectId, relPath],
     queryFn: () => api.getFileContent(projectId, relPath!),
     enabled: !!projectId && !!relPath,
-    staleTime: 30_000,
+    // Files change on disk outside the app (editors, Claude Code) — always
+    // refetch on mount so previews never show stale content.
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
 }
 
