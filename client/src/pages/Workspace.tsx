@@ -5,7 +5,7 @@ import { useProjects, useUpdateProject, useLaunchTerminal, useOpenFolder } from 
 import { Badge } from '@/components/ui/badge'
 import {
   GitBranch, Star, ExternalLink, Link2, Settings, Code2, LayoutList,
-  Play, Monitor, FolderOpen, Sparkles,
+  Play, Monitor, FolderOpen, Sparkles, MoreHorizontal,
 } from 'lucide-react'
 // CodeMirror and its language modes only matter once the user opens a file.
 const EditorPanel = lazy(() =>
@@ -15,6 +15,9 @@ import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDial
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
 import { useTerminalStatus } from '@/hooks/useTerminal'
@@ -178,12 +181,6 @@ export function Workspace() {
           </Badge>
         )}
 
-        {project.category !== 'root' && (
-          <span className="text-[10px] text-muted-foreground/30 shrink-0 hidden lg:block">{project.category}</span>
-        )}
-
-        <span className="text-[10px] text-muted-foreground/20 truncate hidden xl:block">{project.path}</span>
-
         {/* Mode toggle */}
         <div className="flex items-center ml-auto shrink-0">
           <div className="flex items-center h-7 rounded-md border bg-muted/30 p-0.5">
@@ -214,41 +211,8 @@ export function Workspace() {
           </div>
         </div>
 
-        {/* Quick actions (always-on for the active project) */}
+        {/* Claude is the core workflow — the only always-visible action */}
         <div className="flex items-center gap-0.5 shrink-0 ml-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => handleLaunch('dev', 'Dev Server')}
-                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-success hover:bg-accent transition-colors"
-              >
-                <Play className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Dev Server</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => handleLaunch('shell', 'Shell')}
-                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent transition-colors"
-              >
-                <Monitor className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Shell</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleOpenFolder}
-                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent transition-colors"
-              >
-                <FolderOpen className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Open Folder</TooltipContent>
-          </Tooltip>
           <Popover open={claudePopoverOpen} onOpenChange={setClaudePopoverOpen}>
             <Tooltip>
               <TooltipTrigger asChild>
@@ -304,51 +268,51 @@ export function Workspace() {
           </Popover>
         </div>
 
-        {/* Links + settings */}
-        <div className="flex items-center gap-0.5 shrink-0 ml-2 pl-2 border-l">
-          {project.gitRemoteUrl && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <a href={project.gitRemoteUrl} target="_blank" rel="noopener noreferrer"
-                  className="p-1.5 rounded-md text-muted-foreground/30 hover:text-foreground hover:bg-accent transition-colors">
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              </TooltipTrigger>
-              <TooltipContent>Repository</TooltipContent>
-            </Tooltip>
-          )}
-          {project.externalLink ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <a href={project.externalLink} target="_blank" rel="noopener noreferrer"
-                  className="p-1.5 rounded-md text-primary/60 hover:text-primary hover:bg-primary/10 transition-colors">
-                  <Link2 className="h-3.5 w-3.5" />
-                </a>
-              </TooltipTrigger>
-              <TooltipContent>Open Cloud — {project.externalLink}</TooltipContent>
-            </Tooltip>
-          ) : (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => openSettings('links')}
-                  className="p-1.5 rounded-md text-muted-foreground/20 hover:text-primary hover:bg-accent transition-colors"
-                >
-                  <Link2 className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Set cloud / external link…</TooltipContent>
-            </Tooltip>
-          )}
-
-          <button
-            onClick={() => openSettings()}
-            className="p-1.5 rounded-md text-muted-foreground/30 hover:text-foreground hover:bg-accent transition-colors ml-0.5"
-            title="Project settings"
-          >
-            <Settings className="h-3.5 w-3.5" />
-          </button>
-        </div>
+        {/* Everything secondary lives in one overflow menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button className="p-1.5 rounded-md text-muted-foreground/40 hover:text-foreground hover:bg-accent transition-colors shrink-0">
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onClick={() => handleLaunch('dev', 'Dev Server')}>
+              <Play />
+              Dev Server
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleLaunch('shell', 'Shell')}>
+              <Monitor />
+              Shell
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleOpenFolder}>
+              <FolderOpen />
+              Open Folder
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            {project.gitRemoteUrl && (
+              <DropdownMenuItem onClick={() => window.open(project.gitRemoteUrl, '_blank', 'noopener,noreferrer')}>
+                <ExternalLink />
+                Repository
+              </DropdownMenuItem>
+            )}
+            {project.externalLink ? (
+              <DropdownMenuItem onClick={() => window.open(project.externalLink, '_blank', 'noopener,noreferrer')}>
+                <Link2 />
+                Open Cloud
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onClick={() => openSettings('links')}>
+                <Link2 />
+                Set cloud link…
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => openSettings()}>
+              <Settings />
+              Project settings…
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* ── Main content ── */}

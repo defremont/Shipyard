@@ -129,6 +129,15 @@ interface Project {
   (ambar) tem cor; medium/low sao neutros
 - Tasks done: **sem** `line-through` e **sem** `opacity` no card — titulo em
   `text-muted-foreground` + check verde. Legibilidade > decoracao
+- **Cromo minimo**: toolbars mostram so as acoes do fluxo principal (Claude,
+  New Task, milestone, toggle Tasks/Editor). Acoes secundarias (sort, view mode,
+  import/export, report, dev server, shell, links, settings) vivem em menus "⋯"
+  (`ui/dropdown-menu.tsx`) ou aparecem apenas no hover (acoes de coluna do kanban:
+  `group/col` + `opacity-0 group-hover/col:opacity-100`). Nao adicionar botoes
+  sempre-visiveis a toolbars sem justificativa de fluxo
+- Painel lateral fecha automaticamente em rotas full-page (`/settings`, `/logs`,
+  `/help`) e restaura a preferencia ao voltar — ver `FULL_PAGE_ROUTES` em
+  `useActivity.tsx`
 
 ### Tarefas: description vs prompt
 - **description**: O QUE fazer, visao usuario/produto, sem referencias a codigo

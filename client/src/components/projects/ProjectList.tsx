@@ -1,10 +1,12 @@
 import { useState, useMemo, useRef, useEffect } from 'react'
-import { Search, ArrowUpDown } from 'lucide-react'
+import { Search, ListFilter } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { ProjectCard, type TaskCounts } from './ProjectCard'
-import { cn } from '@/lib/utils'
 import type { Project } from '@/hooks/useProjects'
 
 type SortOption = 'name' | 'lastModified' | 'lastOpened' | 'category' | 'tasks'
@@ -39,11 +41,6 @@ export function ProjectList({ projects, taskCounts }: ProjectListProps) {
   }, [projects])
 
   const sortOptions: SortOption[] = ['name', 'lastModified', 'lastOpened', 'category', 'tasks']
-
-  const cycleSortBy = () => {
-    const idx = sortOptions.indexOf(sortBy)
-    setSortBy(sortOptions[(idx + 1) % sortOptions.length])
-  }
 
   const filtered = useMemo(() => {
     let result = projects
@@ -100,10 +97,11 @@ export function ProjectList({ projects, taskCounts }: ProjectListProps) {
   }, [projects, search, categoryFilter, showFavoritesOnly, sortBy, taskCounts])
 
   const hasFilters = search || categoryFilter || showFavoritesOnly
+  const activeFilterCount = (categoryFilter ? 1 : 0) + (showFavoritesOnly ? 1 : 0)
 
   return (
     <div className="space-y-3">
-      {/* Toolbar */}
+      {/* Toolbar — search plus a single quiet filter control */}
       <div className="flex items-center gap-2">
         <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
@@ -115,55 +113,58 @@ export function ProjectList({ projects, taskCounts }: ProjectListProps) {
             className="h-8 pl-8 text-sm"
           />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="gap-1.5 text-xs h-8"
-          onClick={cycleSortBy}
-        >
-          <ArrowUpDown className="h-3 w-3" />
-          {sortLabels[sortBy]}
-        </Button>
-        <Button
-          variant={showFavoritesOnly ? 'default' : 'outline'}
-          size="sm"
-          className="h-8 text-xs"
-          onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-        >
-          Favorites
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+              <ListFilter className="h-3.5 w-3.5" />
+              Filter
+              {activeFilterCount > 0 && (
+                <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground tabular-nums">
+                  {activeFilterCount}
+                </span>
+              )}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuCheckboxItem
+              checked={showFavoritesOnly}
+              onCheckedChange={setShowFavoritesOnly}
+              onSelect={(e) => e.preventDefault()}
+            >
+              Favorites only
+            </DropdownMenuCheckboxItem>
+            {categories.length > 1 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Category</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={categoryFilter ?? '__all'}
+                  onValueChange={(v) => setCategoryFilter(v === '__all' ? null : v)}
+                >
+                  <DropdownMenuRadioItem value="__all">All ({projects.length})</DropdownMenuRadioItem>
+                  {categories.map(cat => (
+                    <DropdownMenuRadioItem key={cat} value={cat}>
+                      {cat} ({projects.filter(p => p.category === cat).length})
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+            <DropdownMenuRadioGroup value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+              {sortOptions.map(o => (
+                <DropdownMenuRadioItem key={o} value={o}>{sortLabels[o]}</DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {hasFilters && (
           <span className="text-[11px] text-muted-foreground/50 ml-1">
             {filtered.length} of {projects.length}
           </span>
         )}
       </div>
-
-      {/* Categories */}
-      {categories.length > 1 && (
-        <div className="flex flex-wrap gap-1">
-          <Badge
-            variant={categoryFilter === null ? 'default' : 'outline'}
-            className="cursor-pointer text-[10px]"
-            onClick={() => setCategoryFilter(null)}
-          >
-            All ({projects.length})
-          </Badge>
-          {categories.map(cat => {
-            const count = projects.filter(p => p.category === cat).length
-            return (
-              <Badge
-                key={cat}
-                variant={categoryFilter === cat ? 'default' : 'outline'}
-                className="cursor-pointer text-[10px]"
-                onClick={() => setCategoryFilter(cat === categoryFilter ? null : cat)}
-              >
-                {cat} ({count})
-              </Badge>
-            )
-          })}
-        </div>
-      )}
 
       {/* Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2.5">

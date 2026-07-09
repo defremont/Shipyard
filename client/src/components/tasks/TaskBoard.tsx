@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect, memo, lazy, Suspense } from 'react'
-import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown, Import, LayoutGrid, List, Sparkles, ChevronDown, CheckCheck, Eye, EyeOff, FileText } from 'lucide-react'
+import { Plus, Inbox, Loader, CheckCircle2, Copy, Import, LayoutGrid, List, ChevronDown, CheckCheck, Eye, EyeOff, FileText, MoreHorizontal } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -17,6 +17,10 @@ import { SortableContext, useSortable, verticalListSortingStrategy, arrayMove } 
 import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { TaskItem } from './TaskItem'
 import { TaskEditor } from './TaskEditor'
 import { TaskViewer } from './TaskViewer'
@@ -193,47 +197,45 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, mil
     <div
       ref={setNodeRef}
       className={cn(
-        'flex flex-col rounded-lg border bg-muted/30 min-h-[200px] transition-colors',
+        'group/col flex flex-col rounded-lg border bg-muted/30 min-h-[200px] transition-colors',
         isOver && 'border-primary/50 bg-primary/5'
       )}
     >
-      <div className="flex items-center gap-2 p-3 border-b">
-        <Icon className={cn('h-4 w-4', col.color)} />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {col.label}
-        </h3>
-        <span className="text-xs text-muted-foreground">({count})</span>
-        {onCopy && count > 0 && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button onClick={onCopy} className="ml-auto text-muted-foreground/40 hover:text-foreground transition-colors">
-                <Copy className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {col.key === 'inbox' ? 'Copy inbox tasks as prompt — organize and detail' :
-               col.key === 'in_progress' ? 'Copy in-progress tasks as prompt — resolve them' :
-               'Copy done tasks as prompt — verify completion'}
-            </TooltipContent>
-          </Tooltip>
-        )}
-        {headerExtra}
-        {projectId && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => onAddingChange?.(!isAdding)}
-                className={cn(
-                  'text-muted-foreground/40 hover:text-foreground transition-colors',
-                  !onCopy || count === 0 ? 'ml-auto' : ''
-                )}
-              >
-                <Plus className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Quick add task</TooltipContent>
-          </Tooltip>
-        )}
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b">
+        <Icon className={cn('h-3.5 w-3.5', col.color)} />
+        <h3 className="text-xs font-medium">{col.label}</h3>
+        <span className="text-xs text-muted-foreground/60 tabular-nums">{count}</span>
+        {/* Column actions stay hidden until the column is hovered — quieter chrome */}
+        <div className="ml-auto flex items-center gap-1 opacity-0 group-hover/col:opacity-100 focus-within:opacity-100 transition-opacity">
+          {onCopy && count > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button onClick={onCopy} className="text-muted-foreground/50 hover:text-foreground transition-colors">
+                  <Copy className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {col.key === 'inbox' ? 'Copy inbox tasks as prompt — organize and detail' :
+                 col.key === 'in_progress' ? 'Copy in-progress tasks as prompt — resolve them' :
+                 'Copy done tasks as prompt — verify completion'}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {headerExtra}
+          {projectId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => onAddingChange?.(!isAdding)}
+                  className="text-muted-foreground/50 hover:text-foreground transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>Quick add task</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
       </div>
       <div className="flex-1 p-2 space-y-2">
         {isAdding && projectId && (
@@ -565,7 +567,8 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold flex items-center gap-1.5">
-          Tasks ({tasks?.length || 0})
+          Tasks
+          <span className="text-xs font-normal text-muted-foreground/60 tabular-nums">{tasks?.length || 0}</span>
           {isSyncing && <Loader className="h-3 w-3 animate-spin text-muted-foreground" />}
           {onMilestoneChange && (
             <>
@@ -576,61 +579,45 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
         </h2>
         <div className="flex flex-wrap items-center gap-1">
           <SyncMenu projectId={projectId} projectName={projectName} milestoneId={milestoneId} tasks={tasks || []} />
-          <div className="flex items-center border rounded-md">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => { setViewMode('kanban'); localStorage.setItem('shipyard:view:' + projectId, 'kanban') }}
-                  className={cn('p-1.5 rounded-l-md transition-colors', viewMode === 'kanban' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                >
-                  <LayoutGrid className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>Kanban view</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => { setViewMode('list'); localStorage.setItem('shipyard:view:' + projectId, 'list') }}
-                  className={cn('p-1.5 rounded-r-md transition-colors', viewMode === 'list' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground')}
-                >
-                  <List className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent>List view</TooltipContent>
-            </Tooltip>
-          </div>
-          <select
-            value={sortBy}
-            onChange={e => {
-              const v = e.target.value as SortOption
-              setSortBy(v)
-              localStorage.setItem(`shipyard:sort:${projectId}`, v)
-            }}
-            className="h-7 text-xs bg-background border rounded-md px-2 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-ring text-muted-foreground hover:text-foreground transition-colors"
-          >
-            {SORT_OPTIONS.map(o => (
-              <option key={o.key} value={o.key}>{o.label}</option>
-            ))}
-          </select>
-          {onOpenSettings && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-muted-foreground" onClick={() => onOpenSettings('data')}>
-                  <Import className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Import / Export tasks (CSV, JSON, Markdown)</TooltipContent>
-            </Tooltip>
-          )}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-muted-foreground" onClick={() => setReportOpen(true)}>
-                <FileText className="h-3.5 w-3.5" />
+          {/* Secondary controls live in one overflow menu — the toolbar stays minimal */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground">
+                <MoreHorizontal className="h-3.5 w-3.5" />
               </Button>
-            </TooltipTrigger>
-            <TooltipContent>Gerar relatório (HTML/PDF/TXT)</TooltipContent>
-          </Tooltip>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel>View</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={viewMode}
+                onValueChange={(v) => { setViewMode(v as 'kanban' | 'list'); localStorage.setItem('shipyard:view:' + projectId, v) }}
+              >
+                <DropdownMenuRadioItem value="kanban"><LayoutGrid className="h-3.5 w-3.5 mr-2 text-muted-foreground" />Kanban</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="list"><List className="h-3.5 w-3.5 mr-2 text-muted-foreground" />List</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={sortBy}
+                onValueChange={(v) => { setSortBy(v as SortOption); localStorage.setItem(`shipyard:sort:${projectId}`, v) }}
+              >
+                {SORT_OPTIONS.map(o => (
+                  <DropdownMenuRadioItem key={o.key} value={o.key}>{o.label}</DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              {onOpenSettings && (
+                <DropdownMenuItem onClick={() => onOpenSettings('data')}>
+                  <Import />
+                  Import / Export…
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={() => setReportOpen(true)}>
+                <FileText />
+                Generate report…
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" className="h-7 gap-1 text-xs" onClick={handleNew}>
             <Plus className="h-3.5 w-3.5" />
             New Task

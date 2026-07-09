@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, memo } from 'react'
-import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Search, LayoutGrid, List, ChevronDown } from 'lucide-react'
+import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Search, LayoutGrid, List, ChevronDown, ListFilter } from 'lucide-react'
 import {
   DndContext,
   DragOverlay,
@@ -17,7 +17,10 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel,
+  DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import { useAllTasks, useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
 import { useProjects, type Project } from '@/hooks/useProjects'
@@ -139,12 +142,10 @@ function DroppableColumn({ col, children, count, taskIds, hiddenCount, onShowMor
         isOver && 'border-primary/50 bg-primary/5'
       )}
     >
-      <div className="flex items-center gap-2 p-3 border-b">
-        <Icon className={cn('h-4 w-4', col.color)} />
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          {col.label}
-        </h3>
-        <span className="text-xs text-muted-foreground">({count})</span>
+      <div className="flex items-center gap-2 px-3 py-2.5 border-b">
+        <Icon className={cn('h-3.5 w-3.5', col.color)} />
+        <h3 className="text-xs font-medium">{col.label}</h3>
+        <span className="text-xs text-muted-foreground/60 tabular-nums">{count}</span>
       </div>
       <div className="flex-1 p-2 space-y-2 overflow-y-auto">
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
@@ -400,41 +401,43 @@ export function TasksPage() {
                 className="h-8 pl-8 text-sm"
               />
             </div>
-            <div className="flex items-center gap-1">
-              {priorities.map(p => {
-                const Icon = p.icon
-                const active = priorityFilters.has(p.key)
-                return (
-                  <button
+            {/* Filters + sort collapse into one quiet control */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+                  <ListFilter className="h-3.5 w-3.5" />
+                  Filter
+                  {priorityFilters.size > 0 && (
+                    <span className="flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-semibold text-primary-foreground tabular-nums">
+                      {priorityFilters.size}
+                    </span>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuLabel>Priority</DropdownMenuLabel>
+                {priorities.map(p => (
+                  <DropdownMenuCheckboxItem
                     key={p.key}
-                    onClick={() => togglePriority(p.key)}
-                    className={cn(
-                      'flex items-center gap-1 px-2 py-1 rounded-md border text-xs font-medium transition-colors',
-                      active ? p.color : 'border-transparent text-muted-foreground hover:bg-accent'
-                    )}
+                    checked={priorityFilters.has(p.key)}
+                    onCheckedChange={() => togglePriority(p.key)}
+                    onSelect={(e) => e.preventDefault()}
                   >
-                    <Icon className="h-3 w-3" />
                     {p.label}
-                  </button>
-                )
-              })}
-            </div>
-            <Select
-              value={sortBy}
-              onValueChange={(v: SortOption) => {
-                setSortBy(v)
-                localStorage.setItem('shipyard:sort:global', v)
-              }}
-            >
-              <SelectTrigger className="h-8 w-[140px] text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {SORT_OPTIONS.map(o => (
-                  <SelectItem key={o.key} value={o.key} className="text-xs">{o.label}</SelectItem>
+                  </DropdownMenuCheckboxItem>
                 ))}
-              </SelectContent>
-            </Select>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={sortBy}
+                  onValueChange={(v) => { setSortBy(v as SortOption); localStorage.setItem('shipyard:sort:global', v) }}
+                >
+                  {SORT_OPTIONS.map(o => (
+                    <DropdownMenuRadioItem key={o.key} value={o.key}>{o.label}</DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {hasFilters && (
               <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setSearch(''); setPriorityFilters(new Set()) }}>
                 Clear

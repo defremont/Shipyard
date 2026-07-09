@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useLocation } from 'react-router-dom'
 
 export type ActivityId = 'projects' | 'explorer' | 'search' | 'git' | 'claude'
 
@@ -26,9 +27,26 @@ function loadPanelOpen(): boolean {
 
 const ActivityContext = createContext<ActivityContextValue | null>(null)
 
+// Full-page routes (settings, logs, help) are not project-scoped — the side
+// panel auto-collapses there and the user's preference is restored on return.
+const FULL_PAGE_ROUTES = ['/settings', '/logs', '/help']
+
 export function ActivityProvider({ children }: { children: ReactNode }) {
   const [activity, setActivity] = useState<ActivityId>(loadActivity)
   const [panelOpen, setPanelOpen] = useState<boolean>(loadPanelOpen)
+  const location = useLocation()
+
+  const isFullPage = FULL_PAGE_ROUTES.some(p => location.pathname.startsWith(p))
+  const wasFullPage = useRef(false)
+  useEffect(() => {
+    if (isFullPage && !wasFullPage.current) {
+      // Ephemeral close — localStorage keeps the user's real preference
+      setPanelOpen(false)
+    } else if (!isFullPage && wasFullPage.current) {
+      setPanelOpen(loadPanelOpen())
+    }
+    wasFullPage.current = isFullPage
+  }, [isFullPage])
 
   const persistActivity = (id: ActivityId) => {
     setActivity(id)
