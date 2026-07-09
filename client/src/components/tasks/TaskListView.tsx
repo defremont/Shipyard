@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, memo } from 'react'
 import { ChevronDown, ChevronRight, Circle, Check, AlertTriangle, ArrowUp, ArrowDown, Minus, Pencil, Trash2, Copy, CopyPlus } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
@@ -39,7 +39,7 @@ interface TaskListViewProps {
   onView?: (task: Task) => void
 }
 
-function TaskRow({ task, projectName, projectPath, showProjectBadge, projectMap, onEdit, onView }: {
+const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProjectBadge, projectMap, onEdit, onView }: {
   task: Task
   projectName?: string
   projectPath?: string
@@ -185,7 +185,7 @@ function TaskRow({ task, projectName, projectPath, showProjectBadge, projectMap,
       </div>
     </div>
   )
-}
+})
 
 const LIST_INITIAL_VISIBLE = 20
 const LIST_LOAD_MORE = 20

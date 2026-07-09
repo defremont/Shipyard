@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, memo } from 'react'
 import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Search, LayoutGrid, List, ChevronDown } from 'lucide-react'
 import {
   DndContext,
@@ -164,7 +164,7 @@ function DroppableColumn({ col, children, count, taskIds, hiddenCount, onShowMor
   )
 }
 
-function SortableGlobalTaskItem({ task, project, onEdit, onView }: {
+const SortableGlobalTaskItem = memo(function SortableGlobalTaskItem({ task, project, onEdit, onView }: {
   task: Task
   project?: Project
   onEdit: (task: Task) => void
@@ -199,7 +199,7 @@ function SortableGlobalTaskItem({ task, project, onEdit, onView }: {
       />
     </div>
   )
-}
+})
 
 export function TasksPage() {
   const { data: tasks } = useAllTasks()

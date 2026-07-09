@@ -79,6 +79,13 @@ interface StoreV2 {
 // "Trello keeps disconnecting". A read that hits a corrupt/partial file falls
 // back to the last good in-memory copy instead of an empty store, so a bad
 // read can never wipe existing connections on the next write.
+//
+// This process is the only writer, so once the file has been read the
+// in-memory copy IS the store: reads are served from it without touching the
+// disk. That matters because a single task mutation fans out into a dozen
+// reads (listProjectConfigs → getProviderCredentials per config → push's
+// getEffectiveConfig/patchState/patchStatus), and each one used to re-read and
+// re-parse the whole JSON file.
 
 let storeLock: Promise<unknown> = Promise.resolve();
 function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
@@ -87,21 +94,23 @@ function withStoreLock<T>(fn: () => Promise<T>): Promise<T> {
   return next;
 }
 
-let lastGoodStore: StoreV3 | null = null;
+let cachedStore: StoreV3 | null = null;
 
 async function readStore(): Promise<StoreV3> {
+  if (cachedStore) return cachedStore;
+
   let data: string;
   try {
     data = await readFile(STORE_FILE, 'utf-8');
   } catch {
     // File doesn't exist yet — genuinely empty store
-    return lastGoodStore ?? { version: 3, providers: {}, projects: {} };
+    return { version: 3, providers: {}, projects: {} };
   }
 
   try {
     const parsed = JSON.parse(data);
     if (parsed?.version === 3 && parsed.projects && parsed.providers) {
-      lastGoodStore = parsed;
+      cachedStore = parsed;
       return parsed;
     }
     if (parsed?.version === 2 && parsed.providers) {
@@ -114,7 +123,7 @@ async function readStore(): Promise<StoreV3> {
     // the last good copy so we never wipe existing connections.
     console.error('[syncStore] sync-config.json is corrupt, using last good copy:', (err as Error).message);
     try { await copyFile(STORE_FILE, `${STORE_FILE}.corrupt-${Date.now()}.bak`); } catch {}
-    return lastGoodStore ?? { version: 3, providers: {}, projects: {} };
+    return cachedStore ?? { version: 3, providers: {}, projects: {} };
   }
 }
 
@@ -127,7 +136,7 @@ function migrateFromV2(v2: StoreV2): StoreV3 {
     providers: v2.providers ?? {},
     projects: {},
   };
-  lastGoodStore = v3;
+  cachedStore = v3;
   void writeStore(v3);
   return v3;
 }
@@ -138,7 +147,7 @@ async function writeStore(store: StoreV3): Promise<void> {
   const tmp = `${STORE_FILE}.tmp`;
   await writeFile(tmp, JSON.stringify(store, null, 2), 'utf-8');
   await rename(tmp, STORE_FILE);
-  lastGoodStore = store;
+  cachedStore = store;
 }
 
 // ── Provider (global) API ───────────────────────────────────────────────
@@ -416,7 +425,7 @@ export function sanitizeProject(config: ProjectSyncConfig) {
 
 export async function clearAll(): Promise<void> {
   return withStoreLock(async () => {
-    lastGoodStore = null;
+    cachedStore = null;
     try { await unlink(STORE_FILE); } catch { /* already gone */ }
   });
 }

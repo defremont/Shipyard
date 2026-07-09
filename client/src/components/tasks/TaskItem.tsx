@@ -1,4 +1,4 @@
-import { useState, useMemo, useSyncExternalStore, useCallback } from 'react'
+import { useState, useMemo, useSyncExternalStore, useCallback, memo } from 'react'
 import { Link } from 'react-router-dom'
 import { Pencil, Trash2, Copy, CopyPlus, Check, Circle, AlertTriangle, ArrowUp, ArrowDown, Minus, Sparkles, Wand2, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
@@ -55,7 +55,10 @@ const statusConfig = {
   done: { label: 'Done', variant: 'outline' as const },
 }
 
-export function TaskItem({ task, projectName, projectPath, showProjectBadge, projectLink, onEdit, onView, onAiResolve, dragListeners }: TaskItemProps) {
+// react-query's structural sharing keeps `task` referentially stable across
+// polls when nothing changed, so memoizing here stops a board's worth of cards
+// from re-rendering every few seconds.
+export const TaskItem = memo(function TaskItem({ task, projectName, projectPath, showProjectBadge, projectLink, onEdit, onView, onAiResolve, dragListeners }: TaskItemProps) {
   const createTask = useCreateTask()
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
@@ -301,4 +304,4 @@ export function TaskItem({ task, projectName, projectPath, showProjectBadge, pro
       </div>
     </div>
   )
-}
+})

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
+import { useState, useCallback, useMemo, useRef, useEffect, memo, lazy, Suspense } from 'react'
 import { Plus, Inbox, Loader, CheckCircle2, FileSpreadsheet, Copy, ArrowUpDown, Import, LayoutGrid, List, Sparkles, ChevronDown, CheckCheck, Eye, EyeOff, FileText } from 'lucide-react'
 import {
   DndContext,
@@ -26,7 +26,10 @@ import { BulkImportDialog } from './BulkImportDialog'
 import { ColumnBulkMenu } from './ColumnBulkMenu'
 import { SyncMenu } from '@/components/sync/SyncMenu'
 import { MilestoneSelector } from './MilestoneSelector'
-import { ReportDialog } from '@/components/reports/ReportDialog'
+// Pulls in CodeMirror for the markdown preview — keep it out of the board's chunk.
+const ReportDialog = lazy(() =>
+  import('@/components/reports/ReportDialog').then(m => ({ default: m.ReportDialog }))
+)
 import { SyncPanelExports } from '@/components/sync/SyncPanel'
 import { useTasks, useUpdateTask, useReorderTasks, useCreateTask, type Task } from '@/hooks/useTasks'
 import { useTerminalStatus } from '@/hooks/useTerminal'
@@ -280,7 +283,9 @@ function BacklogSubHeader({ count, headerExtra, children }: { count: number; hea
   )
 }
 
-function SortableTaskItem({ task, projectName, projectPath, onEdit, onView, onAiResolve }: { task: Task; projectName?: string; projectPath?: string; onEdit: (task: Task) => void; onView: (task: Task) => void; onAiResolve?: (task: Task) => void }) {
+// Memoized: useSortable rebuilds `listeners` on every render, so without this
+// each poll would re-render every card through the drag wrapper.
+const SortableTaskItem = memo(function SortableTaskItem({ task, projectName, projectPath, onEdit, onView, onAiResolve }: { task: Task; projectName?: string; projectPath?: string; onEdit: (task: Task) => void; onView: (task: Task) => void; onAiResolve?: (task: Task) => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: task.id,
     data: { task },
@@ -309,7 +314,7 @@ function SortableTaskItem({ task, projectName, projectPath, onEdit, onView, onAi
       />
     </div>
   )
-}
+})
 
 export function TaskBoard({ projectId, projectName, projectPath, milestoneId, onMilestoneChange, onOpenSettings }: TaskBoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId, milestoneId)
@@ -855,13 +860,17 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
         onOpenChange={setBulkImportOpen}
       />
 
-      <ReportDialog
-        projectId={projectId}
-        projectName={projectName}
-        milestoneId={milestoneId}
-        open={reportOpen}
-        onOpenChange={setReportOpen}
-      />
+      {reportOpen && (
+        <Suspense fallback={null}>
+          <ReportDialog
+            projectId={projectId}
+            projectName={projectName}
+            milestoneId={milestoneId}
+            open={reportOpen}
+            onOpenChange={setReportOpen}
+          />
+        </Suspense>
+      )}
 
       {csvDiff && (
         <CsvReviewDialog

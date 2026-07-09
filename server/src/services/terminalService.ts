@@ -170,6 +170,8 @@ export function killSession(id: string): boolean {
     session.pty.kill();
   } catch {}
   sessions.delete(id);
+  clearQueue(id);
+  pendingResizes.delete(id);
   return true;
 }
 
@@ -222,63 +224,207 @@ export function listAiSessions(): Omit<TerminalSession, 'pty'>[] {
   return list;
 }
 
-export function writeToSession(id: string, data: string): boolean {
-  const session = sessions.get(id);
-  if (!session) return false;
-  try {
-    session.pty.write(data);
-  } catch { return false; }
-  return true;
+// ── PTY write queue ───────────────────────────────────────────────────────
+//
+// Every byte destined for a PTY goes through a per-session FIFO. Two reasons:
+//
+// 1. ConPTY on Windows silently drops input when a single write exceeds its
+//    buffer, so large payloads (clipboard pastes, injected prompts) must be
+//    split and paced.
+// 2. Without a queue, a paced write and a plain keystroke write can interleave
+//    mid-sequence — the keystroke lands between two chunks of a paste and
+//    corrupts it. The FIFO guarantees bytes reach the PTY in submission order.
+
+interface QueuedChunk {
+  data: string;
+  /** Pause before writing the NEXT chunk (ms). */
+  delayAfter: number;
+  /** Called once this chunk has been written. */
+  onWritten?: () => void;
+}
+
+interface WriteQueue {
+  chunks: QueuedChunk[];
+  draining: boolean;
+  timer?: NodeJS.Timeout;
+}
+
+const writeQueues = new Map<string, WriteQueue>();
+
+const CHUNK_SIZE = 512;
+const CHUNK_DELAY = 6;
+
+function isHighSurrogate(code: number): boolean {
+  return code >= 0xd800 && code <= 0xdbff;
 }
 
 /**
- * Write large data to a PTY session in small chunks to avoid ConPTY buffer
- * overflow on Windows. Each chunk is written with a small delay. After all
- * chunks are delivered a final `\r` (Enter) is sent separately to ensure it
- * is not lost if the last data chunk was near the buffer boundary.
+ * Split `data` into chunks of at most `size` UTF-16 code units without ever
+ * cutting through:
+ *
+ *   - a surrogate pair (would emit a lone surrogate → mojibake at the PTY), or
+ *   - an ANSI escape sequence (a split `\x1b[201~` end-of-paste marker leaves
+ *     Claude CLI stuck in bracketed-paste mode and swallows the prompt).
+ *
+ * When a single escape sequence is longer than `size` the chunk is allowed to
+ * grow past `size` rather than break the sequence — correctness beats the
+ * buffer-size heuristic.
+ */
+export function safeChunks(data: string, size = CHUNK_SIZE): string[] {
+  if (data.length <= size) return data.length ? [data] : [];
+
+  const chunks: string[] = [];
+  let start = 0;
+
+  while (start < data.length) {
+    let end = Math.min(start + size, data.length);
+
+    if (end < data.length) {
+      // Never leave a high surrogate as the last code unit of a chunk.
+      if (isHighSurrogate(data.charCodeAt(end - 1))) end--;
+
+      // Find an escape sequence that straddles the boundary and pull `end`
+      // back to its start, so it travels whole in the next chunk.
+      const escStart = data.lastIndexOf('\x1b', end - 1);
+      if (escStart >= start) {
+        const seqEnd = escapeSequenceEnd(data, escStart);
+        if (seqEnd > end) {
+          // The sequence continues past the boundary.
+          end = escStart > start ? escStart : Math.min(seqEnd, data.length);
+        }
+      }
+    }
+
+    chunks.push(data.slice(start, end));
+    start = end;
+  }
+
+  return chunks;
+}
+
+/**
+ * Index just past the end of the escape sequence starting at `i`, or
+ * `data.length` when the sequence is still incomplete in this buffer.
+ */
+function escapeSequenceEnd(data: string, i: number): number {
+  const introducer = data[i + 1];
+  if (introducer === undefined) return data.length;
+
+  // CSI (`\x1b[`) and the paste markers: parameters, then a final byte 0x40–0x7E.
+  if (introducer === '[') {
+    for (let j = i + 2; j < data.length; j++) {
+      const c = data.charCodeAt(j);
+      if (c >= 0x40 && c <= 0x7e) return j + 1;
+    }
+    return data.length;
+  }
+
+  // OSC (`\x1b]`) runs until BEL or ST (`\x1b\\`).
+  if (introducer === ']') {
+    for (let j = i + 2; j < data.length; j++) {
+      if (data[j] === '\x07') return j + 1;
+      if (data[j] === '\x1b' && data[j + 1] === '\\') return j + 2;
+    }
+    return data.length;
+  }
+
+  // Everything else (`\x1bP`, `\x1bO…`, two-byte escapes) — assume two chars.
+  return i + 2;
+}
+
+function enqueueChunks(id: string, chunks: QueuedChunk[]): boolean {
+  if (!sessions.has(id)) return false;
+  if (chunks.length === 0) return true;
+
+  let queue = writeQueues.get(id);
+  if (!queue) {
+    queue = { chunks: [], draining: false };
+    writeQueues.set(id, queue);
+  }
+  queue.chunks.push(...chunks);
+  if (!queue.draining) drainQueue(id);
+  return true;
+}
+
+function drainQueue(id: string): void {
+  const queue = writeQueues.get(id);
+  if (!queue) return;
+
+  const session = sessions.get(id);
+  if (!session) {
+    writeQueues.delete(id);
+    return;
+  }
+
+  const chunk = queue.chunks.shift();
+  if (!chunk) {
+    queue.draining = false;
+    writeQueues.delete(id);
+    return;
+  }
+
+  queue.draining = true;
+  try {
+    session.pty.write(chunk.data);
+  } catch {
+    writeQueues.delete(id);
+    return;
+  }
+  chunk.onWritten?.();
+
+  if (queue.chunks.length === 0) {
+    queue.draining = false;
+    writeQueues.delete(id);
+    return;
+  }
+  queue.timer = setTimeout(() => drainQueue(id), chunk.delayAfter);
+}
+
+function clearQueue(id: string): void {
+  const queue = writeQueues.get(id);
+  if (!queue) return;
+  if (queue.timer) clearTimeout(queue.timer);
+  writeQueues.delete(id);
+}
+
+/** Write data verbatim, preserving order against any in-flight paced write. */
+export function writeToSession(id: string, data: string): boolean {
+  if (!sessions.has(id)) return false;
+  // Short input (keystrokes) still goes through the queue so it can never
+  // land in the middle of a paste that is currently being drained.
+  return enqueueChunks(id, safeChunks(data).map(data => ({ data, delayAfter: CHUNK_DELAY })));
+}
+
+/**
+ * Write a large payload to a PTY, paced to survive ConPTY's input buffer.
+ * `sendEnter` submits a trailing `\r` after the payload has fully landed —
+ * Claude CLI needs a beat to render a big bracketed paste before it will
+ * accept the Enter that submits it.
  */
 export function writeChunked(
   id: string,
   data: string,
-  { chunkSize = 256, chunkDelay = 20, sendEnter = true }: { chunkSize?: number; chunkDelay?: number; sendEnter?: boolean } = {},
+  {
+    chunkSize = CHUNK_SIZE,
+    chunkDelay = CHUNK_DELAY,
+    sendEnter = true,
+    onDone,
+  }: { chunkSize?: number; chunkDelay?: number; sendEnter?: boolean; onDone?: () => void } = {},
 ): boolean {
-  const session = sessions.get(id);
-  if (!session) return false;
+  if (!sessions.has(id)) return false;
 
-  const chunks: string[] = [];
-  for (let i = 0; i < data.length; i += chunkSize) {
-    chunks.push(data.substring(i, i + chunkSize));
+  const parts = safeChunks(data, chunkSize);
+  const chunks: QueuedChunk[] = parts.map(part => ({ data: part, delayAfter: chunkDelay }));
+
+  if (sendEnter) {
+    // Give the CLI time to finish rendering the paste before Enter arrives.
+    if (chunks.length > 0) chunks[chunks.length - 1].delayAfter = 500;
+    chunks.push({ data: '\r', delayAfter: chunkDelay, onWritten: onDone });
+  } else if (chunks.length > 0) {
+    chunks[chunks.length - 1].onWritten = onDone;
   }
 
-  let index = 0;
-  function writeNext() {
-    const s = sessions.get(id);
-    if (!s) return; // session was killed
-    if (index >= chunks.length) {
-      if (sendEnter) {
-        // Claude CLI needs time to process the bracketed paste before
-        // accepting Enter. On Windows/ConPTY large pastes can take a
-        // while to render, so we wait 500ms then send Enter.
-        setTimeout(() => {
-          const s2 = sessions.get(id);
-          if (s2) {
-            try { s2.pty.write('\r'); } catch {}
-          }
-        }, 500);
-      }
-      return;
-    }
-    try { s.pty.write(chunks[index]); } catch { return; }
-    index++;
-    if (index < chunks.length) {
-      setTimeout(writeNext, chunkDelay);
-    } else {
-      writeNext(); // last chunk — proceed to Enter immediately
-    }
-  }
-
-  writeNext();
-  return true;
+  return enqueueChunks(id, chunks);
 }
 
 /**
@@ -389,37 +535,35 @@ function sendPromptWithRetry(
   // Wrap in bracketed paste markers so Claude CLI treats the entire
   // prompt as a single paste event instead of interpreting each \n as Enter
   const pasteData = '\x1b[200~' + prompt + '\x1b[201~';
-  writeChunked(sessionId, pasteData, { sendEnter: true });
 
-  // Estimate how long the chunked write takes:
-  // (chunks * 20ms) + 500ms for Enter
-  const chunks = Math.ceil(pasteData.length / 256);
-  const writeTime = (chunks * 20) + 500 + 200; // +200ms margin
+  // The queue tells us exactly when the trailing Enter reached the PTY, so we
+  // no longer have to guess the write duration from the payload size.
+  writeChunked(sessionId, pasteData, {
+    sendEnter: true,
+    onDone: () => {
+      if (!sessions.has(sessionId)) { onDone(); return; }
 
-  // After the write completes, verify that the CLI started processing
-  // by checking if new output appeared.
-  setTimeout(() => {
-    if (!sessions.has(sessionId)) { onDone(); return; }
+      let gotOutput = false;
+      const verifyDisposable = session.pty.onData(() => { gotOutput = true; });
 
-    let gotOutput = false;
-    const verifyDisposable = session.pty.onData(() => { gotOutput = true; });
+      setTimeout(() => {
+        try { verifyDisposable.dispose(); } catch {}
 
-    setTimeout(() => {
-      try { verifyDisposable.dispose(); } catch {}
-
-      if (gotOutput || attempt >= MAX_RETRIES) {
-        // Success (or exhausted retries) — we're done
-        onDone();
-      } else {
-        // No output detected — CLI may not have received the prompt. Retry.
-        sendPromptWithRetry(sessionId, prompt, attempt + 1, onDone);
-      }
-    }, VERIFY_TIMEOUT);
-  }, writeTime);
+        if (gotOutput || attempt >= MAX_RETRIES) {
+          // Success (or exhausted retries) — we're done
+          onDone();
+        } else {
+          // No output detected — CLI may not have received the prompt. Retry.
+          sendPromptWithRetry(sessionId, prompt, attempt + 1, onDone);
+        }
+      }, VERIFY_TIMEOUT);
+    },
+  });
 }
 
 // Clean up all sessions on server shutdown
 function cleanupAll() {
+  for (const id of sessions.keys()) clearQueue(id);
   for (const session of sessions.values()) {
     try { session.pty.kill(); } catch {}
   }

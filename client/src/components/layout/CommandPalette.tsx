@@ -37,7 +37,8 @@ export function CommandPalette() {
   const navigate = useNavigate()
   const { openTab } = useTabs()
   const { data: projects } = useProjects()
-  const { data: tasks } = useAllTasks()
+  // Same as GlobalSearch: always mounted, only needs data while open.
+  const { data: tasks } = useAllTasks({ enabled: open })
 
   // Listen for Ctrl+K / Cmd+K
   useEffect(() => {

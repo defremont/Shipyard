@@ -1,5 +1,5 @@
 import { resolve, dirname } from 'path';
-import { promises as fsp } from 'fs';
+import { promises as fsp, appendFileSync, mkdirSync } from 'fs';
 import { DATA_DIR } from './dataDir.js';
 
 export type LogLevel = 'info' | 'warn' | 'error';
@@ -21,15 +21,53 @@ const LOG_FILE = resolve(DATA_DIR, 'server.log');
 let entries: LogEntry[] = [];
 let nextId = 1;
 
-/** Append a single JSON line to the log file (fire-and-forget). */
-async function appendToFile(entry: LogEntry): Promise<void> {
+// Buffered file persistence. Every task mutation logs at least once, so a
+// syscall per entry (plus a redundant mkdir) turns a bulk action into hundreds
+// of tiny writes. Entries are batched and flushed on the next tick.
+const FLUSH_DELAY_MS = 200;
+const MAX_BUFFERED = 64;
+
+let pendingLines: string[] = [];
+let flushTimer: NodeJS.Timeout | undefined;
+let logDirReady: Promise<unknown> | undefined;
+
+async function flushToFile(): Promise<void> {
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = undefined;
+  }
+  if (pendingLines.length === 0) return;
+
+  const payload = pendingLines.join('');
+  pendingLines = [];
   try {
-    await fsp.mkdir(dirname(LOG_FILE), { recursive: true });
-    await fsp.appendFile(LOG_FILE, JSON.stringify(entry) + '\n', 'utf-8');
+    logDirReady ??= fsp.mkdir(dirname(LOG_FILE), { recursive: true });
+    await logDirReady;
+    await fsp.appendFile(LOG_FILE, payload, 'utf-8');
   } catch {
     // Can't log the logging failure — just drop it
   }
 }
+
+/** Queue a JSON line for the log file (fire-and-forget). */
+function appendToFile(entry: LogEntry): void {
+  pendingLines.push(JSON.stringify(entry) + '\n');
+  if (pendingLines.length >= MAX_BUFFERED) {
+    void flushToFile();
+    return;
+  }
+  flushTimer ??= setTimeout(() => { void flushToFile(); }, FLUSH_DELAY_MS);
+}
+
+// Don't lose the tail of the log when the server stops. Must be synchronous —
+// 'exit' handlers can't await.
+process.on('exit', () => {
+  if (pendingLines.length === 0) return;
+  try {
+    mkdirSync(dirname(LOG_FILE), { recursive: true });
+    appendFileSync(LOG_FILE, pendingLines.join(''), 'utf-8');
+  } catch { /* best effort */ }
+});
 
 /** Load persisted entries on startup (last MAX_ENTRIES lines). */
 export async function initLogs(): Promise<void> {
@@ -133,6 +171,13 @@ export function getStats(): { total: number; errors: number; warnings: number; b
 export async function clearLogs(): Promise<void> {
   entries = [];
   nextId = 1;
+  // Drop anything still buffered, or it would be appended back after the
+  // truncate and resurrect the logs the user just cleared.
+  pendingLines = [];
+  if (flushTimer) {
+    clearTimeout(flushTimer);
+    flushTimer = undefined;
+  }
   try {
     await fsp.writeFile(LOG_FILE, '', 'utf-8');
   } catch { /* ignore */ }

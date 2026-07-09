@@ -58,6 +58,28 @@ function credentials(config: SyncConfig): { apiKey: string; token: string } {
   return { apiKey, token };
 }
 
+// Trello allows ~100 requests per 10s per token. Pushing a board sequentially
+// is slow, pushing it wide-open gets us throttled — so cap concurrency and
+// back off on 429.
+const MAX_CONCURRENT_REQUESTS = 6;
+const MAX_RETRIES = 3;
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/** Run `worker` over `items` with at most `limit` in flight, preserving order. */
+async function mapLimit<T, R>(items: T[], limit: number, worker: (item: T, index: number) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 async function trelloRequest<T = any>(
   config: SyncConfig,
   path: string,
@@ -71,8 +93,8 @@ async function trelloRequest<T = any>(
   params.set('token', token);
   if (query) {
     for (const [k, v] of Object.entries(query)) {
-      if (v === undefined || v === null) continue;
-      params.set(k, String(v));
+      if (v === undefined) continue;
+      params.set(k, v === null ? '' : String(v));
     }
   }
   const url = `${BASE}${path}?${params.toString()}`;
@@ -83,15 +105,28 @@ async function trelloRequest<T = any>(
     init.body = JSON.stringify(body);
   }
 
-  const res = await fetch(url, init);
-  const text = await res.text();
-  let data: any = text;
-  try { data = JSON.parse(text); } catch { /* keep text */ }
-  if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(url, init);
+    const text = await res.text();
+    let data: any = text;
+    try { data = JSON.parse(text); } catch { /* keep text */ }
+
+    if (res.ok) return data as T;
+
+    // 429 = rate limited, 5xx = transient. Honour Retry-After when present.
+    const retryable = res.status === 429 || res.status >= 500;
+    if (retryable && attempt < MAX_RETRIES) {
+      const retryAfter = Number(res.headers.get('retry-after'));
+      const delay = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 500 * 2 ** attempt;
+      await sleep(delay);
+      continue;
+    }
+
     const message = typeof data === 'string' ? data : data?.message || `Status ${res.status}`;
     throw new Error(`Trello: ${message}`);
   }
-  return data as T;
 }
 
 export async function testConnection(config: SyncConfig): Promise<{ ok: boolean; message: string }> {
@@ -194,16 +229,134 @@ function renderDesc(task: Task): string {
   return desc + prompt;
 }
 
-interface RemoteCardSummary {
+// ── Card ordering ─────────────────────────────────────────────────────────
+//
+// Trello can only auto-sort a list by creation date or alphabetically, and
+// Shipyard's agent creates a whole milestone's cards within the same second —
+// so creation order carries no information. We therefore own each card's `pos`
+// and rewrite it on every push:
+//
+//   Done         → most recently completed first
+//   In Progress  → most recently started first
+//   To Do/Backlog→ the Shipyard kanban order (priority, then manual order)
+//
+// The result is a board that reads correctly the moment it's opened, with no
+// sort setting to change — which is what makes it shareable with a client.
+
+const POS_STEP = 1024;
+
+const PRIORITY_RANK: Record<TaskPriority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+
+/** Epoch ms, or 0 when absent/unparseable — keeps sorts total and stable. */
+function timeOf(value?: string): number {
+  if (!value) return 0;
+  const t = Date.parse(value);
+  return Number.isFinite(t) ? t : 0;
+}
+
+/** Newest-completed-first; tasks that predate `doneAt` fall back to updatedAt. */
+function byCompletedDesc(a: Task, b: Task): number {
+  return (timeOf(b.doneAt) || timeOf(b.updatedAt)) - (timeOf(a.doneAt) || timeOf(a.updatedAt));
+}
+
+function byStartedDesc(a: Task, b: Task): number {
+  return (timeOf(b.inProgressAt) || timeOf(b.updatedAt)) - (timeOf(a.inProgressAt) || timeOf(a.updatedAt));
+}
+
+function byKanbanOrder(a: Task, b: Task): number {
+  const p = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
+  return p !== 0 ? p : a.order - b.order;
+}
+
+function comparatorFor(status: TaskStatus): (a: Task, b: Task) => number {
+  if (status === 'done') return byCompletedDesc;
+  if (status === 'in_progress') return byStartedDesc;
+  return byKanbanOrder;
+}
+
+/** Desired Trello `pos` for every task, computed per list. */
+export function computePositions(tasks: Task[]): Map<string, number> {
+  const positions = new Map<string, number>();
+  for (const status of STATUS_ORDER) {
+    const inList = tasks.filter(t => t.status === status).sort(comparatorFor(status));
+    inList.forEach((task, i) => positions.set(task.id, (i + 1) * POS_STEP));
+  }
+  return positions;
+}
+
+// ── Card payloads ─────────────────────────────────────────────────────────
+
+interface RemoteCard {
   id: string;
   name: string;
+  desc: string;
+  idList: string;
+  idLabels: string[];
+  pos: number;
+  due: string | null;
+  dueComplete: boolean;
   dateLastActivity: string;
   closed?: boolean;
 }
 
+const REMOTE_CARD_FIELDS = 'name,desc,idList,idLabels,pos,due,dueComplete,dateLastActivity,closed';
+
+interface CardPayload {
+  name: string;
+  desc: string;
+  idList: string;
+  idLabels: string[];
+  pos: number;
+  /** Completion date, surfaced as Trello's date badge. Null on open cards. */
+  due: string | null;
+  dueComplete: boolean;
+  closed: false;
+}
+
+function desiredCard(task: Task, state: TrelloState, pos: number): CardPayload {
+  const completedAt = task.status === 'done' ? (task.doneAt || task.updatedAt) : null;
+  return {
+    name: task.title,
+    desc: renderDesc(task),
+    idList: state.listIds![task.status],
+    idLabels: [state.labelIds![task.priority]],
+    pos,
+    // Stamping `due` on completed cards gives every Done card a visible date
+    // badge and lets the board be sorted by it in the Trello UI.
+    due: completedAt,
+    dueComplete: completedAt !== null,
+    closed: false,
+  };
+}
+
+function sameLabels(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const set = new Set(a);
+  return b.every(id => set.has(id));
+}
+
+function sameDue(a: string | null, b: string | null): boolean {
+  if (!a || !b) return !a && !b;
+  return timeOf(a) === timeOf(b);
+}
+
+/** Fields of `desired` that differ from what Trello currently holds. */
+function diffCard(desired: CardPayload, remote: RemoteCard): Partial<CardPayload> {
+  const patch: Partial<CardPayload> = {};
+  if (desired.name !== remote.name) patch.name = desired.name;
+  if (desired.desc !== (remote.desc ?? '')) patch.desc = desired.desc;
+  if (desired.idList !== remote.idList) patch.idList = desired.idList;
+  if (!sameLabels(desired.idLabels, remote.idLabels ?? [])) patch.idLabels = desired.idLabels;
+  if (desired.pos !== remote.pos) patch.pos = desired.pos;
+  if (!sameDue(desired.due, remote.due ?? null)) patch.due = desired.due;
+  if (desired.dueComplete !== !!remote.dueComplete) patch.dueComplete = desired.dueComplete;
+  if (remote.closed) patch.closed = false;
+  return patch;
+}
+
 interface UpsertContext {
-  byId: Map<string, RemoteCardSummary>;
-  byTitle: Map<string, RemoteCardSummary>;
+  byId: Map<string, RemoteCard>;
+  byTitle: Map<string, RemoteCard>;
   adoptedRemoteIds: Set<string>;
 }
 
@@ -215,10 +368,9 @@ async function upsertCard(
   config: SyncConfig,
   state: TrelloState,
   task: Task,
+  pos: number,
   ctx: UpsertContext,
-): Promise<{ cardId: string; skipped: boolean }> {
-  const listId = state.listIds![task.status];
-  const labelId = state.labelIds![task.priority];
+): Promise<{ cardId: string; changed: boolean }> {
   let existingCardId = state.cardMap?.[task.id];
 
   // If cardMap points at a card that no longer exists on the board, drop the
@@ -240,37 +392,37 @@ async function upsertCard(
     }
   }
 
-  const payload = {
-    name: task.title,
-    desc: renderDesc(task),
-    idList: listId,
-    idLabels: [labelId],
-    closed: false,
-  };
+  const desired = desiredCard(task, state, pos);
 
   if (existingCardId) {
     const remote = ctx.byId.get(existingCardId);
-    // Skip the PUT when Trello has a newer modification than our local
-    // task — otherwise this push would clobber whatever the user just
-    // changed on Trello. The next pull will reconcile their change.
     if (remote) {
-      const remoteTs = new Date(remote.dateLastActivity).getTime();
-      const localTs = new Date(task.updatedAt).getTime();
-      if (Number.isFinite(remoteTs) && Number.isFinite(localTs) && remoteTs > localTs) {
-        return { cardId: existingCardId, skipped: true };
+      let patch = diffCard(desired, remote);
+
+      // Trello holds a newer edit than our local task: don't clobber the
+      // user's change — the next pull reconciles it. Position is the one
+      // exception: it's derived from Shipyard state, not user-authored, so
+      // reordering stays correct even between content syncs.
+      if (timeOf(remote.dateLastActivity) > timeOf(task.updatedAt)) {
+        patch = patch.pos !== undefined ? { pos: patch.pos } : {};
       }
-    }
-    try {
-      await trelloRequest(config, `/cards/${existingCardId}`, 'PUT', undefined, payload);
-      return { cardId: existingCardId, skipped: false };
-    } catch (err: any) {
-      if (!/not found|404/i.test(String(err?.message))) throw err;
-      // Card vanished between our fetch and PUT — fall through to create.
+
+      // Nothing to say — skip the round-trip entirely. This is what keeps a
+      // debounced auto-push from re-PUTting every card on the board.
+      if (Object.keys(patch).length === 0) return { cardId: existingCardId, changed: false };
+
+      try {
+        await trelloRequest(config, `/cards/${existingCardId}`, 'PUT', undefined, patch);
+        return { cardId: existingCardId, changed: true };
+      } catch (err: any) {
+        if (!/not found|404/i.test(String(err?.message))) throw err;
+        // Card vanished between our fetch and PUT — fall through to create.
+      }
     }
   }
 
-  const card = await trelloRequest<{ id: string }>(config, '/cards', 'POST', undefined, payload);
-  return { cardId: card.id, skipped: false };
+  const card = await trelloRequest<{ id: string }>(config, '/cards', 'POST', undefined, desired);
+  return { cardId: card.id, changed: true };
 }
 
 export interface PushResult {
@@ -285,18 +437,18 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
   const milestoneName = config.settings.milestoneName as string | undefined;
   const state = await ensureBoard(config, projectName, milestoneName);
 
-  // Snapshot remote state once at the start of the push so we can: (a) skip
-  // PUTs when Trello has fresher data than us, (b) fall back to title
-  // matching when cardMap is stale, and (c) detect cards already deleted in
-  // Trello before we PUT them.
-  const remoteCards = await trelloRequest<RemoteCardSummary[]>(
+  // Snapshot remote state once at the start of the push so we can: (a) send
+  // only the fields that actually changed, (b) fall back to title matching
+  // when cardMap is stale, and (c) detect cards already deleted in Trello
+  // before we PUT them.
+  const remoteCards = await trelloRequest<RemoteCard[]>(
     config,
     `/boards/${state.boardId}/cards`,
     'GET',
-    { fields: 'name,dateLastActivity,closed' },
+    { fields: REMOTE_CARD_FIELDS },
   );
-  const byId = new Map<string, RemoteCardSummary>();
-  const byTitle = new Map<string, RemoteCardSummary>();
+  const byId = new Map<string, RemoteCard>();
+  const byTitle = new Map<string, RemoteCard>();
   for (const c of remoteCards) {
     if (c.closed) continue;
     byId.set(c.id, c);
@@ -312,37 +464,45 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
   }
   const ctx: UpsertContext = { byId, byTitle, adoptedRemoteIds };
 
+  // Safe to fan out: upsertCard resolves title adoption synchronously, before
+  // its first await, so two tasks can never claim the same remote card.
+  const positions = computePositions(tasks);
   const nextMap: Record<string, string> = { ...(state.cardMap ?? {}) };
   const errors: string[] = [];
   let pushed = 0;
 
-  for (const task of tasks) {
+  await mapLimit(tasks, MAX_CONCURRENT_REQUESTS, async task => {
     try {
-      const { cardId } = await upsertCard(config, state, task, ctx);
+      const { cardId } = await upsertCard(config, state, task, positions.get(task.id) ?? POS_STEP, ctx);
       nextMap[task.id] = cardId;
       pushed++;
     } catch (err: any) {
       errors.push(`${task.title}: ${err?.message ?? 'failed'}`);
     }
-  }
+  });
 
   // Archive cards whose local task no longer exists. Only touch cards we
   // actually owned (in the old cardMap) — never archive cards we found on
   // the board but never linked to, since those may belong to the user.
   const liveIds = new Set(tasks.map(t => t.id));
+  const pushedCardIds = new Set(Object.values(nextMap));
+  const orphans: Array<[string, string]> = [];
   for (const [taskId, cardId] of Object.entries(state.cardMap ?? {})) {
     if (liveIds.has(taskId)) continue;
     // Skip archive if we re-adopted this card under a different local task
     // (rare but possible after id churn).
-    if (Object.values(nextMap).includes(cardId) && nextMap[taskId] !== cardId) {
+    if (pushedCardIds.has(cardId) && nextMap[taskId] !== cardId) {
       delete nextMap[taskId];
       continue;
     }
+    orphans.push([taskId, cardId]);
+  }
+  await mapLimit(orphans, MAX_CONCURRENT_REQUESTS, async ([taskId, cardId]) => {
     try {
       await trelloRequest(config, `/cards/${cardId}`, 'PUT', undefined, { closed: true });
     } catch { /* ignore */ }
     delete nextMap[taskId];
-  }
+  });
 
   await patchState(config.projectId, 'trello', config.milestoneId, { cardMap: nextMap });
 

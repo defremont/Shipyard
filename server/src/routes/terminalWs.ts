@@ -7,7 +7,6 @@ import {
   listSessions,
   listAiSessions,
   writeToSession,
-  writeChunked,
   resizeSession,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
@@ -15,6 +14,11 @@ import * as log from '../services/logService.js';
 
 // Track active WebSocket connections per session to prevent duplicate listeners
 const activeConnections = new Map<string, { socket: any; cleanup: () => void }>();
+
+// Output batching window. 8ms keeps input echo well under one frame at 60Hz
+// while collapsing a TUI redraw burst into a single WebSocket frame.
+const OUTPUT_FLUSH_MS = 8;
+const OUTPUT_FLUSH_BYTES = 64 * 1024;
 
 export async function terminalWsRoutes(app: FastifyInstance) {
   // REST: Check if integrated terminal is available
@@ -118,14 +122,40 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         try { existing.socket.close(1000, 'Replaced by new connection'); } catch {}
       }
 
-      // Register PTY listeners for this connection
-      const onData = session.pty.onData((data: string) => {
+      // Coalesce PTY output. A TUI like Claude CLI emits hundreds of tiny
+      // chunks per redraw; forwarding each as its own JSON frame costs a
+      // stringify + parse + xterm write per chunk and visibly stutters the
+      // terminal. Batching them into one frame per tick collapses that into a
+      // single write while keeping latency below a rendered frame.
+      let pending = '';
+      let flushTimer: NodeJS.Timeout | undefined;
+
+      const flush = () => {
+        flushTimer = undefined;
+        if (!pending) return;
+        const data = pending;
+        pending = '';
         if (socket.readyState === 1) {
           socket.send(JSON.stringify({ type: 'output', data }));
         }
+      };
+
+      const onData = session.pty.onData((data: string) => {
+        if (socket.readyState !== 1) return;
+        pending += data;
+        // Flush immediately once a batch grows large, so a `cat bigfile`
+        // streams instead of buffering into one giant frame.
+        if (pending.length >= OUTPUT_FLUSH_BYTES) {
+          if (flushTimer) clearTimeout(flushTimer);
+          flush();
+          return;
+        }
+        if (!flushTimer) flushTimer = setTimeout(flush, OUTPUT_FLUSH_MS);
       });
 
       const onExit = session.pty.onExit(({ exitCode }) => {
+        if (flushTimer) clearTimeout(flushTimer);
+        flush(); // don't lose the process's final output
         if (socket.readyState === 1) {
           socket.send(JSON.stringify({ type: 'exit', code: exitCode }));
         }
@@ -134,6 +164,7 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       });
 
       const cleanup = () => {
+        if (flushTimer) clearTimeout(flushTimer);
         onData.dispose();
         onExit.dispose();
       };
@@ -147,13 +178,11 @@ export async function terminalWsRoutes(app: FastifyInstance) {
           const msg = JSON.parse(typeof raw === 'string' ? raw : raw.toString());
           switch (msg.type) {
             case 'input':
-              // Large inputs (e.g. clipboard paste) must be chunked to avoid
-              // ConPTY buffer overflow on Windows which silently drops data.
-              if (msg.data.length > 256) {
-                writeChunked(sessionId, msg.data, { sendEnter: false });
-              } else {
-                session.pty.write(msg.data);
-              }
+              // writeToSession splits oversized payloads (clipboard pastes) at
+              // safe boundaries and serializes them against other writes, so
+              // ConPTY never sees a buffer-busting write and a keystroke can't
+              // land in the middle of a paste.
+              writeToSession(sessionId, msg.data);
               break;
             case 'binary':
               // Binary data from TUI apps (mouse reports, etc.)

@@ -34,6 +34,11 @@ export async function getStatus(projectPath: string): Promise<StatusResult> {
   return git.status();
 }
 
+export async function getRemotes(projectPath: string) {
+  const git = getGit(projectPath);
+  return git.getRemotes(true);
+}
+
 export async function getDiff(projectPath: string, file?: string, staged = false): Promise<string> {
   const git = getGit(projectPath);
   const args = staged ? ['--cached'] : [];

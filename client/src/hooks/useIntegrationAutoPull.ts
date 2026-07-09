@@ -16,6 +16,8 @@ import { api } from '@/lib/api'
 
 const INTERVAL_MS = 30_000
 const running = new Set<string>()
+// Integrations that have completed at least one pull in this session.
+const primed = new Set<string>()
 
 export function useIntegrationAutoPull() {
   const queryClient = useQueryClient()
@@ -26,6 +28,8 @@ export function useIntegrationAutoPull() {
 
     const tick = async () => {
       if (cancelled.current) return
+      // Nobody is looking — the next tick after the tab is restored will catch up.
+      if (document.hidden) return
       try {
         const { integrations } = await api.listIntegrations()
         const active = integrations.filter(i => i.enabled)
@@ -41,12 +45,14 @@ export function useIntegrationAutoPull() {
             const created = result.created ?? 0
             const updated = result.updated ?? 0
             const pulled = result.pulled ?? 0
-            // Invalidate when the local task store changed (created or
-            // updated) or when the remote returned tasks at all — this
-            // ensures the kanban refreshes after the very first pull from
-            // a freshly-linked board even if all rows happened to match by
-            // title and produced no new local entries.
-            if (result.success && (created > 0 || updated > 0 || pulled > 0)) {
+            // Invalidate when the local task store actually changed. The very
+            // first pull of a freshly-linked board also refreshes even if
+            // every row matched by title and produced no new local entries —
+            // but only that first time, otherwise a board that never changes
+            // would invalidate every task query every 30s forever.
+            const firstPull = !primed.has(key)
+            primed.add(key)
+            if (result.success && (created > 0 || updated > 0 || (firstPull && pulled > 0))) {
               queryClient.invalidateQueries({ queryKey: ['tasks', i.projectId] })
               queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
             }

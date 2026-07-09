@@ -132,15 +132,60 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - GitPanel mostra tabs para selecionar sub-repo quando ha mais de um
 - Query keys incluem `subrepo`: `['git-status', projectId, subrepo]`
 
+### MCP (servidor de ferramentas para agentes)
+- `mcpServer.ts` expoe 24 tools. Cobertura: projetos, milestones (CRUD),
+  tarefas (incl. `create_tasks`/`bulk_update_tasks`/`bulk_delete_tasks`/`reorder_tasks`),
+  git (status/log/diff) e sync (`list_sync_integrations`/`sync_push`/`sync_pull`)
+- **Toda mutacao de task no MCP DEVE chamar `afterTaskMutation(projectId)`**
+  (= `triggerAutoSync`). Sem isso o agente altera tarefas e o Trello/ClickUp
+  fica desatualizado ate o usuario mexer na UI
+- `update_task`/`bulk_update_tasks` aceitam `milestoneId` (`'default'` = General)
+- Tools read-only levam `annotations.readOnlyHint`; destrutivas, `destructiveHint`
+- Ao adicionar tool: registrar em `MCP_TOOLS` **e** no `handleToolCall`, e atualizar
+  a lista de permissoes da tela de consentimento OAuth em `routes/mcp.ts`
+
 ### Cache e Invalidacao (react-query)
-- refetchInterval: 15s (tasks), 30s (projects), 5s (git status)
+- `staleTime` default: 3s (`main.tsx`) — evita refetch de tudo a cada foco de janela
+- refetchInterval: 5s (git status, tasks do board), 30s (`['tasks','all']`, projects)
+- `['tasks','all']` le TODOS os arquivos de tasks — e a query mais cara. Componentes
+  sempre montados (GlobalSearch, CommandPalette) passam `useAllTasks({ enabled: open })`
 - Mutations de tarefas DEVEM invalidar `['tasks', projectId]` E `['tasks', 'all']`
+- Auto-pull so invalida quando houve mudanca real (created/updated), nunca a cada tick
+
+### Performance (regras que nao podem regredir)
+- `syncStore`: leituras vem do cache em memoria (`cachedStore`); o processo e o
+  unico escritor. Nunca voltar a ler o JSON do disco por chamada
+- `taskStore`: caminho de leitura NAO escreve. O backfill de `number` persiste
+  uma unica vez, sob lock, e retorna a lista ja autoritativa
+- `projectDiscovery`: refresh de git a cada 15s usa `gitService` (instancia
+  compartilhada por repo = fila serializada). `status.current` ja da o branch —
+  nao chamar `git.branch()`. Remote URL e sub-repos sao cacheados
+- `logService`: escritas em disco sao bufferizadas (flush 200ms / 64 linhas)
+- Componentes de lista (`TaskItem`, `SortableTaskItem`, `TaskRow`) sao `React.memo` —
+  o structural sharing do react-query mantem `task` estavel entre polls
+- Editor (CodeMirror), terminal (xterm) e markdown sao `lazy()`. **Nao** usar
+  `manualChunks`: agrupar vendors puxa modulos compartilhados para o entry chunk
 
 ### Terminais (multiplataforma)
 - **Windows**: `wt.exe` + `cmd.exe /k` (NAO bash — causa erro WSL)
 - **Linux**: `gnome-terminal --title --working-directory` + `bash -c "cmd; exec bash"`
 - **macOS**: `osascript` (Terminal.app)
 - Terminal integrado: xterm.js + node-pty (optional dep) + WebSocket
+
+### Terminal integrado — copiar/colar e performance
+- **Colar SEMPRE via `term.paste()`** (client). Ele converte `\n` → `\r` e aplica
+  os marcadores de bracketed paste (`\x1b[200~`…`\x1b[201~`) quando o programa os
+  pediu. Enviar o texto cru pelo WebSocket faz o Claude CLI ler cada `\n` como
+  Enter e submeter linha a linha
+- Botao direito: copia se ha selecao, senao cola. Botao do meio cola.
+  Com mouse tracking ligado (Claude CLI), selecionar exige **Shift**+arrastar
+- `safeChunks()` (server) nunca corta um par surrogate nem uma sequencia de escape.
+  Cortar `\x1b[201~` ao meio prende o CLI em bracketed-paste e engole o prompt
+- Toda escrita no PTY passa por uma **fila por sessao** — sem ela uma tecla
+  digitada cai no meio de um paste em andamento
+- Saida do PTY e agrupada por ~8ms antes de ir pro WebSocket (um redraw de TUI
+  gera centenas de chunks minusculos)
+- Renderer WebGL com fallback automatico para DOM (`attachRenderer`)
 
 ### AI Backend (CLI-first, padronizado)
 - `aiBackend.ts` e o UNICO ponto de entrada para features de IA server-side
@@ -194,6 +239,20 @@ sua propria sheet/board/list. O milestone "General" usa o id literal `'default'`
 - Creds globais em `providers[providerId]` (apiKey/token), config em `projects[id][provider][milestoneId]`
 - Push: server-side debounce 2.5s em mutations de task — empurra TODOS os milestones
   habilitados do projeto, cada um para sua propria board/list
+
+**Ordenacao dos cards no Trello** (`computePositions` em trelloSync.ts):
+- O Trello so ordena lista por data de criacao ou alfabeticamente, e o agente MCP
+  cria as tarefas todas no mesmo segundo — logo a ordem de criacao nao diz nada.
+  Por isso o Shipyard controla o `pos` de cada card e o reescreve a cada push:
+  - **Done** → concluidas mais recentes no topo (`doneAt` desc)
+  - **In Progress** → iniciadas mais recentes no topo (`inProgressAt` desc)
+  - **To Do / Backlog** → ordem do kanban (prioridade, depois `order`)
+- Cards `done` recebem `due = doneAt` + `dueComplete: true` → badge de data visivel
+  no card (e permite ordenar por data no proprio Trello)
+- Push envia **so os campos que mudaram** (diff contra snapshot do board). Se nada
+  mudou, zero requests. Requisicoes em paralelo (limite 6) com retry/backoff em 429
+- Edicao feita no Trello nao e sobrescrita (comparamos `dateLastActivity` vs
+  `updatedAt`) — a unica excecao e `pos`, que e derivado do estado do Shipyard
 - Pull: cliente faz merge a cada 30s via `useIntegrationAutoPull` (key inclui milestoneId)
 - Tasks novas vindas do remoto recebem `milestoneId` automaticamente no merge
 - Board/list e nomeada `Shipyard · {project} · {milestone}` (ou so `Shipyard · {project}`

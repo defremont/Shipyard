@@ -292,6 +292,8 @@ export function useAutoSync(projectId: string, milestoneId?: string) {
     const syncOpts: SheetSyncOptions = { includePrompt: config.syncPrompt !== false }
 
     const silentMerge = async () => {
+      // Don't poll a hidden tab — the next tick after it's restored catches up.
+      if (document.hidden) return
       const guardKey = `${projectId}:${mid}`
       if (Date.now() - (lastPushAt.get(guardKey) ?? 0) < PUSH_GUARD_MS) return
       if (Date.now() - getAutoSyncLastPushAt() < PUSH_GUARD_MS) return

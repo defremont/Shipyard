@@ -22,14 +22,24 @@ export interface Task {
   subtasks?: { id: string; title: string; done: boolean }[]
 }
 
-export function useAllTasks() {
+/**
+ * Cross-project task list. This is the most expensive endpoint (it reads every
+ * project's task file) and it has many consumers, including components that
+ * stay mounted on every page — so it polls slowly. The board's own
+ * `useTasks(projectId)` is what stays at 5s. Mutations invalidate this key, so
+ * anything the user does still shows up immediately.
+ *
+ * Pass `enabled: false` from components that only need the data while open.
+ */
+export function useAllTasks(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['tasks', 'all'],
     queryFn: async () => {
       const data = await api.getAllTasks()
       return data.tasks as Task[]
     },
-    refetchInterval: 5000,
+    enabled: options?.enabled ?? true,
+    refetchInterval: 30000,
   })
 }
 

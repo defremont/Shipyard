@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
 import { useParams } from 'react-router-dom'
 import { TaskBoard } from '@/components/tasks/TaskBoard'
 import { useProjects, useUpdateProject, useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
@@ -7,7 +7,10 @@ import {
   GitBranch, Star, ExternalLink, Link2, Settings, Code2, LayoutList,
   Play, Monitor, FolderOpen, Sparkles,
 } from 'lucide-react'
-import { EditorPanel } from '@/components/editor/EditorPanel'
+// CodeMirror and its language modes only matter once the user opens a file.
+const EditorPanel = lazy(() =>
+  import('@/components/editor/EditorPanel').then(m => ({ default: m.EditorPanel }))
+)
 import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
@@ -364,16 +367,18 @@ export function Workspace() {
               onOpenSettings={openSettings}
             />
           ) : (
-            <EditorPanel
-              projectId={project.id}
-              tabs={editor.tabs}
-              activeTabPath={editor.activeTabPath}
-              onSelectTab={editor.setActiveTab}
-              onCloseTab={editor.closeTab}
-              onContentChange={editor.setContent}
-              onMarkSaved={editor.markSaved}
-              onInitContent={editor.initContent}
-            />
+            <Suspense fallback={null}>
+              <EditorPanel
+                projectId={project.id}
+                tabs={editor.tabs}
+                activeTabPath={editor.activeTabPath}
+                onSelectTab={editor.setActiveTab}
+                onCloseTab={editor.closeTab}
+                onContentChange={editor.setContent}
+                onMarkSaved={editor.markSaved}
+                onInitContent={editor.initContent}
+              />
+            </Suspense>
           )}
         </div>
       </div>

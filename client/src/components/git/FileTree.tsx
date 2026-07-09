@@ -4,7 +4,7 @@ import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { useStageFile, useUnstageFile, useDiscardFile } from '@/hooks/useGit'
 import { FileIcon } from '@/components/files/FileIcon'
-import { FilePreviewDialog } from '@/components/files/FilePreviewDialog'
+import { LazyFilePreviewDialog as FilePreviewDialog } from '@/components/files/LazyFilePreviewDialog'
 
 export interface ChangeEntry {
   file: string

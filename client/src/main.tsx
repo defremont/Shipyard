@@ -9,6 +9,11 @@ import './index.css'
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
+      // Without a staleTime, every Alt-Tab back into the app refetches every
+      // active query at once. Most of these are already on a poll, so a short
+      // freshness window collapses the focus stampede without making the UI
+      // feel stale.
+      staleTime: 3000,
       refetchOnWindowFocus: true,
       retry: 1,
     },

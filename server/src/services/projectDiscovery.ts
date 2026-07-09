@@ -3,6 +3,7 @@ import { join, basename, resolve } from 'path';
 import type { Project, ProjectsCache } from '../types/index.js';
 import { getSettings, saveSettings } from './settingsStore.js';
 import { DATA_DIR } from './dataDir.js';
+import * as gitService from './gitService.js';
 
 const CACHE_FILE = join(DATA_DIR, 'projects.json');
 
@@ -123,6 +124,43 @@ async function detectSubRepos(projectPath: string): Promise<string[]> {
   return subRepos;
 }
 
+// Remote URL and sub-repo layout change only when the user reconfigures the
+// repo, but the git status poll runs every 15s. Caching them turns each poll
+// from 4 git subprocesses + a directory scan into 2 subprocesses per project.
+// A full refreshProjects() clears both.
+const remoteUrlCache = new Map<string, string | undefined>();
+const subReposCache = new Map<string, string[]>();
+
+function clearGitCaches(): void {
+  remoteUrlCache.clear();
+  subReposCache.clear();
+}
+
+async function getRemoteUrl(projectPath: string): Promise<string | undefined> {
+  if (remoteUrlCache.has(projectPath)) return remoteUrlCache.get(projectPath);
+  let gitRemoteUrl: string | undefined;
+  try {
+    const remotes = await gitService.getRemotes(projectPath);
+    const origin = remotes.find(r => r.name === 'origin');
+    if (origin?.refs?.push) {
+      gitRemoteUrl = origin.refs.push
+        .replace(/\.git$/, '')
+        .replace(/^git@([^:]+):/, 'https://$1/')
+        .replace(/^ssh:\/\/git@([^/]+)\//, 'https://$1/');
+    }
+  } catch {}
+  remoteUrlCache.set(projectPath, gitRemoteUrl);
+  return gitRemoteUrl;
+}
+
+async function getSubRepos(projectPath: string): Promise<string[]> {
+  const cached = subReposCache.get(projectPath);
+  if (cached) return cached;
+  const subRepos = await detectSubRepos(projectPath);
+  subReposCache.set(projectPath, subRepos);
+  return subRepos;
+}
+
 async function detectGitInfo(projectPath: string): Promise<{
   isGitRepo: boolean; gitBranch?: string; gitDirty?: boolean;
   gitAhead?: number; gitBehind?: number;
@@ -133,7 +171,7 @@ async function detectGitInfo(projectPath: string): Promise<{
   const gitDir = join(projectPath, '.git');
   if (!(await fileExists(gitDir))) {
     // Check for sub-repos (subdirectories with their own .git)
-    const subRepos = await detectSubRepos(projectPath);
+    const subRepos = await getSubRepos(projectPath);
     if (subRepos.length > 0) {
       return { isGitRepo: false, subRepos };
     }
@@ -141,30 +179,21 @@ async function detectGitInfo(projectPath: string): Promise<{
   }
 
   try {
-    const { simpleGit } = await import('simple-git');
-    const git = simpleGit(projectPath);
-    const branchSummary = await git.branch();
-    const status = await git.status();
-    const log = await git.log({ maxCount: 1 }).catch(() => null);
-
-    let gitRemoteUrl: string | undefined;
-    try {
-      const remotes = await git.getRemotes(true);
-      const origin = remotes.find(r => r.name === 'origin');
-      if (origin?.refs?.push) {
-        gitRemoteUrl = origin.refs.push
-          .replace(/\.git$/, '')
-          .replace(/^git@([^:]+):/, 'https://$1/')
-          .replace(/^ssh:\/\/git@([^/]+)\//, 'https://$1/');
-      }
-    } catch {}
-
-    // Also check for sub-repos (subdirectories with their own .git)
-    const subRepos = await detectSubRepos(projectPath);
+    // Go through gitService so every command on this repo shares one
+    // SimpleGit instance — and therefore one task queue, which is what keeps
+    // concurrent reads from tripping over index.lock on Windows.
+    // `status.current` already carries the branch name, so a separate
+    // git.branch() call would be a wasted subprocess.
+    const [status, log, gitRemoteUrl, subRepos] = await Promise.all([
+      gitService.getStatus(projectPath),
+      gitService.getLog(projectPath, 1).catch(() => null),
+      getRemoteUrl(projectPath),
+      getSubRepos(projectPath),
+    ]);
 
     return {
       isGitRepo: true,
-      gitBranch: branchSummary.current,
+      gitBranch: status.current ?? undefined,
       gitDirty: !status.isClean(),
       gitAhead: status.ahead || 0,
       gitBehind: status.behind || 0,
@@ -357,6 +386,7 @@ export async function refreshGitStatus(): Promise<Project[]> {
 }
 
 export async function refreshProjects(): Promise<Project[]> {
+  clearGitCaches();
   const projects = await loadSelectedProjects();
   projectsCache = projects;
   await saveCache(projects, true);
@@ -380,8 +410,15 @@ export async function initProjectDiscovery(): Promise<void> {
     console.log(`Loaded ${projectsCache.length} projects`);
   });
 
-  // Lightweight git refresh every 15s (only updates git status fields)
+  // Lightweight git refresh every 15s (only updates git status fields).
+  // The guard keeps ticks from stacking when a slow repo makes one poll
+  // outlast the interval.
+  let refreshing = false;
   setInterval(() => {
-    refreshGitStatus().catch(() => {});
+    if (refreshing) return;
+    refreshing = true;
+    refreshGitStatus()
+      .catch(() => {})
+      .finally(() => { refreshing = false; });
   }, 15000);
 }

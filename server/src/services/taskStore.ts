@@ -101,45 +101,52 @@ function filterByMilestone(tasks: Task[], milestoneId?: string): Task[] {
   return tasks.filter(t => t.milestoneId === milestoneId);
 }
 
-export async function getTasks(projectId: string, milestoneId?: string): Promise<Task[]> {
-  const tasks = await readTasks(projectId);
+/** Repair fields that older task files may be missing. In-memory only. */
+function normalizeTasks(tasks: Task[], projectId: string): void {
   for (const t of tasks) {
     if (!t.projectId) t.projectId = projectId;
     if (!t.createdAt) t.createdAt = t.updatedAt || new Date().toISOString();
     if (t.order == null) t.order = 0;
   }
-  // Backfill numbers for tasks that don't have one yet — re-read inside the
-  // lock so we don't clobber a concurrent mutation with stale data.
-  if (backfillNumbers(tasks)) {
-    await withLock(projectId, async () => {
-      const fresh = await readTasks(projectId);
-      if (backfillNumbers(fresh)) await writeTasks(projectId, fresh);
-    });
-    return filterByMilestone(await readTasks(projectId), milestoneId);
-  }
+}
+
+async function readNormalized(projectId: string): Promise<Task[]> {
+  const tasks = await readTasks(projectId);
+  normalizeTasks(tasks, projectId);
+  return tasks;
+}
+
+/**
+ * Assign `number` to tasks created before numbering existed. This is a
+ * one-time migration per project: it persists under the lock and returns the
+ * authoritative list, so a read path never has to re-read what it just wrote.
+ */
+async function ensureNumbers(projectId: string, tasks: Task[]): Promise<Task[]> {
+  if (tasks.every(t => t.number)) return tasks;
+  return withLock(projectId, async () => {
+    // Re-read inside the lock so we don't clobber a concurrent mutation.
+    const fresh = await readNormalized(projectId);
+    if (backfillNumbers(fresh)) await writeTasks(projectId, fresh);
+    return fresh;
+  });
+}
+
+export async function getTasks(projectId: string, milestoneId?: string): Promise<Task[]> {
+  const tasks = await ensureNumbers(projectId, await readNormalized(projectId));
   return filterByMilestone(tasks, milestoneId);
 }
 
 export async function getAllTasks(): Promise<Task[]> {
   await ensureTasksDir();
   const { readdir: rd } = await import('fs/promises');
-  const files = await rd(TASKS_DIR);
-  const allTasks: Task[] = [];
-  for (const file of files) {
-    if (!file.endsWith('.json')) continue;
-    const projectId = file.replace('.json', '');
-    const tasks = await readTasks(projectId);
-    for (const t of tasks) {
-      if (!t.projectId) t.projectId = projectId;
-      if (!t.createdAt) t.createdAt = t.updatedAt || new Date().toISOString();
-      if (t.order == null) t.order = 0;
-    }
-    if (backfillNumbers(tasks)) {
-      await writeTasks(projectId, tasks);
-    }
-    allTasks.push(...tasks);
-  }
-  return allTasks;
+  const files = (await rd(TASKS_DIR)).filter(f => f.endsWith('.json'));
+  // Read every project's file concurrently — this is the hot path behind
+  // GET /api/tasks/all, which the dashboard polls.
+  const perProject = await Promise.all(files.map(async file => {
+    const projectId = file.replace(/\.json$/, '');
+    return ensureNumbers(projectId, await readNormalized(projectId));
+  }));
+  return perProject.flat();
 }
 
 export async function getTask(projectId: string, taskId: string): Promise<Task | undefined> {

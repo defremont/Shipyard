@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { Sparkles, Terminal, Settings, Check, AlertTriangle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -6,7 +6,10 @@ import { useTabs } from '@/hooks/useTabs'
 import { useProjects } from '@/hooks/useProjects'
 import { useClaudeStatus } from '@/hooks/useClaude'
 import { ClaudeConfigDialog } from '@/components/claude/ClaudeConfigDialog'
-import { ChatPanel } from '@/components/claude/ChatPanel'
+// Renders markdown responses — keep react-markdown off the initial load.
+const ChatPanel = lazy(() =>
+  import('@/components/claude/ChatPanel').then(m => ({ default: m.ChatPanel }))
+)
 import { TerminalLauncher } from '@/components/terminals/TerminalLauncher'
 
 export function ClaudeView() {
@@ -70,7 +73,9 @@ export function ClaudeView() {
 
             {(cli || api) && (
               <div className="border-t pt-3">
-                <ChatPanel projectId={project.id} />
+                <Suspense fallback={null}>
+                  <ChatPanel projectId={project.id} />
+                </Suspense>
               </div>
             )}
           </>

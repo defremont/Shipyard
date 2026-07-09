@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useStageFile, useUnstageFile, useGitDiff, useDiscardFile } from '@/hooks/useGit'
 import { FileIcon } from '@/components/files/FileIcon'
-import { FilePreviewDialog } from '@/components/files/FilePreviewDialog'
+import { LazyFilePreviewDialog as FilePreviewDialog } from '@/components/files/LazyFilePreviewDialog'
 
 const PREVIEW_ONLY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp', '.tiff', '.avif',

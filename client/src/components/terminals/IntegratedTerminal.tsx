@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { WebglAddon } from '@xterm/addon-webgl'
 import { getWebSocketUrl } from '@/hooks/useTerminal'
 import '@xterm/xterm/css/xterm.css'
 
@@ -37,6 +38,28 @@ const TERMINAL_THEME = {
 }
 
 const MAX_RECONNECT_ATTEMPTS = 5
+
+/**
+ * Swap the default DOM renderer for the WebGL one. The DOM renderer rebuilds a
+ * span per cell on every frame, which a full-screen TUI like the Claude CLI
+ * repaints constantly. Falls back silently — WebGL is unavailable in some
+ * remote-desktop and software-rendering setups, and the context can be lost at
+ * runtime (GPU reset, driver update), in which case xterm reverts to DOM.
+ */
+function attachRenderer(term: Terminal): () => void {
+  let addon: WebglAddon | undefined
+  try {
+    addon = new WebglAddon()
+    addon.onContextLoss(() => addon?.dispose())
+    term.loadAddon(addon)
+  } catch {
+    addon?.dispose()
+    addon = undefined
+  }
+  return () => {
+    try { addon?.dispose() } catch {}
+  }
+}
 
 export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -143,9 +166,29 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
     term.open(containerRef.current)
+    // Must run after open() — the renderer needs the screen element to exist.
+    const disposeRenderer = attachRenderer(term)
 
     termRef.current = term
     fitAddonRef.current = fitAddon
+
+    const copySelection = () => {
+      const sel = term.getSelection()
+      if (!sel) return false
+      void navigator.clipboard.writeText(sel)
+      term.clearSelection()
+      return true
+    }
+
+    // term.paste() is what makes pasting into the Claude CLI work: it strips
+    // the \n → \r translation the PTY would misread as repeated Enter, and
+    // wraps the text in bracketed-paste markers whenever the running program
+    // asked for them, so the CLI receives one paste instead of N submissions.
+    const pasteFromClipboard = () => {
+      navigator.clipboard.readText().then(text => {
+        if (text) term.paste(text)
+      }).catch(() => {})
+    }
 
     // Fit to container
     const rafId = requestAnimationFrame(() => {
@@ -164,36 +207,43 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
           return false
         }
       }
+      if (ev.type !== 'keydown' || !ev.ctrlKey) return true
+      const key = ev.key.toLowerCase()
+
       // Ctrl+C: copy if there's a selection, otherwise let terminal handle (SIGINT)
-      if (ev.ctrlKey && !ev.shiftKey && ev.key === 'c' && ev.type === 'keydown') {
-        const sel = term.getSelection()
-        if (sel) {
-          navigator.clipboard.writeText(sel)
-          term.clearSelection()
-          return false // prevent terminal from processing
-        }
+      if (!ev.shiftKey && key === 'c') {
+        if (copySelection()) return false
       }
       // Ctrl+Shift+C: always copy selection
-      if (ev.ctrlKey && ev.shiftKey && ev.key === 'C' && ev.type === 'keydown') {
-        const sel = term.getSelection()
-        if (sel) {
-          navigator.clipboard.writeText(sel)
-          term.clearSelection()
-        }
+      if (ev.shiftKey && key === 'c') {
+        copySelection()
         return false
       }
-      // Ctrl+V or Ctrl+Shift+V: paste from clipboard
-      if (ev.ctrlKey && (ev.key === 'v' || ev.key === 'V') && ev.type === 'keydown') {
-        ev.preventDefault() // Prevent browser's native paste event (which would cause duplicate via onData)
-        navigator.clipboard.readText().then((text) => {
-          if (text && wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({ type: 'input', data: text }))
-          }
-        }).catch(() => {})
+      // Ctrl+V / Ctrl+Shift+V: paste. We handle it ourselves rather than
+      // letting the browser's native paste event through, because the native
+      // path is unreliable inside Electron's focus model.
+      if (key === 'v') {
+        ev.preventDefault()
+        pasteFromClipboard()
         return false
       }
       return true
     })
+
+    // Right-click: copy a selection if there is one, otherwise paste — the
+    // Windows Terminal / PuTTY convention. Middle-click pastes (X11 habit).
+    const handleContextMenu = (ev: MouseEvent) => {
+      ev.preventDefault()
+      if (!copySelection()) pasteFromClipboard()
+    }
+    const handleMouseDown = (ev: MouseEvent) => {
+      if (ev.button !== 1) return
+      ev.preventDefault()
+      pasteFromClipboard()
+    }
+    const el = containerRef.current
+    el.addEventListener('contextmenu', handleContextMenu)
+    el.addEventListener('mousedown', handleMouseDown)
 
     // Send keystrokes to server
     const dataDisposable = term.onData((data) => {
@@ -217,6 +267,8 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
       disposedRef.current = true
       cancelAnimationFrame(rafId)
       clearTimeout(reconnectTimerRef.current)
+      el.removeEventListener('contextmenu', handleContextMenu)
+      el.removeEventListener('mousedown', handleMouseDown)
       dataDisposable.dispose()
       binaryDisposable.dispose()
       if (wsRef.current) {
@@ -225,6 +277,7 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
         ws.onclose = null // prevent reconnect
         ws.close()
       }
+      disposeRenderer()
       term.dispose()
       termRef.current = null
       fitAddonRef.current = null

@@ -170,9 +170,11 @@ export async function mcpRoutes(app: FastifyInstance) {
   <p><span class="client">${client.clientName}</span> wants to connect to your Shipyard dashboard.</p>
   <p style="font-size: 13px; color: #888;">Permissions requested:</p>
   <ul class="perms">
-    <li>View projects and git status</li>
+    <li>View projects, git status, history and diffs</li>
     <li>View, create, update, and delete tasks</li>
+    <li>Create, rename and delete milestones</li>
     <li>Search across all tasks</li>
+    <li>Sync tasks with Trello and ClickUp</li>
   </ul>
   <div class="actions">
     <form method="POST" action="/authorize">

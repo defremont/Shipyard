@@ -9,6 +9,11 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
+  // No manualChunks: grouping vendors by package pins shared transitive
+  // modules into those groups, which then get pulled into the entry chunk —
+  // exactly what we're trying to avoid. Rollup's automatic splitting, driven
+  // by the lazy() boundaries around the editor, terminal and markdown views,
+  // already keeps them off the boot path.
   server: {
     open: true,
     proxy: {

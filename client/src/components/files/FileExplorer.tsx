@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/alert-dialog'
 import { useFileTree, useDeleteFile, useOpenFileFolder, useRenameFile, useCreateFile, useCopyFile, type FileEntry } from '@/hooks/useFiles'
 import { FileIcon } from './FileIcon'
-import { FilePreviewDialog } from './FilePreviewDialog'
+import { LazyFilePreviewDialog as FilePreviewDialog } from './LazyFilePreviewDialog'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
 

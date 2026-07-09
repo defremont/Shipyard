@@ -59,7 +59,8 @@ export function GlobalSearch() {
   const navigate = useNavigate()
   const { openTab } = useTabs()
   const { data: projects } = useProjects()
-  const { data: tasks } = useAllTasks()
+  // Mounted on every page, but only visible on Ctrl+K — don't poll while closed.
+  const { data: tasks } = useAllTasks({ enabled: open })
 
   // Listen for Ctrl+K and the Electron menu action
   useEffect(() => {

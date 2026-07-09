@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react'
 import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -10,7 +10,11 @@ import { useLaunchTerminal } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
 import { useAiSessions } from '@/hooks/useAiSessions'
 import { api } from '@/lib/api'
-import { IntegratedTerminal } from './IntegratedTerminal'
+// xterm + its addons are ~300kB and TerminalPanel is mounted by Layout on
+// every page, so load the terminal only once a session actually exists.
+const IntegratedTerminal = lazy(() =>
+  import('./IntegratedTerminal').then(m => ({ default: m.IntegratedTerminal }))
+)
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -743,11 +747,13 @@ export function TerminalPanel() {
                   }
                 }}
               >
-                <IntegratedTerminal
-                  sessionId={tab.sessionId}
-                  isActive={isShown}
-                  onExit={handleTabExit}
-                />
+                <Suspense fallback={null}>
+                  <IntegratedTerminal
+                    sessionId={tab.sessionId}
+                    isActive={isShown}
+                    onExit={handleTabExit}
+                  />
+                </Suspense>
               </div>
             )
           })}
