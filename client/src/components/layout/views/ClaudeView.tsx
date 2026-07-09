@@ -21,6 +21,9 @@ export function ClaudeView() {
 
   const cli = !!status?.cliAvailable
   const api = !!status?.configured
+  // CLI runs on the user's subscription (no API credits) and always takes
+  // priority in aiBackend — highlight whichever backend is actually active.
+  const cliActive = cli && status?.activeBackend !== 'api'
 
   return (
     <div className="flex flex-col h-full">
@@ -30,13 +33,25 @@ export function ClaudeView() {
           <Sparkles className="h-3.5 w-3.5 text-muted-foreground" />
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Claude AI</span>
           {cli && (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 gap-1 bg-green-500/10 border-green-500/30 text-green-400">
+            <Badge
+              variant="outline"
+              title={cliActive ? 'Active — runs on your Claude subscription (no API credits)' : 'CLI available'}
+              className={cliActive
+                ? 'text-[9px] px-1.5 py-0 h-4 gap-1 bg-success/10 border-success/30 text-success'
+                : 'text-[9px] px-1.5 py-0 h-4 gap-1 text-muted-foreground'}
+            >
               <Terminal className="h-2.5 w-2.5" />
               CLI
             </Badge>
           )}
           {api && (
-            <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 gap-1 bg-blue-500/10 border-blue-500/30 text-blue-400">
+            <Badge
+              variant="outline"
+              title={cliActive ? 'API key configured — fallback only' : 'Active — pay-per-use API key'}
+              className={!cliActive
+                ? 'text-[9px] px-1.5 py-0 h-4 gap-1 bg-primary/10 border-primary/30 text-primary'
+                : 'text-[9px] px-1.5 py-0 h-4 gap-1 text-muted-foreground'}
+            >
               <Check className="h-2.5 w-2.5" />
               API
             </Badge>
@@ -50,8 +65,8 @@ export function ClaudeView() {
       {/* Body */}
       <div className="flex-1 overflow-y-auto scrollbar-dark px-3 py-3 space-y-3 min-h-0">
         {!cli && !api && (
-          <div className="rounded-md border border-yellow-500/30 bg-yellow-500/5 p-3 text-xs text-muted-foreground space-y-2">
-            <div className="flex items-center gap-1.5 text-yellow-400 font-medium">
+          <div className="rounded-md border border-warning/30 bg-warning/5 p-3 text-xs text-muted-foreground space-y-2">
+            <div className="flex items-center gap-1.5 text-warning font-medium">
               <AlertTriangle className="h-3.5 w-3.5" />
               Claude not configured
             </div>

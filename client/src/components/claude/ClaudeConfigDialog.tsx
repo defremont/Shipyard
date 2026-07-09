@@ -117,7 +117,7 @@ export function ClaudeConfigDialog({ open, onOpenChange }: ClaudeConfigDialogPro
                 className="shrink-0 gap-1.5"
               >
                 {testStatus === 'testing' && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                {testStatus === 'ok' && <Check className="h-3.5 w-3.5 text-green-500" />}
+                {testStatus === 'ok' && <Check className="h-3.5 w-3.5 text-success" />}
                 {testStatus === 'error' && <X className="h-3.5 w-3.5 text-red-500" />}
                 Test
               </Button>

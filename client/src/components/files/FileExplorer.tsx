@@ -100,7 +100,7 @@ function TreeNode({ entry, projectId, depth, expanded, onToggle, onPreview, onCo
         className={cn(
           'flex items-center gap-1 py-0.5 px-1 rounded cursor-pointer group',
           'hover:bg-accent/50 transition-colors text-xs',
-          isActive && 'bg-blue-500/15 text-blue-300'
+          isActive && 'bg-primary/15 text-primary'
         )}
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >

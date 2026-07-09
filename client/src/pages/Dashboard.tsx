@@ -131,15 +131,15 @@ export function Dashboard() {
             {tasks && tasks.length > 0 && (
               <div className="flex items-center gap-4 text-xs">
                 <span className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary" />
                   {totalInbox} inbox
                 </span>
                 <span className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="w-1.5 h-1.5 rounded-full bg-yellow-500" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-warning" />
                   {totalInProgress} active
                 </span>
                 <span className="flex items-center gap-1.5 text-muted-foreground">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-success" />
                   {totalDone} done
                 </span>
               </div>
@@ -149,7 +149,7 @@ export function Dashboard() {
           {/* Working On banner */}
           {workingOn.length > 0 && (
             <div className="flex items-center gap-2 overflow-x-auto scrollbar-dark pb-0.5">
-              <div className="flex items-center gap-1.5 shrink-0 text-xs text-yellow-500 font-medium">
+              <div className="flex items-center gap-1.5 shrink-0 text-xs text-warning font-medium">
                 <Loader className="h-3 w-3" />
                 Working On
               </div>
@@ -157,7 +157,7 @@ export function Dashboard() {
                 <button
                   key={task.id}
                   onClick={() => openTab(task.projectId)}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-yellow-500/10 hover:bg-yellow-500/20 transition-colors text-xs shrink-0 group"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-warning/10 hover:bg-warning/15 transition-colors text-xs shrink-0 group"
                 >
                   <span className="text-muted-foreground">{task.projectName}</span>
                   <span className="text-muted-foreground/30">·</span>

@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 import { playAiCompleteSound } from '@/lib/sounds'
+import { PRIORITY_CONFIG } from '@/lib/taskVisuals'
 
 interface ParsedTask {
   title: string
@@ -114,10 +115,10 @@ export function BulkImportDialog({ projectId, open, onOpenChange }: BulkImportDi
   const selectedCount = tasks.filter(t => t.selected).length
 
   const priorityColors: Record<string, string> = {
-    urgent: 'bg-red-500/15 text-red-400',
-    high: 'bg-orange-500/15 text-orange-400',
-    medium: 'bg-blue-500/15 text-blue-400',
-    low: 'bg-muted text-muted-foreground',
+    urgent: PRIORITY_CONFIG.urgent.badge,
+    high: PRIORITY_CONFIG.high.badge,
+    medium: PRIORITY_CONFIG.medium.badge,
+    low: PRIORITY_CONFIG.low.badge,
   }
 
   return (

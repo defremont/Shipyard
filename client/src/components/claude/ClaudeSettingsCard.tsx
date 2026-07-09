@@ -26,13 +26,13 @@ export function ClaudeSettingsCard() {
           <Sparkles className="h-4 w-4" />
           Claude AI
           {status?.cliAvailable && (
-            <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-green-600">
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-success/10 border-success/30 text-success">
               <Terminal className="h-2.5 w-2.5 mr-0.5" />
               CLI
             </Badge>
           )}
           {status?.configured && (
-            <Badge variant="default" className="text-[10px] px-1.5 py-0 bg-blue-600">
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-primary/10 border-primary/30 text-primary">
               <Check className="h-2.5 w-2.5 mr-0.5" />
               API
             </Badge>
@@ -47,7 +47,7 @@ export function ClaudeSettingsCard() {
         {/* Active backend */}
         {activeLabel && (
           <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/30 rounded-lg p-2.5">
-            <div className="h-2 w-2 rounded-full bg-green-500" />
+            <div className="h-2 w-2 rounded-full bg-success" />
             Active backend: <span className="font-medium text-foreground">{activeLabel}</span>
           </div>
         )}
@@ -62,7 +62,7 @@ export function ClaudeSettingsCard() {
                 : <>Not found — install with <code className="bg-muted px-1 rounded">npm i -g @anthropic-ai/claude-code</code> then run <code className="bg-muted px-1 rounded">claude</code> once to log in</>}
             </p>
           </div>
-          <div className={`h-2 w-2 rounded-full shrink-0 ${status?.cliAvailable ? 'bg-green-500' : 'bg-muted-foreground/30'}`} />
+          <div className={`h-2 w-2 rounded-full shrink-0 ${status?.cliAvailable ? 'bg-success' : 'bg-muted-foreground/30'}`} />
         </div>
 
         {/* API status */}

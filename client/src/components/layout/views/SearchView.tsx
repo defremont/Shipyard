@@ -19,10 +19,10 @@ interface FileResult {
 }
 
 const priorityConfig: Record<string, { icon: typeof AlertTriangle; color: string }> = {
-  urgent: { icon: AlertTriangle, color: 'text-red-400' },
-  high: { icon: ArrowUp, color: 'text-orange-400' },
-  medium: { icon: Minus, color: 'text-yellow-400' },
-  low: { icon: ArrowDownIcon, color: 'text-blue-400' },
+  urgent: { icon: AlertTriangle, color: 'text-destructive' },
+  high: { icon: ArrowUp, color: 'text-warning' },
+  medium: { icon: Minus, color: 'text-muted-foreground' },
+  low: { icon: ArrowDownIcon, color: 'text-muted-foreground/60' },
 }
 
 const statusLabels: Record<string, string> = {

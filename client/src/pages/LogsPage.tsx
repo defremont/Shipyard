@@ -20,10 +20,10 @@ const levelConfig: Record<LogLevel, { icon: typeof Info; color: string; bg: stri
 const categoryConfig: Record<LogCategory, { icon: typeof Server; color: string; label: string }> = {
   server: { icon: Server, color: 'text-gray-400', label: 'Server' },
   git: { icon: GitBranch, color: 'text-orange-400', label: 'Git' },
-  claude: { icon: Bot, color: 'text-purple-400', label: 'Claude' },
+  claude: { icon: Bot, color: 'text-primary', label: 'Claude' },
   sync: { icon: ArrowUpDown, color: 'text-green-400', label: 'Sync' },
   terminal: { icon: Terminal, color: 'text-cyan-400', label: 'Terminal' },
-  mcp: { icon: Blocks, color: 'text-indigo-400', label: 'MCP' },
+  mcp: { icon: Blocks, color: 'text-cyan-400', label: 'MCP' },
   tasks: { icon: ClipboardList, color: 'text-teal-400', label: 'Tasks' },
   files: { icon: FileText, color: 'text-amber-400', label: 'Files' },
 }

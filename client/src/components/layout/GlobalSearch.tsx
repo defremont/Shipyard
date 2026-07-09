@@ -24,10 +24,10 @@ import { api } from '@/lib/api'
 type FilterTab = 'all' | 'projects' | 'tasks' | 'files'
 
 const priorityConfig: Record<string, { icon: typeof AlertTriangle; color: string; label: string }> = {
-  urgent: { icon: AlertTriangle, color: 'text-red-400', label: 'Urgent' },
-  high: { icon: ArrowUp, color: 'text-orange-400', label: 'High' },
-  medium: { icon: Minus, color: 'text-yellow-400', label: 'Medium' },
-  low: { icon: ArrowDownIcon, color: 'text-blue-400', label: 'Low' },
+  urgent: { icon: AlertTriangle, color: 'text-destructive', label: 'Urgent' },
+  high: { icon: ArrowUp, color: 'text-warning', label: 'High' },
+  medium: { icon: Minus, color: 'text-muted-foreground', label: 'Medium' },
+  low: { icon: ArrowDownIcon, color: 'text-muted-foreground/60', label: 'Low' },
 }
 
 const statusLabels: Record<string, string> = {
@@ -415,8 +415,9 @@ export function GlobalSearch() {
                         {projectName}
                       </span>
                       <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-                        task.status === 'in_progress' ? 'bg-blue-500/15 text-blue-400' :
-                        task.status === 'todo' ? 'bg-yellow-500/15 text-yellow-400' :
+                        task.status === 'in_progress' ? 'bg-warning/15 text-warning' :
+                        task.status === 'todo' ? 'bg-primary/15 text-primary' :
+                        task.status === 'done' ? 'bg-success/15 text-success' :
                         'bg-muted text-muted-foreground'
                       }`}>
                         {statusLabels[task.status] || task.status}

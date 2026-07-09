@@ -116,7 +116,7 @@ export function TerminalLauncher({ projectId, projectPath, projectName }: Termin
         <Rocket className="h-3.5 w-3.5" />
         Launcher
         {mcpActive && (
-          <span className="text-[9px] font-medium bg-green-500/15 text-green-400 px-1.5 py-0.5 rounded-full normal-case tracking-normal">
+          <span className="text-[9px] font-medium bg-success/15 text-success px-1.5 py-0.5 rounded-full normal-case tracking-normal">
             MCP
           </span>
         )}

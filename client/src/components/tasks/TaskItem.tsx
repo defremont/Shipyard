@@ -1,6 +1,6 @@
 import { useState, useMemo, useSyncExternalStore, useCallback, memo } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Trash2, Copy, CopyPlus, Check, Circle, AlertTriangle, ArrowUp, ArrowDown, Minus, Sparkles, Wand2, Loader2 } from 'lucide-react'
+import { Pencil, Trash2, Copy, CopyPlus, Check, Circle, Sparkles, Wand2, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +18,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { scheduleAutoSync } from '@/lib/sync/autoSync'
+import { priorityVisual, statusVisual } from '@/lib/taskVisuals'
 
 // Module-level store for AI improve operations — survives component unmounts
 const _improvingTasks = new Set<string>()
@@ -41,20 +42,6 @@ interface TaskItemProps {
   dragListeners?: Record<string, Function>
 }
 
-const priorityConfig = {
-  urgent: { icon: AlertTriangle, color: 'text-red-500', label: 'Urgent' },
-  high: { icon: ArrowUp, color: 'text-orange-500', label: 'High' },
-  medium: { icon: Minus, color: 'text-blue-500', label: 'Medium' },
-  low: { icon: ArrowDown, color: 'text-red-500', label: 'Low' },
-}
-
-const statusConfig = {
-  backlog: { label: 'Backlog', variant: 'outline' as const },
-  todo: { label: 'To Do', variant: 'secondary' as const },
-  in_progress: { label: 'In Progress', variant: 'default' as const },
-  done: { label: 'Done', variant: 'outline' as const },
-}
-
 // react-query's structural sharing keeps `task` referentially stable across
 // polls when nothing changed, so memoizing here stops a board's worth of cards
 // from re-rendering every few seconds.
@@ -72,8 +59,8 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
   const isAiResolving = hasAiSession(task.id)
   const canAiImprove = !!(claudeStatus?.configured || claudeStatus?.cliAvailable)
 
-  const priority = priorityConfig[task.priority] || priorityConfig.medium
-  const status = statusConfig[task.status] || statusConfig.todo
+  const priority = priorityVisual(task.priority)
+  const status = statusVisual(task.status)
   const PriorityIcon = priority.icon
 
   const handleStatusToggle = (e: React.MouseEvent) => {
@@ -160,27 +147,26 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
   return (
     <div
       className={cn(
-        'group relative rounded-lg border bg-card transition-colors hover:border-primary/30 cursor-grab active:cursor-grabbing p-2',
-        task.status === 'done' && !task.needsReview && 'opacity-60',
-        task.needsReview && 'border-purple-500/30 bg-purple-500/5',
-        isAiResolving && 'ring-2 ring-purple-500/40 border-purple-500/30 animate-pulse'
+        'group relative rounded-lg border bg-card transition-colors hover:border-primary/40 cursor-grab active:cursor-grabbing p-2',
+        task.needsReview && 'border-primary/30 bg-primary/5',
+        isAiResolving && 'ring-2 ring-primary/40 border-primary/30 animate-pulse'
       )}
       {...dragListeners}
     >
       {task.needsReview && (
         <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-purple-500" />
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/70" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
         </span>
       )}
       <div className="flex items-start gap-2">
         <button onClick={handleStatusToggle} className="shrink-0 mt-0.5">
           {isAiResolving ? (
-            <Sparkles className="h-3.5 w-3.5 text-purple-500 animate-pulse" />
+            <Sparkles className="h-3.5 w-3.5 text-primary animate-pulse" />
           ) : task.status === 'done' ? (
-            <Check className="h-3.5 w-3.5 text-green-500" />
+            <Check className="h-3.5 w-3.5 text-success" />
           ) : (
-            <Circle className="h-3.5 w-3.5 text-muted-foreground" />
+            <Circle className="h-3.5 w-3.5 text-muted-foreground/60" />
           )}
         </button>
 
@@ -188,7 +174,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
 
         <div className="min-w-0 flex-1">
           <span
-            className={cn('text-sm line-clamp-2 cursor-pointer hover:text-primary transition-colors', task.status === 'done' && 'line-through')}
+            className={cn('text-sm line-clamp-2 cursor-pointer hover:text-primary transition-colors', task.status === 'done' && 'text-muted-foreground')}
             onClick={(e) => { e.stopPropagation(); onView?.(task) }}
           >
             {task.title}
@@ -217,7 +203,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
           {onAiResolve && task.status === 'in_progress' && !isAiResolving && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-purple-500 hover:text-purple-400" onClick={(e) => { e.stopPropagation(); onAiResolve(task) }}>
+                <Button variant="ghost" size="icon" className="h-6 w-6 text-primary hover:text-primary/80" onClick={(e) => { e.stopPropagation(); onAiResolve(task) }}>
                   <Sparkles className="h-3 w-3" />
                 </Button>
               </TooltipTrigger>
@@ -230,7 +216,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-6 w-6 text-blue-500 hover:text-blue-400"
+                  className="h-6 w-6 text-primary hover:text-primary/80"
                   onClick={handleAiImprove}
                   disabled={isAiImproving}
                 >

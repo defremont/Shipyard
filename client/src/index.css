@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Design tokens — single source of truth for color.
+ * Brand accent is blue (hsl 212). Semantic status colors:
+ *   --primary  → brand / interactive / AI (Claude) / inbox
+ *   --warning  → in progress / attention
+ *   --success  → done / positive
+ *   --destructive → urgent / errors / delete
+ * Components must use these tokens (or the tailwind mappings success/warning)
+ * instead of literal palette classes like text-purple-500.
+ */
 @layer base {
   :root {
     --background: 0 0% 100%;
@@ -10,19 +20,23 @@
     --card-foreground: 240 10% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 240 10% 3.9%;
-    --primary: 240 5.9% 10%;
-    --primary-foreground: 0 0% 98%;
+    --primary: 212 90% 45%;
+    --primary-foreground: 0 0% 100%;
     --secondary: 240 4.8% 95.9%;
     --secondary-foreground: 240 5.9% 10%;
     --muted: 240 4.8% 95.9%;
     --muted-foreground: 240 3.8% 46.1%;
     --accent: 240 4.8% 95.9%;
     --accent-foreground: 240 5.9% 10%;
-    --destructive: 0 84.2% 60.2%;
+    --destructive: 0 74% 50%;
     --destructive-foreground: 0 0% 98%;
+    --success: 152 60% 34%;
+    --success-foreground: 0 0% 100%;
+    --warning: 32 95% 42%;
+    --warning-foreground: 0 0% 100%;
     --border: 240 5.9% 90%;
     --input: 240 5.9% 90%;
-    --ring: 240 5.9% 10%;
+    --ring: 212 90% 45%;
     --radius: 0.5rem;
     --sidebar: 240 4.8% 95.9%;
     --sidebar-foreground: 240 5.9% 10%;
@@ -30,28 +44,32 @@
   }
 
   .dark {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 240 10% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 240 10% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 240 5.9% 10%;
-    --secondary: 240 3.7% 15.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
-    --accent: 240 3.7% 15.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
+    --background: 240 7% 4.5%;
+    --foreground: 240 6% 93%;
+    --card: 240 6% 6.5%;
+    --card-foreground: 240 6% 93%;
+    --popover: 240 6% 6%;
+    --popover-foreground: 240 6% 93%;
+    --primary: 212 95% 62%;
+    --primary-foreground: 220 60% 8%;
+    --secondary: 240 5% 13%;
+    --secondary-foreground: 240 6% 93%;
+    --muted: 240 5% 12%;
+    --muted-foreground: 240 5% 63%;
+    --accent: 240 5% 13%;
+    --accent-foreground: 240 6% 96%;
+    --destructive: 0 70% 58%;
     --destructive-foreground: 0 0% 98%;
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
-    --ring: 240 4.9% 83.9%;
-    --sidebar: 240 6% 6%;
-    --sidebar-foreground: 0 0% 98%;
-    --sidebar-border: 240 3.7% 12%;
+    --success: 152 52% 50%;
+    --success-foreground: 160 60% 7%;
+    --warning: 38 92% 56%;
+    --warning-foreground: 30 70% 8%;
+    --border: 240 5% 14%;
+    --input: 240 5% 16%;
+    --ring: 212 95% 62%;
+    --sidebar: 240 6% 5.5%;
+    --sidebar-foreground: 240 6% 93%;
+    --sidebar-border: 240 5% 12%;
   }
 }
 
@@ -61,9 +79,10 @@
   }
   body {
     @apply bg-background text-foreground;
-    font-family: system-ui, -apple-system, sans-serif;
+    font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 }
 
@@ -76,14 +95,14 @@
   background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: hsl(240 3.7% 20%);
+  background: hsl(var(--muted-foreground) / 0.25);
   border-radius: 3px;
 }
 *::-webkit-scrollbar-thumb:hover {
-  background: hsl(240 3.7% 28%);
+  background: hsl(var(--muted-foreground) / 0.4);
 }
 * {
-  scrollbar-color: hsl(240 3.7% 20%) transparent;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
   scrollbar-width: thin;
 }
 

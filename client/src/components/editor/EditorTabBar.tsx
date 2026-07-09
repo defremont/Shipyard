@@ -22,7 +22,7 @@ export function EditorTabBar({ tabs, activeTabPath, onSelectTab, onCloseTab }: E
             'flex items-center gap-1.5 px-3 py-1.5 text-xs border-r cursor-pointer group min-w-0 max-w-[180px]',
             'hover:bg-accent/50 transition-colors',
             tab.path === activeTabPath
-              ? 'bg-background text-foreground border-b-2 border-b-blue-500'
+              ? 'bg-background text-foreground border-b-2 border-b-primary'
               : 'text-muted-foreground'
           )}
           onClick={() => onSelectTab(tab.path)}
@@ -35,10 +35,10 @@ export function EditorTabBar({ tabs, activeTabPath, onSelectTab, onCloseTab }: E
           />
           <span className="truncate">{tab.name}</span>
           {tab.diffMode && (
-            <span title="Diff view"><GitCompareArrows className="h-3 w-3 text-blue-400 shrink-0" /></span>
+            <span title="Diff view"><GitCompareArrows className="h-3 w-3 text-primary shrink-0" /></span>
           )}
           {tab.isDirty && (
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" title="Unsaved changes" />
+            <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" title="Unsaved changes" />
           )}
           <button
             className="h-4 w-4 flex items-center justify-center rounded opacity-0 group-hover:opacity-100 hover:bg-accent transition-all shrink-0 ml-auto"

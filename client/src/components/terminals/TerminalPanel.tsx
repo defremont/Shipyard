@@ -561,8 +561,8 @@ export function TerminalPanel() {
                 <Terminal className="h-3.5 w-3.5" />
                 {tabs.some(t => t.hasNotification) && (
                   <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-warning" />
                   </span>
                 )}
               </span>
@@ -591,31 +591,31 @@ export function TerminalPanel() {
                     'flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-sm transition-colors max-w-[200px] group',
                     isInPane
                       ? tab.taskId && !tab.exited
-                        ? 'bg-purple-500/20 text-purple-300 ring-1 ring-purple-500/40'
+                        ? 'bg-primary/15 text-primary ring-1 ring-primary/40'
                         : tab.taskId && tab.exited
-                          ? 'bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-500/40'
+                          ? 'bg-success/15 text-success ring-1 ring-success/40'
                           : 'bg-background/60 text-foreground'
                       : tab.taskId && !tab.exited
-                        ? 'text-purple-400/60 hover:text-purple-300 hover:bg-purple-500/10'
+                        ? 'text-primary/60 hover:text-primary hover:bg-primary/10'
                         : tab.taskId && tab.exited
-                          ? 'text-emerald-400/60 hover:text-emerald-300 hover:bg-emerald-500/10'
+                          ? 'text-success/60 hover:text-success hover:bg-success/10'
                           : 'text-muted-foreground hover:text-foreground hover:bg-background/30',
                     tab.exited && !tab.taskId && !tab.hasNotification && 'opacity-50'
                   )}
                 >
                   {/* Split pane indicator dot */}
                   {isSplit && isLeftPane && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 shrink-0" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
                   )}
                   {isSplit && isRightPane && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                    <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
                   )}
                   {tab.taskId && !tab.exited && <Sparkles className="h-3 w-3 shrink-0 animate-pulse" />}
-                  {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-400" />}
+                  {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
                   {tab.hasNotification && (
                     <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-warning" />
                     </span>
                   )}
                   <span className="truncate">{tab.title.replace(/^\[(.*?)\]\s*/, '$1 · ')}</span>
@@ -717,8 +717,8 @@ export function TerminalPanel() {
               className={cn(
                 'absolute top-0 h-0.5 z-10 transition-all duration-150',
                 activePaneIndex === 0
-                  ? 'left-0 w-[calc(50%-0.5px)] bg-blue-400/60'
-                  : 'left-[calc(50%+0.5px)] w-[calc(50%-0.5px)] bg-emerald-400/60'
+                  ? 'left-0 w-[calc(50%-0.5px)] bg-primary/60'
+                  : 'left-[calc(50%+0.5px)] w-[calc(50%-0.5px)] bg-success/60'
               )}
             />
           )}

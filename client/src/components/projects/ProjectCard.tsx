@@ -54,8 +54,8 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
           <Star className={cn(
             'h-3 w-3 transition-colors',
             project.favorite
-              ? 'fill-yellow-500 text-yellow-500'
-              : 'text-muted-foreground/20 hover:text-yellow-500'
+              ? 'fill-warning text-warning'
+              : 'text-muted-foreground/20 hover:text-warning'
           )} />
         </button>
         <span className="text-[13px] font-medium truncate flex-1">{project.name}</span>
@@ -63,14 +63,14 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
         {activeTasks > 0 && (
           <div className="flex items-center gap-1.5 shrink-0">
             {(taskCounts?.inProgress || 0) > 0 && (
-              <span className="flex items-center gap-0.5 text-[10px] text-yellow-500/80">
-                <span className="w-1 h-1 rounded-full bg-yellow-500" />
+              <span className="flex items-center gap-0.5 text-[10px] text-warning/80">
+                <span className="w-1 h-1 rounded-full bg-warning" />
                 {taskCounts!.inProgress}
               </span>
             )}
             {(taskCounts?.inbox || 0) > 0 && (
-              <span className="flex items-center gap-0.5 text-[10px] text-blue-500/60">
-                <span className="w-1 h-1 rounded-full bg-blue-500" />
+              <span className="flex items-center gap-0.5 text-[10px] text-primary/70">
+                <span className="w-1 h-1 rounded-full bg-primary" />
                 {taskCounts!.inbox}
               </span>
             )}
@@ -85,13 +85,13 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
             <GitBranch className="h-2.5 w-2.5 shrink-0" />
             <span className="font-mono truncate max-w-[80px]">{project.gitBranch}</span>
             {(project.gitAhead ?? 0) > 0 && (
-              <span className="text-orange-400 shrink-0"><ArrowUp className="h-2.5 w-2.5 inline" />{project.gitAhead}</span>
+              <span className="text-muted-foreground shrink-0"><ArrowUp className="h-2.5 w-2.5 inline" />{project.gitAhead}</span>
             )}
             {(project.gitBehind ?? 0) > 0 && (
-              <span className="text-blue-400 shrink-0"><ArrowDown className="h-2.5 w-2.5 inline" />{project.gitBehind}</span>
+              <span className="text-muted-foreground shrink-0"><ArrowDown className="h-2.5 w-2.5 inline" />{project.gitBehind}</span>
             )}
             {changes > 0 && (
-              <span className="text-yellow-500 shrink-0"><FileEdit className="h-2.5 w-2.5 inline" />{changes}</span>
+              <span className="text-warning shrink-0"><FileEdit className="h-2.5 w-2.5 inline" />{changes}</span>
             )}
           </>
         )}
@@ -122,7 +122,7 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity -mb-0.5">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-purple-400" onClick={e => handleLaunch(e, 'claude')}>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-primary" onClick={e => handleLaunch(e, 'claude')}>
               <Sparkles className="h-2.5 w-2.5" />
             </Button>
           </TooltipTrigger>
@@ -130,7 +130,7 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-green-400" onClick={e => handleLaunch(e, 'dev')}>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-success" onClick={e => handleLaunch(e, 'dev')}>
               <Play className="h-2.5 w-2.5" />
             </Button>
           </TooltipTrigger>

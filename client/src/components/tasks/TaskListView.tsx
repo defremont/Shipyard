@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, memo } from 'react'
-import { ChevronDown, ChevronRight, Circle, Check, AlertTriangle, ArrowUp, ArrowDown, Minus, Pencil, Trash2, Copy, CopyPlus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Circle, Check, Pencil, Trash2, Copy, CopyPlus } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -15,18 +15,12 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import { Link } from 'react-router-dom'
-
-const priorityConfig = {
-  urgent: { icon: AlertTriangle, color: 'text-red-500', label: 'Urgent', order: 0 },
-  high: { icon: ArrowUp, color: 'text-orange-500', label: 'High', order: 1 },
-  medium: { icon: Minus, color: 'text-blue-500', label: 'Medium', order: 2 },
-  low: { icon: ArrowDown, color: 'text-muted-foreground', label: 'Low', order: 3 },
-}
+import { priorityVisual } from '@/lib/taskVisuals'
 
 const statusSections = [
-  { key: 'in_progress', label: 'In Progress', statuses: ['in_progress'] as Task['status'][], color: 'text-yellow-500' },
-  { key: 'inbox', label: 'Inbox', statuses: ['backlog', 'todo'] as Task['status'][], color: 'text-blue-500' },
-  { key: 'done', label: 'Done', statuses: ['done'] as Task['status'][], color: 'text-green-500' },
+  { key: 'in_progress', label: 'In Progress', statuses: ['in_progress'] as Task['status'][], color: 'text-warning' },
+  { key: 'inbox', label: 'Inbox', statuses: ['backlog', 'todo'] as Task['status'][], color: 'text-primary' },
+  { key: 'done', label: 'Done', statuses: ['done'] as Task['status'][], color: 'text-success' },
 ]
 
 interface TaskListViewProps {
@@ -54,7 +48,7 @@ const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProj
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings, staleTime: Infinity })
   const [deleteOpen, setDeleteOpen] = useState(false)
 
-  const priority = priorityConfig[task.priority] || priorityConfig.medium
+  const priority = priorityVisual(task.priority)
   const PriorityIcon = priority.icon
   const project = projectMap?.get(task.projectId)
   const displayProjectName = projectName || project?.name || task.projectId
@@ -86,19 +80,18 @@ const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProj
   return (
     <div className={cn(
       'group relative flex items-center gap-3 px-3 py-1.5 pr-10 hover:bg-accent/50 rounded transition-colors',
-      task.status === 'done' && !task.needsReview && 'opacity-60',
-      task.needsReview && 'bg-purple-500/5'
+      task.needsReview && 'bg-primary/5'
     )}>
       <button onClick={handleStatusToggle} className="shrink-0 relative">
         {task.status === 'done' ? (
-          <Check className="h-3.5 w-3.5 text-green-500" />
+          <Check className="h-3.5 w-3.5 text-success" />
         ) : (
-          <Circle className="h-3.5 w-3.5 text-muted-foreground" />
+          <Circle className="h-3.5 w-3.5 text-muted-foreground/60" />
         )}
         {task.needsReview && (
           <span className="absolute -top-1 -right-1 flex h-2 w-2">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75" />
-            <span className="relative inline-flex rounded-full h-2 w-2 bg-purple-500" />
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary/70" />
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
           </span>
         )}
       </button>
@@ -108,7 +101,7 @@ const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProj
       <span className="text-[10px] text-muted-foreground/50 font-mono shrink-0 select-all">#{task.number || '?'}</span>
 
       <span
-        className={cn('text-sm flex-1 truncate cursor-pointer hover:text-primary transition-colors', task.status === 'done' && 'line-through')}
+        className={cn('text-sm flex-1 truncate cursor-pointer hover:text-primary transition-colors', task.status === 'done' && 'text-muted-foreground')}
         onClick={() => onView?.(task)}
       >
         {task.title}
@@ -133,7 +126,7 @@ const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProj
       {doneDate ? (
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="text-[10px] text-green-500/70 shrink-0 text-right">
+            <span className="text-[10px] text-success/80 shrink-0 text-right">
               {doneDate.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
             </span>
           </TooltipTrigger>

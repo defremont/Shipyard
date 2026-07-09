@@ -19,10 +19,10 @@ import { useAllTasks, type Task } from '@/hooks/useTasks'
 import { useTabs } from '@/hooks/useTabs'
 
 const priorityConfig: Record<string, { icon: typeof AlertTriangle; color: string; label: string }> = {
-  urgent: { icon: AlertTriangle, color: 'text-red-400', label: 'Urgent' },
-  high: { icon: ArrowUp, color: 'text-orange-400', label: 'High' },
-  medium: { icon: Minus, color: 'text-yellow-400', label: 'Medium' },
-  low: { icon: ArrowDownIcon, color: 'text-blue-400', label: 'Low' },
+  urgent: { icon: AlertTriangle, color: 'text-destructive', label: 'Urgent' },
+  high: { icon: ArrowUp, color: 'text-warning', label: 'High' },
+  medium: { icon: Minus, color: 'text-muted-foreground', label: 'Medium' },
+  low: { icon: ArrowDownIcon, color: 'text-muted-foreground/60', label: 'Low' },
 }
 
 const statusLabels: Record<string, string> = {

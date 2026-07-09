@@ -85,7 +85,7 @@ export function SyncMenu({ projectId, projectName, milestoneId, tasks }: Props) 
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
             <Button variant="outline" size="sm" className="h-7 text-xs gap-1.5">
-              <RefreshCw className={cn('h-3.5 w-3.5', anyEnabled && 'text-emerald-500')} />
+              <RefreshCw className={cn('h-3.5 w-3.5', anyEnabled && 'text-success')} />
               Sync
             </Button>
           </PopoverTrigger>
@@ -330,7 +330,7 @@ function ProjectProviderRow({
           </Badge>
         )}
         {connected && enabled && (
-          <Badge variant="outline" className="text-[9px] px-1 py-0 text-emerald-500 border-emerald-500/30">
+          <Badge variant="outline" className="text-[9px] px-1 py-0 text-success border-success/30">
             <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
             enabled · {milestoneName}
           </Badge>

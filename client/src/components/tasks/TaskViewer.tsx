@@ -6,7 +6,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Copy, AlertTriangle, ArrowUp, ArrowDown, Minus, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2 } from 'lucide-react'
+import { Pencil, Copy, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
 import { buildTaskPrompt } from '@/lib/promptBuilder'
@@ -16,6 +16,7 @@ import { api } from '@/lib/api'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { playAiCompleteSound } from '@/lib/sounds'
+import { priorityVisual, statusVisual } from '@/lib/taskVisuals'
 
 interface TaskViewerProps {
   task: Task | null
@@ -24,20 +25,6 @@ interface TaskViewerProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onEdit: (task: Task) => void
-}
-
-const priorityConfig: Record<string, { icon: React.ElementType; color: string; label: string }> = {
-  urgent: { icon: AlertTriangle, color: 'text-red-500', label: 'Urgent' },
-  high: { icon: ArrowUp, color: 'text-orange-500', label: 'High' },
-  medium: { icon: Minus, color: 'text-blue-500', label: 'Medium' },
-  low: { icon: ArrowDown, color: 'text-green-500', label: 'Low' },
-}
-
-const statusConfig: Record<string, { label: string; variant: 'default' | 'secondary' | 'outline' }> = {
-  backlog: { label: 'Backlog', variant: 'outline' },
-  todo: { label: 'To Do', variant: 'secondary' },
-  in_progress: { label: 'In Progress', variant: 'default' },
-  done: { label: 'Done', variant: 'outline' },
 }
 
 function formatDate(date?: string) {
@@ -64,8 +51,8 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
 
   if (!task) return null
 
-  const pri = priorityConfig[task.priority] || priorityConfig.medium
-  const sts = statusConfig[task.status] || statusConfig.todo
+  const pri = priorityVisual(task.priority)
+  const sts = statusVisual(task.status)
   const PriIcon = pri.icon
 
   const handleCopy = () => {
@@ -111,9 +98,9 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
   }
 
   const statusActions = [
-    { status: 'todo' as const, label: 'Inbox', icon: Inbox, color: 'text-blue-500' },
-    { status: 'in_progress' as const, label: 'In Progress', icon: Loader, color: 'text-yellow-500' },
-    { status: 'done' as const, label: 'Done', icon: CheckCircle2, color: 'text-green-500' },
+    { status: 'todo' as const, label: 'Inbox', icon: Inbox, color: 'text-primary' },
+    { status: 'in_progress' as const, label: 'In Progress', icon: Loader, color: 'text-warning' },
+    { status: 'done' as const, label: 'Done', icon: CheckCircle2, color: 'text-success' },
   ]
 
   return (
@@ -125,7 +112,7 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
             <div className="flex-1 min-w-0">
               <DialogTitle className="text-base leading-snug">{task.title}</DialogTitle>
               <div className="flex items-center gap-2 mt-2">
-                <Badge variant={sts.variant} className="text-[10px]">{sts.label}</Badge>
+                <Badge variant={sts.badgeVariant} className="text-[10px]">{sts.label}</Badge>
                 <Badge variant="outline" className="text-[10px] gap-1">
                   <PriIcon className={cn('h-2.5 w-2.5', pri.color)} />
                   {pri.label}
@@ -160,11 +147,11 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
                 {task.subtasks.map((st) => (
                   <div key={st.id} className="flex items-center gap-2">
                     {st.done ? (
-                      <Check className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                      <Check className="h-3.5 w-3.5 text-success shrink-0" />
                     ) : (
                       <div className="h-3.5 w-3.5 rounded-sm border border-muted-foreground/40 shrink-0" />
                     )}
-                    <span className={cn('text-sm', st.done && 'line-through text-muted-foreground')}>{st.title}</span>
+                    <span className={cn('text-sm', st.done && 'text-muted-foreground')}>{st.title}</span>
                   </div>
                 ))}
               </div>
@@ -230,7 +217,7 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-1.5 text-xs text-blue-500 hover:text-blue-400"
+                className="gap-1.5 text-xs text-primary hover:text-primary/80"
                 onClick={handleAiImprove}
                 disabled={analyzeTask.isPending}
               >

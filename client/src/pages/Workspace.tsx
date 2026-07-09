@@ -165,7 +165,7 @@ export function Workspace() {
         >
           <Star className={cn(
             'h-3.5 w-3.5 transition-colors',
-            project.favorite ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground/20 hover:text-yellow-500'
+            project.favorite ? 'fill-warning text-warning' : 'text-muted-foreground/20 hover:text-warning'
           )} />
         </button>
         <span className="text-[13px] font-medium text-foreground shrink-0">{project.name}</span>
@@ -220,7 +220,7 @@ export function Workspace() {
             <TooltipTrigger asChild>
               <button
                 onClick={() => handleLaunch('dev', 'Dev Server')}
-                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-green-400 hover:bg-accent transition-colors"
+                className="p-1.5 rounded-md text-muted-foreground/40 hover:text-success hover:bg-accent transition-colors"
               >
                 <Play className="h-3.5 w-3.5" />
               </button>
@@ -257,13 +257,13 @@ export function Workspace() {
                     className={cn(
                       'p-1.5 rounded-md hover:bg-accent transition-colors relative',
                       skipPermissions
-                        ? 'text-amber-400/80 hover:text-amber-300'
-                        : 'text-muted-foreground/40 hover:text-purple-400',
+                        ? 'text-warning/90 hover:text-warning'
+                        : 'text-muted-foreground/40 hover:text-primary',
                     )}
                   >
                     <Sparkles className="h-3.5 w-3.5" />
                     {skipPermissions && (
-                      <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold text-amber-400 leading-none">Y</span>
+                      <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold text-warning leading-none">Y</span>
                     )}
                   </button>
                 </PopoverTrigger>
@@ -278,7 +278,7 @@ export function Workspace() {
                 }}
                 className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-accent transition-colors"
               >
-                <Sparkles className={cn('h-3.5 w-3.5', skipPermissions ? 'text-amber-400' : 'text-purple-400')} />
+                <Sparkles className={cn('h-3.5 w-3.5', skipPermissions ? 'text-warning' : 'text-primary')} />
                 <span className="font-medium">Open Claude Code{skipPermissions ? ' (YOLO)' : ''}</span>
               </button>
               <div className="border-t my-1" />
@@ -321,7 +321,7 @@ export function Workspace() {
             <Tooltip>
               <TooltipTrigger asChild>
                 <a href={project.externalLink} target="_blank" rel="noopener noreferrer"
-                  className="p-1.5 rounded-md text-blue-500/50 hover:text-blue-400 hover:bg-blue-500/10 transition-colors">
+                  className="p-1.5 rounded-md text-primary/60 hover:text-primary hover:bg-primary/10 transition-colors">
                   <Link2 className="h-3.5 w-3.5" />
                 </a>
               </TooltipTrigger>
@@ -332,7 +332,7 @@ export function Workspace() {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => openSettings('links')}
-                  className="p-1.5 rounded-md text-muted-foreground/20 hover:text-blue-400 hover:bg-accent transition-colors"
+                  className="p-1.5 rounded-md text-muted-foreground/20 hover:text-primary hover:bg-accent transition-colors"
                 >
                   <Link2 className="h-3.5 w-3.5" />
                 </button>

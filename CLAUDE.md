@@ -111,6 +111,25 @@ interface Project {
 
 ## Convencoes e Regras
 
+### Design system (UI)
+- Fonte: **Inter Variable** (`@fontsource-variable/inter`, importada em `main.tsx`;
+  `fontFamily.sans` no tailwind config)
+- Tokens de cor em `client/src/index.css` (CSS vars) mapeados no tailwind config.
+  Alem dos padroes shadcn: `--success` (verde), `--warning` (ambar), `--sidebar`.
+  `--primary` e a cor de marca (azul) — usada para acoes primarias, foco, links,
+  estados ativos, features de IA/Claude e status inbox/todo
+- Semantica de cor: inbox/todo = `primary` · in_progress = `warning` ·
+  done = `success` · urgent/erro/delete = `destructive`. **NUNCA** usar classes
+  literais de paleta (`text-purple-500`, `bg-yellow-500`...) para semantica de
+  status/prioridade — use os tokens. Excecoes: cores de marca de terceiros
+  (Trello/ClickUp em SyncMenu) e cores por tipo de arquivo (FileIcon)
+- Aparencia de prioridade/status de tasks vem de `client/src/lib/taskVisuals.ts`
+  (`PRIORITY_CONFIG`, `STATUS_CONFIG`, `priorityVisual()`, `statusVisual()`) —
+  nao redefinir configs locais por componente. So urgent (vermelho) e high
+  (ambar) tem cor; medium/low sao neutros
+- Tasks done: **sem** `line-through` e **sem** `opacity` no card — titulo em
+  `text-muted-foreground` + check verde. Legibilidade > decoracao
+
 ### Tarefas: description vs prompt
 - **description**: O QUE fazer, visao usuario/produto, sem referencias a codigo
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao

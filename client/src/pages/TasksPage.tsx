@@ -39,9 +39,9 @@ interface ColumnConfig {
 }
 
 const columns: ColumnConfig[] = [
-  { key: 'inbox', label: 'Inbox', icon: Inbox, statuses: ['backlog', 'todo'], dropStatus: 'todo', color: 'text-blue-500' },
-  { key: 'in_progress', label: 'In Progress', icon: Loader, statuses: ['in_progress'], dropStatus: 'in_progress', color: 'text-yellow-500' },
-  { key: 'done', label: 'Done', icon: CheckCircle2, statuses: ['done'], dropStatus: 'done', color: 'text-green-500' },
+  { key: 'inbox', label: 'Inbox', icon: Inbox, statuses: ['backlog', 'todo'], dropStatus: 'todo', color: 'text-primary' },
+  { key: 'in_progress', label: 'In Progress', icon: Loader, statuses: ['in_progress'], dropStatus: 'in_progress', color: 'text-warning' },
+  { key: 'done', label: 'Done', icon: CheckCircle2, statuses: ['done'], dropStatus: 'done', color: 'text-success' },
 ]
 
 const COLUMN_KEYS = new Set(columns.map(c => c.key))
@@ -118,10 +118,10 @@ function sortTasks(tasks: Task[], sort: SortOption): Task[] {
 
 type Priority = Task['priority']
 const priorities: { key: Priority; icon: React.ElementType; color: string; label: string }[] = [
-  { key: 'urgent', icon: AlertTriangle, color: 'text-red-500 border-red-500/50 bg-red-500/10', label: 'Urgent' },
-  { key: 'high', icon: ArrowUp, color: 'text-orange-500 border-orange-500/50 bg-orange-500/10', label: 'High' },
-  { key: 'medium', icon: Minus, color: 'text-blue-500 border-blue-500/50 bg-blue-500/10', label: 'Medium' },
-  { key: 'low', icon: ArrowDown, color: 'text-muted-foreground border-muted-foreground/50 bg-muted', label: 'Low' },
+  { key: 'urgent', icon: AlertTriangle, color: 'text-destructive border-destructive/50 bg-destructive/10', label: 'Urgent' },
+  { key: 'high', icon: ArrowUp, color: 'text-warning border-warning/50 bg-warning/10', label: 'High' },
+  { key: 'medium', icon: Minus, color: 'text-muted-foreground border-muted-foreground/50 bg-muted', label: 'Medium' },
+  { key: 'low', icon: ArrowDown, color: 'text-muted-foreground/60 border-muted-foreground/40 bg-muted', label: 'Low' },
 ]
 
 function DroppableColumn({ col, children, count, taskIds, hiddenCount, onShowMore }: {

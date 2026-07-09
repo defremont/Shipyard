@@ -196,7 +196,7 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
                     onChange={() => setSubtasks(prev => prev.map(s => s.id === st.id ? { ...s, done: !s.done } : s))}
                     className="rounded border-border"
                   />
-                  <span className={cn('text-sm flex-1', st.done && 'line-through text-muted-foreground')}>{st.title}</span>
+                  <span className={cn('text-sm flex-1', st.done && 'text-muted-foreground')}>{st.title}</span>
                   <button
                     type="button"
                     onClick={() => setSubtasks(prev => prev.filter(s => s.id !== st.id))}

@@ -182,7 +182,7 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
         <div className="space-y-1.5">
           <div className="flex items-center justify-between">
             <button
-              className="flex items-center gap-1 text-xs font-medium text-green-500 hover:text-green-400 transition-colors"
+              className="flex items-center gap-1 text-xs font-medium text-success hover:text-success/80 transition-colors"
               onClick={() => setStagedOpen(!stagedOpen)}
             >
               {stagedOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
@@ -336,11 +336,11 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
                 key={commit.hash}
                 className={cn(
                   'flex items-start gap-1.5 py-1 rounded hover:bg-accent/30 transition-colors px-1 cursor-pointer',
-                  unpushed && 'border-l-2 border-yellow-500 pl-1.5'
+                  unpushed && 'border-l-2 border-warning pl-1.5'
                 )}
                 onClick={() => setSelectedCommit({ hash: commit.hash, message: commit.message, author_name: commit.author_name, date: commit.date })}
               >
-                <GitCommit className={cn('h-3 w-3 mt-0.5 shrink-0', unpushed ? 'text-yellow-500' : 'text-muted-foreground/50')} />
+                <GitCommit className={cn('h-3 w-3 mt-0.5 shrink-0', unpushed ? 'text-warning' : 'text-muted-foreground/50')} />
                 <div className="flex-1 min-w-0">
                   <p className="text-[11px] leading-tight truncate">{commit.message}</p>
                   <p className="text-[9px] text-muted-foreground/60">
@@ -352,7 +352,7 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
                 </div>
                 <div className="flex items-center gap-1 shrink-0 mt-0.5">
                   {unpushed && (
-                    <ArrowUp className="h-2.5 w-2.5 text-yellow-500" />
+                    <ArrowUp className="h-2.5 w-2.5 text-warning" />
                   )}
                   <span className="text-[9px] font-mono text-muted-foreground/40">
                     {commit.hash.substring(0, 7)}

@@ -97,7 +97,7 @@ export function MilestoneSelector({ projectId, milestoneId, onMilestoneChange }:
           <button className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-accent">
             <span className={cn(
               'w-1.5 h-1.5 rounded-full',
-              active?.status === 'active' ? 'bg-green-500' : 'bg-muted-foreground/40'
+              active?.status === 'active' ? 'bg-success' : 'bg-muted-foreground/40'
             )} />
             {active?.name || 'General'}
             <ChevronDown className="h-3 w-3" />

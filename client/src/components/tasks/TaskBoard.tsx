@@ -133,7 +133,7 @@ const columns: ColumnConfig[] = [
     icon: Inbox,
     statuses: ['backlog', 'todo'],
     dropStatus: 'todo',
-    color: 'text-blue-500',
+    color: 'text-primary',
   },
   {
     key: 'in_progress',
@@ -141,7 +141,7 @@ const columns: ColumnConfig[] = [
     icon: Loader,
     statuses: ['in_progress'],
     dropStatus: 'in_progress',
-    color: 'text-yellow-500',
+    color: 'text-warning',
   },
   {
     key: 'done',
@@ -149,7 +149,7 @@ const columns: ColumnConfig[] = [
     icon: CheckCircle2,
     statuses: ['done'],
     dropStatus: 'done',
-    color: 'text-green-500',
+    color: 'text-success',
   },
 ]
 
@@ -607,7 +607,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
               setSortBy(v)
               localStorage.setItem(`shipyard:sort:${projectId}`, v)
             }}
-            className="h-7 text-xs bg-background border rounded px-1.5 cursor-pointer outline-none"
+            className="h-7 text-xs bg-background border rounded-md px-2 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-ring text-muted-foreground hover:text-foreground transition-colors"
           >
             {SORT_OPTIONS.map(o => (
               <option key={o.key} value={o.key}>{o.label}</option>
@@ -684,7 +684,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                           <TooltipTrigger asChild>
                             <button
                               onClick={handleMarkAllRead}
-                              className="text-muted-foreground/40 hover:text-green-500 transition-colors"
+                              className="text-muted-foreground/40 hover:text-success transition-colors"
                             >
                               <CheckCheck className="h-3.5 w-3.5" />
                             </button>
@@ -773,7 +773,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                         </button>
                       )}
                       {isDoneCol && showReadDone && readDone.map(task => (
-                        <div key={task.id} className="opacity-40">
+                        <div key={task.id} className="opacity-70">
                           <SortableTaskItem
                             task={task}
                             projectName={projectName}
@@ -801,7 +801,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                         </div>
                       )}
                       {isDoneCol && showReadDone && readDone.map(task => (
-                        <div key={task.id} className="opacity-40">
+                        <div key={task.id} className="opacity-70">
                           <SortableTaskItem
                             task={task}
                             projectName={projectName}

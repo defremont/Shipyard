@@ -1,26 +1,13 @@
 import { useMemo } from 'react'
 import { Link } from 'react-router-dom'
-import { Inbox, Loader, CheckCircle2, AlertTriangle, ArrowUp, ArrowDown, Minus, Circle, Clock, Plus } from 'lucide-react'
+import { Inbox, Loader, CheckCircle2, AlertTriangle, Plus } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { useAllTasks, type Task } from '@/hooks/useTasks'
 import { useProjects, type Project } from '@/hooks/useProjects'
-
-const priorityConfig = {
-  urgent: { icon: AlertTriangle, color: 'text-red-500' },
-  high: { icon: ArrowUp, color: 'text-orange-500' },
-  medium: { icon: Minus, color: 'text-blue-500' },
-  low: { icon: ArrowDown, color: 'text-red-500' },
-}
-
-const statusColors: Record<string, string> = {
-  backlog: 'text-muted-foreground',
-  todo: 'text-blue-500',
-  in_progress: 'text-yellow-500',
-  done: 'text-green-500',
-}
+import { priorityVisual, statusVisual } from '@/lib/taskVisuals'
 
 const statusLabels: Record<string, string> = {
   backlog: 'Inbox',
@@ -30,7 +17,7 @@ const statusLabels: Record<string, string> = {
 }
 
 function TaskRow({ task, project }: { task: Task; project?: Project }) {
-  const pri = priorityConfig[task.priority]
+  const pri = priorityVisual(task.priority)
   const PriIcon = pri.icon
 
   return (
@@ -39,10 +26,10 @@ function TaskRow({ task, project }: { task: Task; project?: Project }) {
       className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-accent/50 transition-colors"
     >
       <PriIcon className={cn('h-3.5 w-3.5 shrink-0', pri.color)} />
-      <span className={cn('text-sm flex-1 truncate', task.status === 'done' && 'line-through opacity-60')}>
+      <span className={cn('text-sm flex-1 truncate', task.status === 'done' && 'text-muted-foreground')}>
         {task.title}
       </span>
-      <span className={cn('text-[10px] shrink-0', statusColors[task.status])}>
+      <span className={cn('text-[10px] shrink-0', statusVisual(task.status).color)}>
         {statusLabels[task.status]}
       </span>
       {project && (
@@ -131,7 +118,7 @@ export function TaskSummary() {
       <div className="grid grid-cols-3 gap-3">
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
-            <Inbox className="h-5 w-5 text-blue-500" />
+            <Inbox className="h-5 w-5 text-primary" />
             <div>
               <p className="text-2xl font-bold">{counts.inbox}</p>
               <p className="text-xs text-muted-foreground">Inbox</p>
@@ -140,7 +127,7 @@ export function TaskSummary() {
         </Card>
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
-            <Loader className="h-5 w-5 text-yellow-500" />
+            <Loader className="h-5 w-5 text-warning" />
             <div>
               <p className="text-2xl font-bold">{counts.inProgress}</p>
               <p className="text-xs text-muted-foreground">In Progress</p>
@@ -149,7 +136,7 @@ export function TaskSummary() {
         </Card>
         <Card>
           <CardContent className="p-4 flex items-center gap-3">
-            <CheckCircle2 className="h-5 w-5 text-green-500" />
+            <CheckCircle2 className="h-5 w-5 text-success" />
             <div>
               <p className="text-2xl font-bold">{counts.done}</p>
               <p className="text-xs text-muted-foreground">Done</p>
@@ -163,7 +150,7 @@ export function TaskSummary() {
         <Card>
           <CardHeader className="pb-2 pt-4 px-4">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-              <Loader className="h-3.5 w-3.5 text-yellow-500" />
+              <Loader className="h-3.5 w-3.5 text-warning" />
               In Progress ({inProgressTasks.length})
             </CardTitle>
           </CardHeader>
@@ -182,7 +169,7 @@ export function TaskSummary() {
         <Card>
           <CardHeader className="pb-2 pt-4 px-4">
             <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-              <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
               Needs Attention
             </CardTitle>
           </CardHeader>
@@ -218,7 +205,7 @@ export function TaskSummary() {
                   </Link>
                   <div className="space-y-0.5">
                     {pTasks.map(task => {
-                      const pri = priorityConfig[task.priority]
+                      const pri = priorityVisual(task.priority)
                       const PriIcon = pri.icon
                       return (
                         <Link
@@ -229,11 +216,11 @@ export function TaskSummary() {
                           <PriIcon className={cn('h-3 w-3 shrink-0', pri.color)} />
                           <span className={cn(
                             'text-sm flex-1 truncate',
-                            task.status === 'done' && 'line-through opacity-60'
+                            task.status === 'done' && 'text-muted-foreground'
                           )}>
                             {task.title}
                           </span>
-                          <span className={cn('text-[10px] shrink-0', statusColors[task.status])}>
+                          <span className={cn('text-[10px] shrink-0', statusVisual(task.status).color)}>
                             {statusLabels[task.status]}
                           </span>
                           <span className="text-[10px] text-muted-foreground/60 shrink-0">
