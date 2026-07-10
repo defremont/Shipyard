@@ -11,6 +11,32 @@ export interface SyncProviderStatus {
   updatedAt: string | null;
 }
 
+export type UsageSeverity = 'normal' | 'warning' | 'critical';
+
+export interface UsageWindow {
+  percent: number;
+  resetsAt: string | null;
+}
+
+export interface ScopedUsageWindow extends UsageWindow {
+  label: string;
+}
+
+/** Subscription usage from the Claude CLI's OAuth session. */
+export type ClaudeUsage =
+  | {
+      available: true;
+      plan: string | null;
+      session: UsageWindow | null;
+      weekly: UsageWindow | null;
+      scoped: ScopedUsageWindow[];
+      severity: UsageSeverity;
+      extraCredits: { enabled: boolean; percent: number | null } | null;
+      fetchedAt: string;
+      stale: boolean;
+    }
+  | { available: false; reason: 'no-oauth' | 'request-failed' };
+
 export interface SyncIntegration {
   providerId: 'trello' | 'clickup';
   projectId: string;
@@ -273,6 +299,7 @@ export const api = {
 
   // Claude AI
   getClaudeStatus: () => request<{ configured: boolean; cliAvailable: boolean; oauthAvailable: boolean; activeBackend: 'cli-oauth' | 'cli' | 'api' | null; model: string | null; maxTokens: number | null }>('/claude/status'),
+  getClaudeUsage: () => request<ClaudeUsage>('/claude/usage'),
   saveClaudeConfig: (data: { apiKey: string; model?: string; maxTokens?: number }) =>
     request<{ ok: boolean }>('/claude/config', { method: 'POST', body: JSON.stringify(data) }),
   deleteClaudeConfig: () => request<{ ok: boolean }>('/claude/config', { method: 'DELETE' }),

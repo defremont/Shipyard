@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import * as claudeService from '../services/claudeService.js';
 import * as aiBackend from '../services/aiBackend.js';
+import * as claudeUsage from '../services/claudeUsage.js';
 import { buildProjectContext, buildTaskContext } from '../services/claudeContextBuilder.js';
 import * as taskStore from '../services/taskStore.js';
 import { getProjects } from '../services/projectDiscovery.js';
@@ -100,6 +101,12 @@ export async function claudeRoutes(app: FastifyInstance) {
       model: status.model,
       maxTokens: status.maxTokens,
     };
+  });
+
+  // Subscription usage (5h + weekly windows). Always 200: an unavailable meter
+  // is a normal state (no OAuth token, endpoint changed), not a request error.
+  app.get('/api/claude/usage', async () => {
+    return claudeUsage.getUsage();
   });
 
   // Save Claude config

@@ -52,6 +52,15 @@ export async function getCliStatus(): Promise<boolean> {
  */
 let cachedOAuthToken: string | null = null;
 let oauthTokenExpiry = 0;
+let cachedPlan: OAuthPlan | null = null;
+
+/** Subscription metadata carried alongside the token in .credentials.json */
+export interface OAuthPlan {
+  /** 'max' | 'pro' | 'free' | … — whatever the CLI last wrote */
+  subscriptionType: string | null;
+  /** e.g. 'default_claude_max_5x' */
+  rateLimitTier: string | null;
+}
 
 export async function getOAuthToken(): Promise<string | null> {
   // Return cached token if still valid (with 5min buffer)
@@ -67,15 +76,27 @@ export async function getOAuthToken(): Promise<string | null> {
     if (Date.now() > new Date(oauth.expiresAt).getTime()) return null;
     cachedOAuthToken = oauth.accessToken;
     oauthTokenExpiry = new Date(oauth.expiresAt).getTime();
+    cachedPlan = {
+      subscriptionType: oauth.subscriptionType ?? null,
+      rateLimitTier: oauth.rateLimitTier ?? null,
+    };
     return cachedOAuthToken;
   } catch {
     return null;
   }
 }
 
+/**
+ * Subscription plan from the credentials file. Populated as a side effect of
+ * getOAuthToken() — call that first, or this returns null.
+ */
+export function getOAuthPlan(): OAuthPlan | null {
+  return cachedPlan;
+}
+
 // OAuth access tokens are NOT API keys: they must be sent as a Bearer token
 // with the oauth beta header. Sending them via x-api-key returns 401.
-function oauthHeaders(token: string): Record<string, string> {
+export function oauthHeaders(token: string): Record<string, string> {
   return {
     'Content-Type': 'application/json',
     'Authorization': `Bearer ${token}`,

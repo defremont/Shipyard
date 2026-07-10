@@ -92,7 +92,7 @@ interface Project {
 **Git**: GET /:id/git/status|diff|log|branches, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
 **Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), WS /ws/terminal/:id
-**Claude AI**: GET /api/claude/status, POST config|config/test|chat(SSE)|analyze-task|summarize, DELETE config
+**Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|summarize, DELETE config
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
 **Sync**:
   POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
@@ -225,6 +225,24 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - NUNCA ler `process.env.ANTHROPIC_API_KEY` — pertence a outras ferramentas
 - `generateText()` para one-shot, `streamText()` para chat SSE
 - Novas features de IA DEVEM usar aiBackend, nao chamar Anthropic direto
+
+### Medidor de uso da assinatura
+- `claudeUsage.ts` le `GET https://api.anthropic.com/api/oauth/usage` com o token
+  OAuth do CLI (mesmo endpoint que o `/usage` do proprio CLI usa)
+- **Endpoint nao documentado**: pode mudar de forma ou sumir. Toda falha degrada
+  para `{ available: false }` e o widget some — nunca quebra a UI
+- So expoe **percentual** de utilizacao (`limit_dollars`/`used_dollars` vem `null`
+  em planos de assinatura). Nao ha contagem de tokens nem de dolares
+- Ler o array generico `limits[]` (kinds: `session`, `weekly_all`, `weekly_scoped`),
+  nao os campos nomeados de topo — junto deles vem codinomes internos (`tangelo`,
+  `iguana_necktie`…) que chegam `null` e nao tem significado estavel
+- 429 nesse endpoint = throttle do medidor, **nao** limite do plano estourado.
+  Nesse caso serve a ultima leitura boa (`stale: true`) por ate 10min
+- Cache de 60s no server + `refetchInterval` de 60s no client. A janela de 5h
+  anda devagar; nao vale poll mais agressivo
+- `ClaudeUsageBadge` no rodape da ActivityBar: anel = janela de 5h (a que trava a
+  sessao de trabalho); popover abre o detalhe. Cor por severidade: <75% neutro,
+  75-89% `warning`, >=90% `destructive`
 
 ### AI Task Management (Claude CLI)
 - `claudeCliService.ts`: detecta e executa Claude CLI (`claude`) como subprocess

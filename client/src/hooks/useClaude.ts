@@ -9,6 +9,17 @@ export function useClaudeStatus() {
   })
 }
 
+/** The 5h window moves slowly; a minute of staleness is invisible to the user. */
+export function useClaudeUsage() {
+  return useQuery({
+    queryKey: ['claude', 'usage'],
+    queryFn: () => api.getClaudeUsage(),
+    staleTime: 60_000,
+    refetchInterval: 60_000,
+    retry: false,
+  })
+}
+
 export function useSaveClaudeConfig() {
   const queryClient = useQueryClient()
   return useMutation({

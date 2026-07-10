@@ -9,6 +9,7 @@ import { useTabs } from '@/hooks/useTabs'
 import { useProjects } from '@/hooks/useProjects'
 import { useGitStatus } from '@/hooks/useGit'
 import { useClaudeStatus } from '@/hooks/useClaude'
+import { ClaudeUsageBadge } from '@/components/claude/ClaudeUsageBadge'
 
 interface ActivityItem {
   id: ActivityId
@@ -140,6 +141,7 @@ export function ActivityBar() {
       </nav>
 
       <div className="flex flex-col items-stretch py-1 border-t">
+        <ClaudeUsageBadge />
         <NavLink to="/logs" label="Logs" icon={ScrollText} position="bottom" />
         <NavLink to="/help" label="Help" icon={HelpCircle} position="bottom" />
         <NavLink to="/settings" label="Settings" icon={Settings} position="bottom" />
