@@ -341,11 +341,15 @@ function sameDue(a: string | null, b: string | null): boolean {
 }
 
 /** Fields of `desired` that differ from what Trello currently holds. */
-function diffCard(desired: CardPayload, remote: RemoteCard): Partial<CardPayload> {
+function diffCard(desired: CardPayload, remote: RemoteCard, knownListIds: Set<string>): Partial<CardPayload> {
   const patch: Partial<CardPayload> = {};
   if (desired.name !== remote.name) patch.name = desired.name;
   if (desired.desc !== (remote.desc ?? '')) patch.desc = desired.desc;
-  if (desired.idList !== remote.idList) patch.idList = desired.idList;
+  // Only move a card back into its status list when it's currently sitting in
+  // one of the four lists Shipyard manages. If the user dragged it into a
+  // list of their own (onboarding, reference, whatever), leave it there —
+  // Shipyard has no business reorganising a list it doesn't own.
+  if (desired.idList !== remote.idList && knownListIds.has(remote.idList)) patch.idList = desired.idList;
   if (!sameLabels(desired.idLabels, remote.idLabels ?? [])) patch.idLabels = desired.idLabels;
   if (desired.pos !== remote.pos) patch.pos = desired.pos;
   if (!sameDue(desired.due, remote.due ?? null)) patch.due = desired.due;
@@ -358,6 +362,7 @@ interface UpsertContext {
   byId: Map<string, RemoteCard>;
   byTitle: Map<string, RemoteCard>;
   adoptedRemoteIds: Set<string>;
+  knownListIds: Set<string>;
 }
 
 function normalizeTitle(s: string): string {
@@ -397,7 +402,7 @@ async function upsertCard(
   if (existingCardId) {
     const remote = ctx.byId.get(existingCardId);
     if (remote) {
-      let patch = diffCard(desired, remote);
+      let patch = diffCard(desired, remote, ctx.knownListIds);
 
       // Trello holds a newer edit than our local task: don't clobber the
       // user's change — the next pull reconciles it. Position is the one
@@ -462,7 +467,8 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
   for (const cid of Object.values(state.cardMap ?? {})) {
     if (byId.has(cid)) adoptedRemoteIds.add(cid);
   }
-  const ctx: UpsertContext = { byId, byTitle, adoptedRemoteIds };
+  const knownListIds = new Set(Object.values(state.listIds ?? {}));
+  const ctx: UpsertContext = { byId, byTitle, adoptedRemoteIds, knownListIds };
 
   // Safe to fan out: upsertCard resolves title adoption synchronously, before
   // its first await, so two tasks can never claim the same remote card.
@@ -585,8 +591,15 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
   const out: PulledTask[] = [];
   for (const card of cards) {
     if (card.closed) continue;
-    // Cards in unrecognised lists default to backlog so they're not dropped.
-    const status = listToStatus[card.idList] ?? 'backlog';
+    // Cards in lists Shipyard doesn't manage (anything besides Backlog/To
+    // Do/In Progress/Done) are the user's own board organisation — e.g. an
+    // onboarding or reference list added straight in Trello. Importing them
+    // as tasks would both clutter the task list and, on the next push, snap
+    // them out of that list and into Backlog (since push only knows how to
+    // place a task in one of the four managed lists). So we leave them alone
+    // entirely: never pulled in, never touched by push.
+    const status = listToStatus[card.idList];
+    if (!status) continue;
 
     let priority: TaskPriority = 'medium';
     for (const labelId of card.idLabels) {
