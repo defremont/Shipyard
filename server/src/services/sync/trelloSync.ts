@@ -354,7 +354,12 @@ function diffCard(desired: CardPayload, remote: RemoteCard, knownListIds: Set<st
   if (desired.pos !== remote.pos) patch.pos = desired.pos;
   if (!sameDue(desired.due, remote.due ?? null)) patch.due = desired.due;
   if (desired.dueComplete !== !!remote.dueComplete) patch.dueComplete = desired.dueComplete;
-  if (remote.closed) patch.closed = false;
+  // Deliberately not touching `closed` here: if the user archived this card
+  // (e.g. tidying up Done), that's a real signal from them, not staleness —
+  // forcing it back open on every push is exactly what re-surfaced archived
+  // cards and confused everyone. Archived-in-Trello stays archived unless
+  // the task itself gets deleted locally (handled by the orphan-archiving
+  // pass below, which only ever closes, never reopens).
   return patch;
 }
 
@@ -446,16 +451,18 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
   // only the fields that actually changed, (b) fall back to title matching
   // when cardMap is stale, and (c) detect cards already deleted in Trello
   // before we PUT them.
+  // filter: 'all' — including archived cards is what lets a task the user
+  // archived on Trello (e.g. tidying up Done) get matched and patched below
+  // instead of looking "gone" and getting a fresh duplicate POSTed back.
   const remoteCards = await trelloRequest<RemoteCard[]>(
     config,
     `/boards/${state.boardId}/cards`,
     'GET',
-    { fields: REMOTE_CARD_FIELDS },
+    { fields: REMOTE_CARD_FIELDS, filter: 'all' },
   );
   const byId = new Map<string, RemoteCard>();
   const byTitle = new Map<string, RemoteCard>();
   for (const c of remoteCards) {
-    if (c.closed) continue;
     byId.set(c.id, c);
     const key = normalizeTitle(c.name);
     if (key && !byTitle.has(key)) byTitle.set(key, c);

@@ -1,6 +1,6 @@
 {
   "name": "shipyard",
-  "version": "1.11.1",
+  "version": "1.11.2",
   "description": "Local development dashboard for managing projects, tasks, git, and terminals",
   "author": {
     "name": "Shipyard Contributors",
