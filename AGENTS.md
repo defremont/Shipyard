@@ -135,6 +135,7 @@ interface Project {
   (`ui/dropdown-menu.tsx`) ou aparecem apenas no hover (acoes de coluna do kanban:
   `group/col` + `opacity-0 group-hover/col:opacity-100`). Nao adicionar botoes
   sempre-visiveis a toolbars sem justificativa de fluxo
+- Abas de projetos compartilham toda a largura disponivel (`basis-0 flex-1 min-w-0`), permanecem todas visiveis e truncam os nomes; nao reintroduzir scroll horizontal nem menu de abas excedentes
 - Painel lateral fecha automaticamente em rotas full-page (`/settings`, `/logs`,
   `/help`) e restaura a preferencia ao voltar — ver `FULL_PAGE_ROUTES` em
   `useActivity.tsx`
