@@ -579,6 +579,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           )}
         </h2>
         <div className="flex flex-wrap items-center gap-1">
+          <TaskForecastSummary projectId={projectId} milestoneId={milestoneId} />
           <SyncMenu projectId={projectId} projectName={projectName} milestoneId={milestoneId} tasks={tasks || []} />
           {/* Secondary controls live in one overflow menu — the toolbar stays minimal */}
           <DropdownMenu>
@@ -625,8 +626,6 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           </Button>
         </div>
       </div>
-
-      <TaskForecastSummary projectId={projectId} milestoneId={milestoneId} />
 
       {viewMode === 'kanban' ? (
         <DndContext
