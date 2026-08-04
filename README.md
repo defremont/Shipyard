@@ -73,7 +73,7 @@ Use the latest CI-built installers from the [Releases page](https://github.com/d
 | macOS Intel | `Shipyard-<version>-x64.dmg` |
 | Linux x64 | `Shipyard-<version>.AppImage` or `Shipyard-<version>.deb` |
 
-> Builds are currently distributed without a commercial code-signing certificate. Your operating system may show its standard warning for independently distributed open-source applications.
+Release builds support Windows Authenticode signing and macOS Developer ID signing/notarization. Maintainers must configure the repository secrets described in [Release signing](#release-signing); unsigned local builds may still show the operating system's security warning.
 
 ## Run from source
 
@@ -253,6 +253,14 @@ UI changes should use the existing design tokens and shadcn/ui primitives. New t
 ## Release process
 
 Pushing a `v*` tag starts the GitHub Actions release workflow. It builds Windows, macOS Intel/Apple Silicon, AppImage, and Debian artifacts, then creates a draft GitHub release with generated notes and attached installers.
+
+### Release signing
+
+For Windows, add `WIN_CSC_LINK` (a path/URL or base64-encoded PFX) and `WIN_CSC_KEY_PASSWORD` as GitHub Actions secrets. An OV certificate identifies the publisher but can still need time to build SmartScreen reputation; an EV certificate provides immediate reputation. Keep the certificate subject stable between releases.
+
+For macOS, add `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD`, `APPLE_API_KEY` (the base64-encoded contents of the `.p8` key), `APPLE_API_KEY_ID`, `APPLE_API_ISSUER`, and `APPLE_TEAM_ID`. The certificate must be a **Developer ID Application** certificate for direct DMG distribution. The build uses Hardened Runtime, submits it to Apple for notarization, and staples the resulting ticket.
+
+The application ID (`com.shipyard.dev`), product name, executable name, and Linux desktop filename are intentionally stable. Changing one of them is a migration and can break Windows taskbar pins, macOS preferences, Linux launcher association, or the upgrade path.
 
 ## License
 

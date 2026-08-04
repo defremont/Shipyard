@@ -157,10 +157,11 @@ async function ensureList(config: SyncConfig, projectName: string, milestoneName
 
 function buildTaskPayload(task: Task) {
   const desc = task.description || '';
+  const effort = task.effort ? `\n\n**Effort:** ${task.effort}` : '';
   const prompt = task.prompt ? `\n\n---\n**Details**\n${task.prompt}` : '';
   return {
     name: task.title,
-    description: desc + prompt,
+    description: desc + effort + prompt,
     status: STATUS_MAP[task.status],
     priority: PRIORITY_TO_NUM[task.priority],
   };
@@ -316,6 +317,7 @@ export interface PulledTask {
   title: string;
   description: string;
   prompt?: string;
+  effort?: Task['effort'];
   status: TaskStatus;
   priority: TaskPriority;
   updatedAt: string;
@@ -411,7 +413,10 @@ export async function pullTasks(config: SyncConfig): Promise<PulledTask[]> {
       'medium';
 
     const fullDesc = t.text_content || t.description || '';
-    const split = fullDesc.split(/\n\n---\n\*\*Details\*\*\n/);
+    const effortMatch = fullDesc.match(/\n\n\*\*Effort:\*\*\s*(1|2|3|5|8)(?=\n|$)/);
+    const effort = effortMatch ? Number(effortMatch[1]) as Task['effort'] : undefined;
+    const withoutEffort = fullDesc.replace(/\n\n\*\*Effort:\*\*\s*(1|2|3|5|8)(?=\n|$)/, '');
+    const split = withoutEffort.split(/\n\n---\n\*\*Details\*\*\n/);
     const description = split[0] ?? '';
     const prompt = split[1];
 
@@ -421,6 +426,7 @@ export async function pullTasks(config: SyncConfig): Promise<PulledTask[]> {
       title: t.name,
       description,
       prompt,
+      effort,
       status,
       priority,
       updatedAt: t.date_updated ? new Date(Number(t.date_updated)).toISOString() : new Date().toISOString(),

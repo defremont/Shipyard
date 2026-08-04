@@ -5,6 +5,17 @@ import { spawn, execSync, type ChildProcess } from 'child_process';
 import { request } from 'http';
 import { homedir, platform as osPlatform } from 'os';
 
+const APP_ID = 'com.shipyard.dev';
+
+// Keep the runtime identity identical to the one embedded by electron-builder.
+// Windows uses it to reconnect taskbar pins after an in-place upgrade, while
+// Linux uses the .desktop filename to associate the running window correctly.
+if (process.platform === 'win32') {
+  app.setAppUserModelId(APP_ID);
+} else if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('class', 'shipyard');
+}
+
 // ── PATH fix for GUI launch on Linux/macOS ─────────────────────────
 // GUI-launched apps on Linux/macOS do NOT inherit shell PATH (no .bashrc/.zshrc).
 // That breaks detection of user-installed CLIs like `claude`, `git`, `pnpm`, etc.

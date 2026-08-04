@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { useCreateTask, useUpdateTask, type Task } from '@/hooks/useTasks'
+import { useCreateTask, useUpdateTask, type Task, type EffortPoints } from '@/hooks/useTasks'
 import { TaskAnalysisButton } from '@/components/claude/TaskAnalysisButton'
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -22,6 +22,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<string>('medium')
+  const [effort, setEffort] = useState<string>('none')
+  const [effortSource, setEffortSource] = useState<'claude' | 'manual'>('manual')
   const [status, setStatus] = useState<string>('todo')
   const [prompt, setPrompt] = useState('')
   const [subtasks, setSubtasks] = useState<{ id: string; title: string; done: boolean }[]>([])
@@ -39,6 +41,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
       setTitle(task.title)
       setDescription(task.description)
       setPriority(task.priority)
+      setEffort(task.effort ? String(task.effort) : 'none')
+      setEffortSource(task.effortSource === 'claude' ? 'claude' : 'manual')
       setStatus(task.status)
       setPrompt(task.prompt || '')
       setSubtasks(task.subtasks || [])
@@ -46,6 +50,7 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
       setTitle('')
       setDescription('')
       setPriority('medium')
+      setEffort('none')
       setStatus('todo')
       setPrompt('')
       setSubtasks([])
@@ -56,6 +61,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
     setTitle('')
     setDescription('')
     setPriority('medium')
+    setEffort('none')
+    setEffortSource('manual')
     setStatus('todo')
     setPrompt('')
     setSubtasks([])
@@ -68,12 +75,12 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
 
     if (task) {
       updateTask.mutate(
-        { projectId, taskId: task.id, title, description, priority, status, prompt: prompt || undefined, subtasks: subtasks.length > 0 ? subtasks : undefined },
+        { projectId, taskId: task.id, title, description, priority, effort: effort === 'none' ? null : Number(effort), effortSource: effort === 'none' ? null : effortSource, status, prompt: prompt || undefined, subtasks: subtasks.length > 0 ? subtasks : undefined },
         { onSuccess: () => onOpenChange(false) }
       )
     } else {
       createTask.mutate(
-        { projectId, title, description, priority, status, prompt: prompt || undefined, milestoneId: milestoneId && milestoneId !== 'default' ? milestoneId : undefined, subtasks: subtasks.length > 0 ? subtasks : undefined },
+        { projectId, title, description, priority, effort: effort === 'none' ? undefined : Number(effort) as EffortPoints, effortSource: effort === 'none' ? undefined : effortSource, status, prompt: prompt || undefined, milestoneId: milestoneId && milestoneId !== 'default' ? milestoneId : undefined, subtasks: subtasks.length > 0 ? subtasks : undefined },
         {
           onSuccess: () => {
             if (quickCreate) {
@@ -118,10 +125,11 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
                 projectId={projectId}
                 taskId={task?.id}
                 title={title}
-                onResult={({ title: t, description: d, prompt: p }) => {
+                onResult={({ title: t, description: d, prompt: p, effort: e }) => {
                   if (t) setTitle(t)
                   if (d) setDescription(d)
                   if (p) setPrompt(p)
+                  if (e) { setEffort(String(e)); setEffortSource('claude') }
                 }}
               />
             </div>
@@ -145,7 +153,7 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
               rows={6}
             />
           </div>
-          <div className="flex gap-4">
+          <div className="grid grid-cols-3 gap-3">
             <div className="flex-1">
               <label className="text-sm font-medium">Priority</label>
               <Select value={priority} onValueChange={setPriority}>
@@ -157,6 +165,20 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
                   <SelectItem value="high">High</SelectItem>
                   <SelectItem value="medium">Medium</SelectItem>
                   <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex-1">
+              <label className="text-sm font-medium">Effort</label>
+              <Select value={effort} onValueChange={value => { setEffort(value); setEffortSource('manual') }}>
+                <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Not estimated</SelectItem>
+                  <SelectItem value="1">1 - Trivial</SelectItem>
+                  <SelectItem value="2">2 - Small</SelectItem>
+                  <SelectItem value="3">3 - Medium</SelectItem>
+                  <SelectItem value="5">5 - Large</SelectItem>
+                  <SelectItem value="8">8 - Very large</SelectItem>
                 </SelectContent>
               </Select>
             </div>

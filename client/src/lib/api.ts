@@ -115,6 +115,8 @@ export const api = {
   getAllTasks: () => request<{ tasks: any[] }>('/tasks/all'),
   getTasks: (projectId: string, milestoneId?: string) =>
     request<{ tasks: any[] }>(`/projects/${projectId}/tasks${milestoneId ? `?milestone=${encodeURIComponent(milestoneId)}` : ''}`),
+  getTaskForecast: (projectId: string, milestoneId?: string) =>
+    request<any>(`/projects/${projectId}/tasks/forecast${milestoneId ? `?milestone=${encodeURIComponent(milestoneId)}` : ''}`),
   createTask: (projectId: string, data: any) => request(`/projects/${projectId}/tasks`, { method: 'POST', body: JSON.stringify(data) }),
   updateTask: (projectId: string, taskId: string, data: any) => request(`/projects/${projectId}/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify(data) }),
   deleteTask: (projectId: string, taskId: string) => request(`/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' }),
@@ -312,9 +314,14 @@ export const api = {
   testClaudeKey: (apiKey: string) =>
     request<{ ok: boolean; error?: string }>('/claude/config/test', { method: 'POST', body: JSON.stringify({ apiKey }) }),
   analyzeTask: (projectId: string, title: string, taskId?: string) =>
-    request<{ title: string; description: string; prompt: string }>('/claude/analyze-task', { method: 'POST', body: JSON.stringify({ projectId, title, taskId }), timeout: 60_000 }),
-  bulkOrganizeTasks: (projectId: string, rawText: string) =>
-    request<{ tasks: Array<{ title: string; description: string; prompt: string; priority: string; status: string }> }>(
+    request<{ title: string; description: string; prompt: string; effort?: 1 | 2 | 3 | 5 | 8; effortConfidence?: 'low' | 'medium' | 'high' }>('/claude/analyze-task', { method: 'POST', body: JSON.stringify({ projectId, title, taskId }), timeout: 60_000 }),
+  classifyTaskEffort: (projectId: string, taskIds?: string[]) =>
+    request<{ suggestions: Array<{ taskId: string; title: string; effort: 1 | 2 | 3 | 5 | 8; confidence: 'low' | 'medium' | 'high'; rationale: string }> }>(
+      '/claude/classify-task-effort', { method: 'POST', body: JSON.stringify({ projectId, taskIds }), timeout: 180_000 }
+    ),
+  applyTaskEffort: (projectId: string, assignments: Array<{ taskId: string; effort: 1 | 2 | 3 | 5 | 8; confidence?: 'low' | 'medium' | 'high' }>) =>
+    request<{ updated: number }>(`/projects/${projectId}/tasks/effort/apply`, { method: 'POST', body: JSON.stringify({ assignments }) }),  bulkOrganizeTasks: (projectId: string, rawText: string) =>
+    request<{ tasks: Array<{ title: string; description: string; prompt: string; priority: string; effort?: 1 | 2 | 3 | 5 | 8; status: string }> }>(
       '/claude/bulk-organize', { method: 'POST', body: JSON.stringify({ projectId, rawText }) }
     ),
   manageTasks: (projectId: string, rawText: string, existingTasks: Array<{ id: string; title: string; description: string; status: string; priority: string }>) =>

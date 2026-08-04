@@ -58,6 +58,9 @@ interface Task {
   title: string;
   description: string;      // O QUE fazer (visao usuario/produto)
   prompt?: string;          // HOW/WHY tecnico (causas, arquivos, solucoes)
+  effort?: 1 | 2 | 3 | 5 | 8; // tamanho de implementacao; opcional para compatibilidade
+  effortSource?: 'claude' | 'manual' | 'backfill';
+  effortConfidence?: 'low' | 'medium' | 'high';
   priority: 'urgent' | 'high' | 'medium' | 'low';
   status: 'backlog' | 'todo' | 'in_progress' | 'done';
   order: number;
@@ -88,11 +91,11 @@ interface Project {
 
 **Projetos**: GET /api/projects, PATCH /:id, POST scan/add/remove/refresh
 **Milestones**: GET/POST /:id/milestones, PUT/DELETE /:id/milestones/:mid
-**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace
+**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
 **Git**: GET /:id/git/status|diff|log|branches, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
 **Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
-**Codex AI**: GET /api/Codex/status|usage, POST config|config/test|chat(SSE)|analyze-task|summarize, DELETE config
+**Codex AI**: GET /api/Codex/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
 **Sync**:
   POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
@@ -145,6 +148,14 @@ interface Project {
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao
 - Para tarefas done: prompt contem resumo da implementacao
 
+### Previsao de tarefas
+- `taskForecast.ts` calcula sob demanda usando timestamps; estimativas nao sao persistidas nas tasks.
+- Duracao de desenvolvimento = `inProgressAt` -> `doneAt`; espera = `inboxAt`/`createdAt` -> `inProgressAt`.
+- Usa mediana e quartis (P25-P75), preferindo mesmo projeto + mesmo `effort`; depois usa effort global e fallbacks por projeto/prioridade/historico global (cache de 60s).
+- Duracoes instantaneas/invalidas e acima de 180 dias sao ignoradas; tarefas em andamento usam duracao residual condicional.
+- Tasks antigas sem effort continuam validas. `POST /api/claude/classify-task-effort` gera sugestoes sem receber status/timestamps/duracao; o usuario revisa e `POST /api/projects/:id/tasks/effort/apply` grava somente as selecionadas com `effortSource: backfill`.
+- Endpoint: `GET /api/projects/:id/tasks/forecast?milestone=...`; mutations invalidam `['task-forecast', projectId]`.
+
 ### Timestamps de Status (cascading)
 Os timestamps sao cascading — etapas posteriores preenchem as anteriores automaticamente:
 - `todo`/`backlog` → define `inboxAt`
@@ -169,6 +180,7 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   (= `triggerAutoSync`). Sem isso o agente altera tarefas e o Trello/ClickUp
   fica desatualizado ate o usuario mexer na UI
 - `update_task`/`bulk_update_tasks` aceitam `milestoneId` (`'default'` = General)
+- `create_task`/`create_tasks`/`update_task`/`bulk_update_tasks` aceitam `effort` Fibonacci (1/2/3/5/8). Agentes DEVEM sempre atribuir/revisar effort com base no tamanho tecnico, nunca inferi-lo da prioridade.
 - Tools read-only levam `annotations.readOnlyHint`; destrutivas, `destructiveHint`
 - Ao adicionar tool: registrar em `MCP_TOOLS` **e** no `handleToolCall`, e atualizar
   a lista de permissoes da tela de consentimento OAuth em `routes/mcp.ts`
@@ -252,6 +264,7 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `aiManagePrompt.ts`: monta prompt para Codex gerenciar MULTIPLAS tarefas a partir de texto livre
 - Auto-close: TerminalPanel detecta quando sessao AI termina e marca task como done se Codex nao o fez
 - Prompt reforça que Codex DEVE atualizar status da task via MCP ao concluir
+- Todo fluxo de IA que cria, analisa, organiza ou resolve tasks DEVE atribuir/revisar `effort` Fibonacci (1/2/3/5/8) pelo tamanho tecnico. Prioridade mede urgencia/impacto e nao serve como proxy de complexidade.
 
 ### Stores JSON (concorrencia)
 - `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)
@@ -261,6 +274,13 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 
 ### Electron
 - Server roda como child process via spawn (`ELECTRON_RUN_AS_NODE=1`)
+- Identidade de distribuicao e estavel: `appId`/AppUserModelID
+  `com.shipyard.dev`, `productName` Shipyard, executavel Linux `shipyard` e desktop
+  file `shipyard.desktop`. Nao alterar sem plano de migracao: isso quebra upgrades,
+  atalhos fixados no Windows e associacao de janela no Linux
+- Releases aceitam assinatura Authenticode via `WIN_CSC_LINK`/
+  `WIN_CSC_KEY_PASSWORD`; macOS usa Developer ID + notarizacao via secrets
+  `MAC_CSC_*` e `APPLE_*` definidos no workflow de release
 - Menu de aplicacao em `createApplicationMenu()` (main.ts) envia acoes via IPC
   `menu-action` → preload expoe `electronAPI.onMenuAction` → hook `useElectronMenu`
   roteia (`navigate:<path>`) ou redispara CustomEvents (`shipyard:toggle-search`,
@@ -282,11 +302,13 @@ sua propria sheet/board/list. O milestone "General" usa o id literal `'default'`
 - URL validada: so permite `https://script.google.com/macros/s/...`
 - Auto-push: debounce 2s; auto-pull: polling 30s com merge bidirecional
 - Anti-loop: `lastPushAt` guard impede pull nos 10s apos push
+- A coluna `effort` e sincronizada e permanece opcional para planilhas antigas.
 
 **Trello / ClickUp** (server-side, schema v3 em `data/sync-config.json`):
 - Creds globais em `providers[providerId]` (apiKey/token), config em `projects[id][provider][milestoneId]`
 - Push: server-side debounce 2.5s em mutations de task — empurra TODOS os milestones
   habilitados do projeto, cada um para sua propria board/list
+- `effort` viaja nos metadados das descricoes Trello/ClickUp e e preservado no merge.
 
 **Ordenacao dos cards no Trello** (`computePositions` em trelloSync.ts):
 - O Trello so ordena lista por data de criacao ou alfabeticamente, e o agente MCP

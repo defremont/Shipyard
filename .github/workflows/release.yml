@@ -42,10 +42,60 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Prepare Apple notarization key
+        if: runner.os == 'macOS'
+        env:
+          APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY }}
+        run: |
+          if [[ -n "$APPLE_API_KEY_BASE64" ]]; then
+            umask 077
+            key_path="$RUNNER_TEMP/AuthKey_Shipyard.p8"
+            printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$key_path"
+            echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+            echo "NOTARIZATION_CONFIGURED=true" >> "$GITHUB_ENV"
+          fi
+
       - name: Build and package
         run: ${{ matrix.cmd }}
         env:
-          CSC_IDENTITY_AUTO_DISCOVERY: false
+          # Windows Authenticode signing (OV/EV certificate exported as PFX).
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          # macOS Developer ID signing and Apple notarization.
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Verify Windows signatures
+        if: runner.os == 'Windows' && env.WIN_CSC_LINK != ''
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+        shell: pwsh
+        run: |
+          $artifacts = Get-ChildItem release -Filter *.exe
+          if (-not $artifacts) { throw 'No Windows executables were produced.' }
+          foreach ($artifact in $artifacts) {
+            $signature = Get-AuthenticodeSignature $artifact.FullName
+            if ($signature.Status -ne 'Valid') {
+              throw "Invalid Authenticode signature on $($artifact.Name): $($signature.Status)"
+            }
+          }
+
+      - name: Verify macOS signatures
+        if: runner.os == 'macOS' && env.CSC_LINK != ''
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+        run: |
+          find release -type d -name Shipyard.app -prune -print0 | while IFS= read -r -d '' app; do
+            codesign --verify --deep --strict --verbose=2 "$app"
+          done
+          if [[ "${NOTARIZATION_CONFIGURED:-}" == "true" ]]; then
+            for dmg in release/*.dmg; do
+              xcrun stapler validate "$dmg"
+            done
+          fi
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4

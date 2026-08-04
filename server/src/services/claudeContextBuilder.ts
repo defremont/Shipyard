@@ -42,14 +42,14 @@ export async function buildProjectContext(projectId: string): Promise<string> {
     if (inProgress.length > 0) {
       parts.push('  In Progress:');
       for (const t of inProgress) {
-        parts.push(`    - [${t.priority}] ${t.title}`);
+        parts.push(`    - [${t.priority}; effort ${t.effort ?? 'unclassified'}] ${t.title}`);
         if (t.description) parts.push(`      ${t.description.slice(0, 200)}`);
       }
     }
     if (inbox.length > 0) {
       parts.push('  Inbox:');
       for (const t of inbox.slice(0, 10)) {
-        parts.push(`    - [${t.priority}] ${t.title}`);
+        parts.push(`    - [${t.priority}; effort ${t.effort ?? 'unclassified'}] ${t.title}`);
       }
     }
   }
@@ -70,5 +70,5 @@ export async function buildTaskContext(projectId: string, taskId: string): Promi
 
   if (!task) return projectContext;
 
-  return `${projectContext}\n\nFocused Task:\n  Title: ${task.title}\n  Status: ${task.status}\n  Priority: ${task.priority}\n  Description: ${task.description || 'None'}\n  Technical Details: ${task.prompt || 'None'}`;
+  return `${projectContext}\n\nFocused Task:\n  Title: ${task.title}\n  Status: ${task.status}\n  Priority: ${task.priority}\n  Effort: ${task.effort ? task.effort + ' points' : 'unclassified'}\n  Description: ${task.description || 'None'}\n  Technical Details: ${task.prompt || 'None'}`;
 }

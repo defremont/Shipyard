@@ -8,7 +8,7 @@ interface TaskAnalysisButtonProps {
   projectId: string
   taskId?: string
   title: string
-  onResult: (result: { title: string; description: string; prompt: string }) => void
+  onResult: (result: { title: string; description: string; prompt: string; effort?: 1 | 2 | 3 | 5 | 8; effortConfidence?: 'low' | 'medium' | 'high' }) => void
 }
 
 export function TaskAnalysisButton({ projectId, taskId, title, onResult }: TaskAnalysisButtonProps) {

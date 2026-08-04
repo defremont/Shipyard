@@ -117,7 +117,9 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
                   <PriIcon className={cn('h-2.5 w-2.5', pri.color)} />
                   {pri.label}
                 </Badge>
-                <span className="text-[10px] text-muted-foreground/60 font-mono select-all ml-auto">#{task.number || '?'}</span>
+                {task.effort && (
+                  <Badge variant="outline" className="text-[10px]">{task.effort} pts effort</Badge>
+                )}                <span className="text-[10px] text-muted-foreground/60 font-mono select-all ml-auto">#{task.number || '?'}</span>
               </div>
             </div>
           </div>

@@ -19,6 +19,7 @@ export interface RemoteTask {
   title: string;
   description: string;
   prompt?: string;
+  effort?: Task['effort'];
   status: Task['status'];
   priority: Task['priority'];
   updatedAt: string;
@@ -92,6 +93,7 @@ export function mergeRemoteIntoLocal(
           (r.title || local.title) !== local.title ||
           (r.description ?? local.description) !== local.description ||
           (r.prompt ?? local.prompt) !== local.prompt ||
+          (r.effort ?? local.effort) !== local.effort ||
           r.status !== local.status ||
           r.priority !== local.priority;
         // Skip when only the remote timestamp moved (our own push bumped
@@ -103,6 +105,8 @@ export function mergeRemoteIntoLocal(
             title: r.title || local.title,
             description: r.description ?? local.description,
             prompt: r.prompt ?? local.prompt,
+            effort: r.effort ?? local.effort,
+            effortSource: r.effort ? 'manual' : local.effortSource,
             status: r.status,
             priority: r.priority,
             updatedAt: r.updatedAt,
@@ -121,6 +125,8 @@ export function mergeRemoteIntoLocal(
         title: r.title,
         description: r.description || '',
         prompt: r.prompt,
+        effort: r.effort,
+        effortSource: r.effort ? 'manual' : undefined,
         priority: r.priority,
         status: r.status,
         order: result.length,

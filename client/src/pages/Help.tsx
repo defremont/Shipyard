@@ -393,6 +393,7 @@ function SectionTasks() {
       <Bullet title="Description">What needs to be done (user-facing, plain language).</Bullet>
       <Bullet title="Details (Prompt)">Technical details, causes, files, solutions. This is copied along with context for Claude.</Bullet>
       <Bullet title="Priority">Urgent, High, Medium, or Low. Affects visual indicators.</Bullet>
+      <Bullet title="Effort">Optional Fibonacci points (1, 2, 3, 5, or 8) for implementation size. Effort is independent from priority.</Bullet>
       <Bullet title="Subtasks">Add a checklist of smaller steps within the task.</Bullet>
 
       <H3>Quick Create Mode</H3>
@@ -439,7 +440,7 @@ function SectionTasks() {
         Click the "Import" button in the task toolbar to open the bulk import dialog. Paste
         unstructured text or a list, then choose how to process it:
       </P>
-      <Bullet title="AI Analyze">Claude organizes the text into properly structured tasks with titles, descriptions, and priorities. Requires Claude API key or CLI installed.</Bullet>
+      <Bullet title="AI Analyze">Claude organizes the text into properly structured tasks with titles, descriptions, priorities, and Fibonacci effort. Requires Claude API key or CLI installed.</Bullet>
       <Bullet title="Basic Parse">A simple fallback that splits bullet points or numbered lists into individual tasks without AI.</Bullet>
       <P>
         Review the parsed tasks before importing — you can select/deselect individual tasks.
@@ -471,6 +472,22 @@ function SectionTasks() {
       <Bullet title="Priority filters">Toggle buttons for Urgent, High, Medium, Low (multi-select).</Bullet>
       <Bullet title="Sort options">Sort by Priority, Newest, Oldest, or Recently Updated.</Bullet>
       <Bullet title="Clear filters">Reset all filters with one click.</Bullet>
+
+      <H3>Effort & Forecasting</H3>
+      <P>
+        Effort uses optional Fibonacci points (1, 2, 3, 5, or 8) to represent implementation size,
+        independently from priority. Claude assigns or reviews effort when it creates, improves, manages,
+        or resolves tasks. Older tasks remain valid without this field.
+      </P>
+      <P>
+        The forecast learns from completed tasks using the time between <code>inProgressAt</code> and <code>doneAt</code>. It first compares tasks with the same effort, then falls back to project,
+        priority, and global history. The forecast bar shows median estimates and a P25-P75 range.
+      </P>
+      <P>
+        For historical tasks without effort, use <strong>Classify effort</strong> in the forecast bar.
+        Claude proposes values from task content without seeing durations; review and select the suggestions
+        before applying them.
+      </P>
 
       <H3>Timestamps</H3>
       <P>
@@ -617,7 +634,7 @@ function SectionSync() {
 
       <InfoBox>
         <p><strong>Config location:</strong> localStorage only — nothing saved on the server. Portable via URL.</p>
-        <p><strong>Columns synced:</strong> id, title, description, priority, status, prompt, updatedAt</p>
+        <p><strong>Columns synced:</strong> id, title, description, priority, effort, status, prompt, updatedAt</p>
       </InfoBox>
 
       <H3>JSON Export</H3>

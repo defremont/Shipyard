@@ -1,12 +1,13 @@
 import type { Task } from '@/hooks/useTasks'
 
-const CSV_COLUMNS = ['id', 'title', 'description', 'priority', 'status'] as const
+const CSV_COLUMNS = ['id', 'title', 'description', 'priority', 'effort', 'status'] as const
 
 export type CsvRow = {
   id: string
   title: string
   description: string
   priority: string
+  effort: string
   status: string
 }
 
@@ -26,6 +27,7 @@ export function tasksToCSV(tasks: Task[]): string {
       title: task.title,
       description: task.description || '',
       priority: task.priority,
+      effort: task.effort ? String(task.effort) : '',
       status: task.status,
     }
     return CSV_COLUMNS.map(col => escapeField(row[col])).join(',')
@@ -80,6 +82,7 @@ export function parseCSV(text: string): CsvRow[] {
         title: obj.title || '',
         description: obj.description || '',
         priority: normalizePriority(obj.priority || ''),
+        effort: ['1', '2', '3', '5', '8'].includes(obj.effort) ? obj.effort : '',
         status: normalizeStatus(obj.status || ''),
       }
     })
@@ -186,6 +189,8 @@ export function diffTasks(currentTasks: Task[], csvRows: CsvRow[]): CsvDiff {
         changes.push({ field: 'description', label: 'Description', oldValue: current.description || '', newValue: row.description })
       if (row.priority !== current.priority)
         changes.push({ field: 'priority', label: 'Priority', oldValue: current.priority, newValue: row.priority })
+      if (row.effort !== (current.effort ? String(current.effort) : ''))
+        changes.push({ field: 'effort', label: 'Effort', oldValue: current.effort ? String(current.effort) : '', newValue: row.effort })
       if (row.status !== current.status)
         changes.push({ field: 'status', label: 'Status', oldValue: current.status, newValue: row.status })
 

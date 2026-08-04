@@ -29,6 +29,10 @@ export interface Subtask {
   done: boolean;
 }
 
+export type EffortPoints = 1 | 2 | 3 | 5 | 8;
+export type EffortSource = 'claude' | 'manual' | 'backfill';
+export type EffortConfidence = 'low' | 'medium' | 'high';
+
 export interface Task {
   id: string;
   number?: number;        // Human-friendly sequential number per project (#1, #2, ...)
@@ -37,6 +41,9 @@ export interface Task {
   title: string;
   description: string;
   priority: 'urgent' | 'high' | 'medium' | 'low';
+  effort?: EffortPoints;
+  effortSource?: EffortSource;
+  effortConfidence?: EffortConfidence;
   status: 'backlog' | 'todo' | 'in_progress' | 'done';
   prompt?: string;
   createdAt: string;

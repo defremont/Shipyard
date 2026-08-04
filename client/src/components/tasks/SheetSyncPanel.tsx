@@ -17,7 +17,7 @@ const APPS_SCRIPT_TEMPLATE = `// Shipyard Sync v2 — Two-sheet system
 
 var DATA_SHEET = 'Data';
 var DASH_SHEET = 'Dashboard';
-var HEADERS = ['id','title','description','priority','status','prompt','updatedAt'];
+var HEADERS = ['id','title','description','priority','effort','status','prompt','updatedAt'];
 
 function getDataSheet() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();

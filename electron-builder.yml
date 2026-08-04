@@ -19,6 +19,8 @@ files:
 extraResources:
   - from: assets/icon.png
     to: icon.png
+  - from: assets/icon.ico
+    to: icon.ico
 
 # Asar disabled: server runs as child process (plain Node) and can't read from asar archives
 asar: false
@@ -42,7 +44,9 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
+  # Recreate the desktop shortcut on reinstall while keeping the stable appId
+  # used by Windows taskbar pins and Start Menu integration.
+  createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: Shipyard
   uninstallDisplayName: Shipyard
@@ -53,6 +57,9 @@ mac:
       arch: [x64, arm64]
   icon: assets/icon.icns
   category: public.app-category.developer-tools
+  hardenedRuntime: true
+  notarize: true
+  minimumSystemVersion: "10.15"
   artifactName: "${productName}-${version}-${arch}.${ext}"
 
 dmg:
@@ -93,3 +100,6 @@ deb:
     - libxss1
     - libxtst6
     - xdg-utils
+    - libatspi2.0-0
+    - libuuid1
+    - libsecret-1-0

@@ -120,6 +120,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
         title: result.title,
         description: result.description,
         prompt: result.prompt,
+        ...(result.effort ? { effort: result.effort, effortSource: 'claude', effortConfidence: result.effortConfidence } : {}),
       })
       // Invalidate cache so UI refreshes regardless of which tab is active
       queryClient.invalidateQueries({ queryKey: ['tasks', task.projectId] })
@@ -192,7 +193,11 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
               </Badge>
             )
           )}
-          {task.subtasks && task.subtasks.length > 0 && (
+          {task.effort && (
+            <span className="text-[10px] text-muted-foreground ml-1" title="Fibonacci effort estimate">
+              {task.effort} pt{task.effort !== 1 ? 's' : ''}
+            </span>
+          )}          {task.subtasks && task.subtasks.length > 0 && (
             <span className="text-[10px] text-muted-foreground ml-1">
               {task.subtasks.filter(s => s.done).length}/{task.subtasks.length}
             </span>

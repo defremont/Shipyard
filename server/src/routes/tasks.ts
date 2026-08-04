@@ -5,6 +5,26 @@ import { buildAiResolvePrompt } from '../services/aiResolvePrompt.js';
 import { buildAiManagePrompt } from '../services/aiManagePrompt.js';
 import * as log from '../services/logService.js';
 import { triggerAutoSync } from '../services/sync/syncEngine.js';
+import { buildTaskForecast } from '../services/taskForecast.js';
+
+let forecastHistoryCache: { tasks: Awaited<ReturnType<typeof taskStore.getAllTasks>>; expiresAt: number } | null = null;
+
+const EFFORT_POINTS = new Set([1, 2, 3, 5, 8]);
+function validEffort(value: unknown): value is 1 | 2 | 3 | 5 | 8 {
+  return typeof value === 'number' && EFFORT_POINTS.has(value);
+}
+async function getForecastHistory() {
+  const now = Date.now();
+  if (forecastHistoryCache && forecastHistoryCache.expiresAt > now) return forecastHistoryCache.tasks;
+  const tasks = await taskStore.getAllTasks();
+  forecastHistoryCache = { tasks, expiresAt: now + 60_000 };
+  return tasks;
+}
+
+function afterTaskMutation(projectId: string) {
+  forecastHistoryCache = null;
+  triggerAutoSync(projectId);
+}
 
 export async function taskRoutes(app: FastifyInstance) {
   // All tasks across all projects
@@ -65,20 +85,59 @@ export async function taskRoutes(app: FastifyInstance) {
     }
   );
 
-  app.post<{ Params: { projectId: string }; Body: { title: string; description?: string; priority?: string; status?: string; prompt?: string; milestoneId?: string } }>(
-    '/api/projects/:projectId/tasks',
+  // Computed on demand: every status transition automatically improves the model.
+  app.get<{ Params: { projectId: string }; Querystring: { milestone?: string } }>(
+    '/api/projects/:projectId/tasks/forecast',
     async (request) => {
+      const [projectTasks, historyTasks] = await Promise.all([
+        taskStore.getTasks(request.params.projectId),
+        getForecastHistory(),
+      ]);
+      const milestone = request.query.milestone;
+      const scopedTasks = !milestone
+        ? projectTasks
+        : milestone === 'default'
+          ? projectTasks.filter(task => !task.milestoneId || task.milestoneId === 'default')
+          : projectTasks.filter(task => task.milestoneId === milestone);
+      return buildTaskForecast(historyTasks, request.params.projectId, scopedTasks);
+    }
+  );
+
+  app.post<{
+    Params: { projectId: string };
+    Body: { assignments: Array<{ taskId: string; effort: number; confidence?: 'low' | 'medium' | 'high' }> };
+  }>('/api/projects/:projectId/tasks/effort/apply', async (request, reply) => {
+    const assignments = request.body?.assignments || [];
+    if (assignments.some(item => !validEffort(item.effort))) {
+      return reply.status(400).send({ error: 'Every effort must be one of 1, 2, 3, 5, 8' });
+    }
+    const sanitized = assignments.map(item => ({
+      taskId: item.taskId,
+      effort: item.effort as 1 | 2 | 3 | 5 | 8,
+      confidence: ['low', 'medium', 'high'].includes(String(item.confidence)) ? item.confidence : undefined,
+    }));
+    const result = await taskStore.applyEffortAssignments(request.params.projectId, sanitized);
+    afterTaskMutation(request.params.projectId);
+    return result;
+  });
+  app.post<{ Params: { projectId: string }; Body: { title: string; description?: string; priority?: string; effort?: number; effortSource?: 'claude' | 'manual'; effortConfidence?: 'low' | 'medium' | 'high'; status?: string; prompt?: string; milestoneId?: string } }>(
+    '/api/projects/:projectId/tasks',
+    async (request, reply) => {
       try {
+        if (request.body.effort !== undefined && !validEffort(request.body.effort)) {
+          return reply.status(400).send({ error: 'effort must be one of 1, 2, 3, 5, 8' });
+        }
         const task = await taskStore.createTask(request.params.projectId, {
           title: request.body.title,
           description: request.body.description || '',
           priority: (request.body.priority as any) || 'medium',
+          ...(validEffort(request.body.effort) ? { effort: request.body.effort, effortSource: request.body.effortSource || 'manual', effortConfidence: request.body.effortConfidence } : {}),
           status: (request.body.status as any) || 'todo',
           prompt: request.body.prompt,
           milestoneId: request.body.milestoneId,
         });
         log.info('tasks', `Task created: ${task.title}`, undefined, request.params.projectId);
-        triggerAutoSync(request.params.projectId);
+        afterTaskMutation(request.params.projectId);
         return task;
       } catch (err: any) {
         log.error('tasks', 'Failed to create task', err.message, request.params.projectId);
@@ -87,15 +146,20 @@ export async function taskRoutes(app: FastifyInstance) {
     }
   );
 
-  app.put<{ Params: { projectId: string; taskId: string }; Body: Partial<{ title: string; description: string; priority: string; status: string; prompt: string; order: number }> }>(
+  app.put<{ Params: { projectId: string; taskId: string }; Body: Partial<{ title: string; description: string; priority: string; effort: number | null; effortSource: 'claude' | 'manual' | 'backfill' | null; effortConfidence: 'low' | 'medium' | 'high' | null; status: string; prompt: string; order: number }> }>(
     '/api/projects/:projectId/tasks/:taskId',
     async (request, reply) => {
-      const task = await taskStore.updateTask(request.params.projectId, request.params.taskId, request.body as any);
+      if (request.body.effort !== undefined && request.body.effort !== null && !validEffort(request.body.effort)) {
+        return reply.status(400).send({ error: 'effort must be one of 1, 2, 3, 5, 8' });
+      }
+      const updates = { ...request.body } as any;
+      if (validEffort(request.body.effort) && !request.body.effortSource) updates.effortSource = 'manual';
+      const task = await taskStore.updateTask(request.params.projectId, request.params.taskId, updates);
       if (!task) return reply.status(404).send({ error: 'Task not found' });
       if (request.body.status) {
         log.info('tasks', `Task "${task.title}" → ${request.body.status}`, undefined, request.params.projectId);
       }
-      triggerAutoSync(request.params.projectId);
+      afterTaskMutation(request.params.projectId);
       return task;
     }
   );
@@ -106,7 +170,7 @@ export async function taskRoutes(app: FastifyInstance) {
       const deleted = await taskStore.deleteTask(request.params.projectId, request.params.taskId);
       if (!deleted) return reply.status(404).send({ error: 'Task not found' });
       log.info('tasks', `Task deleted: ${request.params.taskId}`, undefined, request.params.projectId);
-      triggerAutoSync(request.params.projectId);
+      afterTaskMutation(request.params.projectId);
       return { success: true };
     }
   );
@@ -114,11 +178,14 @@ export async function taskRoutes(app: FastifyInstance) {
   // Bulk update — single atomic write for column-level "move all" actions.
   app.post<{ Params: { projectId: string }; Body: { taskIds: string[]; data: Record<string, any> } }>(
     '/api/projects/:projectId/tasks/bulk-update',
-    async (request) => {
+    async (request, reply) => {
       const { taskIds, data } = request.body || ({} as any);
+      if (data?.effort !== undefined && data.effort !== null && !validEffort(data.effort)) {
+        return reply.status(400).send({ error: 'effort must be one of 1, 2, 3, 5, 8' });
+      }
       const result = await taskStore.bulkUpdateTasks(request.params.projectId, taskIds || [], data || {});
       log.info('tasks', `Bulk updated ${result.updated} tasks`, JSON.stringify(data), request.params.projectId);
-      triggerAutoSync(request.params.projectId);
+      afterTaskMutation(request.params.projectId);
       return result;
     }
   );
@@ -130,7 +197,7 @@ export async function taskRoutes(app: FastifyInstance) {
       const taskIds = request.body?.taskIds || [];
       const result = await taskStore.bulkDeleteTasks(request.params.projectId, taskIds);
       log.info('tasks', `Bulk deleted ${result.deleted} tasks`, undefined, request.params.projectId);
-      triggerAutoSync(request.params.projectId);
+      afterTaskMutation(request.params.projectId);
       return result;
     }
   );
@@ -142,7 +209,7 @@ export async function taskRoutes(app: FastifyInstance) {
       try {
         const count = await taskStore.importTasks(request.params.projectId, request.body.tasks);
         log.info('tasks', `Imported ${count} tasks`, undefined, request.params.projectId);
-        triggerAutoSync(request.params.projectId);
+        afterTaskMutation(request.params.projectId);
         return { imported: count };
       } catch (err: any) {
         log.error('tasks', 'Task import failed', err.message, request.params.projectId);
@@ -165,7 +232,7 @@ export async function taskRoutes(app: FastifyInstance) {
       let total = 0;
       for (const [pid, tasks] of byProject) {
         total += await taskStore.importTasks(pid, tasks);
-        triggerAutoSync(pid);
+        afterTaskMutation(pid);
       }
       return { imported: total };
     }
@@ -182,7 +249,7 @@ export async function taskRoutes(app: FastifyInstance) {
         const result = await taskStore.applyCsvChanges(request.params.projectId, request.body);
         const { update, create, remove } = request.body;
         log.info('tasks', `CSV apply: ${update?.length || 0} updated, ${create?.length || 0} created, ${remove?.length || 0} removed`, undefined, request.params.projectId);
-        triggerAutoSync(request.params.projectId);
+        afterTaskMutation(request.params.projectId);
         return result;
       } catch (err: any) {
         log.error('tasks', 'CSV apply failed', err.message, request.params.projectId);
@@ -196,7 +263,7 @@ export async function taskRoutes(app: FastifyInstance) {
     '/api/projects/:projectId/tasks/replace',
     async (request) => {
       const tasks = await taskStore.replaceTasks(request.params.projectId, request.body.tasks, request.body.milestoneId);
-      triggerAutoSync(request.params.projectId);
+      afterTaskMutation(request.params.projectId);
       return { tasks };
     }
   );
@@ -244,7 +311,7 @@ export async function taskRoutes(app: FastifyInstance) {
     '/api/projects/:projectId/tasks/reorder',
     async (request) => {
       const tasks = await taskStore.reorderTasks(request.params.projectId, request.body.taskIds);
-      triggerAutoSync(request.params.projectId);
+      afterTaskMutation(request.params.projectId);
       return { tasks };
     }
   );

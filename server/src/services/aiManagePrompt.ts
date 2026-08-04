@@ -46,11 +46,12 @@ export function buildAiManagePrompt(
   lines.push('```');
   lines.push(`curl -X POST http://localhost:${serverPort}/api/projects/${project.id}/tasks \\`);
   lines.push(`  -H "Content-Type: application/json" \\`);
-  lines.push(`  -d '{"title": "...", "description": "...", "prompt": "...", "priority": "medium", "status": "todo"}'`);
+  lines.push(`  -d '{"title": "...", "description": "...", "prompt": "...", "priority": "medium", "effort": 3, "status": "todo"}'`);
   lines.push('```');
   lines.push('- description: user-facing what needs to be done');
   lines.push('- prompt: technical implementation details, files, approach');
   lines.push('- priority: urgent | high | medium | low');
+  lines.push('- effort: REQUIRED Fibonacci size 1 | 2 | 3 | 5 | 8 (size/uncertainty, never urgency)');
   lines.push('- status: todo | in_progress | done');
   lines.push('');
 
@@ -67,6 +68,7 @@ export function buildAiManagePrompt(
   lines.push('- Compare new items against existing tasks. Skip duplicates, update existing ones if needed.');
   lines.push('- For "mark as done" instructions, find matching tasks and update their status.');
   lines.push('- Set priorities based on urgency: ASAP/critical/urgent → urgent or high.');
+  lines.push('- ALWAYS set effort for every created task: 1 trivial, 2 small, 3 medium, 5 large/cross-layer, 8 very large or uncertain.');
   lines.push('- Generate clear descriptions (user-facing) and technical prompts (implementation details).');
   lines.push('- Interpret informal text: meeting notes, client emails, bug reports, etc.');
   lines.push('- Log each action you take (created, updated, skipped) so the user can see what happened.');

@@ -1,10 +1,14 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { nanoid } from 'nanoid';
-import type { Task, Milestone, TasksFile } from '../types/index.js';
+import type { Task, Milestone, TasksFile, EffortPoints, EffortConfidence } from '../types/index.js';
 import { DATA_DIR } from './dataDir.js';
 
 export const TASKS_DIR = join(DATA_DIR, 'tasks');
+const EFFORT_POINTS = new Set<EffortPoints>([1, 2, 3, 5, 8]);
+function isEffort(value: unknown): value is EffortPoints {
+  return typeof value === 'number' && EFFORT_POINTS.has(value as EffortPoints);
+}
 
 async function ensureTasksDir(): Promise<void> {
   await mkdir(TASKS_DIR, { recursive: true });
@@ -107,6 +111,7 @@ function normalizeTasks(tasks: Task[], projectId: string): void {
     if (!t.projectId) t.projectId = projectId;
     if (!t.createdAt) t.createdAt = t.updatedAt || new Date().toISOString();
     if (t.order == null) t.order = 0;
+    if (!isEffort(t.effort)) { delete t.effort; delete t.effortSource; delete t.effortConfidence; }
   }
 }
 
@@ -219,6 +224,11 @@ export function updateTask(projectId: string, taskId: string, data: Partial<Omit
       ...applyStatusTimestamps(tasks[idx], data.status, now),
       updatedAt: now,
     };
+    if ((data as any).effort === null) {
+      delete tasks[idx].effort;
+      delete tasks[idx].effortSource;
+      delete tasks[idx].effortConfidence;
+    }
     await writeTasks(projectId, tasks);
     return tasks[idx];
   });
@@ -263,6 +273,34 @@ export function bulkUpdateTasks(
   });
 }
 
+export function applyEffortAssignments(
+  projectId: string,
+  assignments: Array<{ taskId: string; effort: EffortPoints; confidence?: EffortConfidence }>,
+): Promise<{ updated: number }> {
+  return withLock(projectId, async () => {
+    const validEfforts = new Set<EffortPoints>([1, 2, 3, 5, 8]);
+    const byId = new Map(assignments.filter(a => validEfforts.has(a.effort)).map(a => [a.taskId, a]));
+    if (byId.size === 0) return { updated: 0 };
+    const tasks = await readTasks(projectId);
+    const now = new Date().toISOString();
+    let updated = 0;
+    for (let i = 0; i < tasks.length; i++) {
+      const assignment = byId.get(tasks[i].id);
+      // Backfill is deliberately non-destructive: manual/previous values win.
+      if (!assignment || tasks[i].effort !== undefined) continue;
+      tasks[i] = {
+        ...tasks[i],
+        effort: assignment.effort,
+        effortSource: 'backfill',
+        effortConfidence: assignment.confidence || 'medium',
+        updatedAt: now,
+      };
+      updated++;
+    }
+    if (updated > 0) await writeTasks(projectId, tasks);
+    return { updated };
+  });
+}
 export function bulkDeleteTasks(projectId: string, taskIds: string[]): Promise<{ deleted: number }> {
   return withLock(projectId, async () => {
     if (taskIds.length === 0) return { deleted: 0 };
@@ -288,6 +326,7 @@ export function importTasks(projectId: string, importedTasks: Partial<Task>[]): 
         title: t.title || 'Untitled',
         description: t.description || '',
         priority: (t.priority as Task['priority']) || 'medium',
+        ...(isEffort(t.effort) ? { effort: t.effort, effortSource: t.effortSource, effortConfidence: t.effortConfidence } : {}),
         status,
         prompt: t.prompt,
         milestoneId: t.milestoneId,
@@ -332,6 +371,11 @@ export function applyCsvChanges(
           ...applyStatusTimestamps(tasks[idx], upd.status, now),
           updatedAt: now,
         };
+        if ((upd as any).effort === null) {
+          delete tasks[idx].effort;
+          delete tasks[idx].effortSource;
+          delete tasks[idx].effortConfidence;
+        }
         updatedCount++;
       }
     }
@@ -343,6 +387,7 @@ export function applyCsvChanges(
         title: newTask.title || 'Untitled',
         description: newTask.description || '',
         priority: (newTask.priority as Task['priority']) || 'medium',
+        ...(isEffort(newTask.effort) ? { effort: newTask.effort, effortSource: newTask.effortSource || 'manual', effortConfidence: newTask.effortConfidence } : {}),
         status,
         prompt: newTask.prompt,
         id: nanoid(10),
@@ -376,6 +421,9 @@ export function replaceTasks(projectId: string, incoming: Partial<Task>[], miles
         title: t.title || 'Untitled',
         description: t.description || '',
         priority: (t.priority as Task['priority']) || 'medium',
+        effort: isEffort(t.effort) ? t.effort : existing?.effort,
+        effortSource: t.effortSource || existing?.effortSource,
+        effortConfidence: t.effortConfidence || existing?.effortConfidence,
         status,
         prompt: t.prompt,
         milestoneId: t.milestoneId || milestoneId || existing?.milestoneId,

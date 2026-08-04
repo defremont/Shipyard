@@ -1,11 +1,11 @@
-import type { Task } from '@/hooks/useTasks'
+import type { Task, EffortPoints } from '@/hooks/useTasks'
 
 export interface SheetSyncOptions {
   includePrompt?: boolean // default true
 }
 
 // Columns synced with Google Sheets
-const SHEET_COLUMNS = ['id', 'title', 'description', 'priority', 'status', 'prompt', 'updatedAt'] as const
+const SHEET_COLUMNS = ['id', 'title', 'description', 'priority', 'effort', 'status', 'prompt', 'updatedAt'] as const
 
 const VALID_PRIORITIES = ['urgent', 'high', 'medium', 'low']
 const VALID_STATUSES = ['backlog', 'todo', 'in_progress', 'done']
@@ -38,6 +38,7 @@ export interface SheetRow {
   title: string
   description: string
   priority: string
+  effort?: EffortPoints
   status: string
   prompt: string
   updatedAt: string
@@ -53,6 +54,7 @@ export function sheetRowsToTasks(rows: Array<Record<string, string>>, options?: 
       title: row.title?.trim() || '',
       description: row.description?.trim() || '',
       priority: normalizePriority(row.priority || ''),
+      effort: ['1', '2', '3', '5', '8'].includes(String(row.effort || '')) ? Number(row.effort) as EffortPoints : undefined,
       status: normalizeStatus(row.status || ''),
       prompt: includePrompt ? (row.prompt?.trim() || '') : '',
       updatedAt: row.updatedat || row.updatedAt || '',
@@ -69,6 +71,7 @@ export function tasksToSheetPayload(tasks: Task[], options?: SheetSyncOptions): 
       title: t.title,
       description: t.description || '',
       priority: t.priority,
+      effort: t.effort,
       status: t.status,
       prompt: includePrompt ? (t.prompt || '') : '',
       updatedAt: t.updatedAt || '',
@@ -82,6 +85,7 @@ function taskToRow(t: Task): SheetRow {
     title: t.title,
     description: t.description || '',
     priority: t.priority,
+    effort: t.effort,
     status: t.status,
     prompt: t.prompt || '',
     updatedAt: t.updatedAt || '',
@@ -93,6 +97,7 @@ function contentEquals(local: Task, sheet: SheetRow, options?: SheetSyncOptions)
   return local.title === sheet.title
     && (local.description || '') === sheet.description
     && local.priority === sheet.priority
+    && local.effort === sheet.effort
     && local.status === sheet.status
     && (includePrompt ? (local.prompt || '') === sheet.prompt : true)
 }

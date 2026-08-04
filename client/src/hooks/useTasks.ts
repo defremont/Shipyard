@@ -2,6 +2,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { scheduleAutoSync as scheduleAutoSyncPush } from '@/lib/sync/autoSync'
 
+export type EffortPoints = 1 | 2 | 3 | 5 | 8
+
 export interface Task {
   id: string
   number?: number
@@ -10,6 +12,9 @@ export interface Task {
   title: string
   description: string
   priority: 'urgent' | 'high' | 'medium' | 'low'
+  effort?: EffortPoints
+  effortSource?: 'claude' | 'manual' | 'backfill'
+  effortConfidence?: 'low' | 'medium' | 'high'
   status: 'backlog' | 'todo' | 'in_progress' | 'done'
   prompt?: string
   createdAt: string
@@ -20,6 +25,38 @@ export interface Task {
   doneAt?: string
   needsReview?: boolean
   subtasks?: { id: string; title: string; done: boolean }[]
+}
+
+export interface TaskForecast {
+  generatedAt: string
+  confidence: 'low' | 'medium' | 'high'
+  history: {
+    completedWithDevelopmentTime: number
+    completedWithQueueTime: number
+    medianDevelopmentMs: number | null
+    medianQueueMs: number | null
+    throughputLast30Days: number
+    completedWithEffort: number
+    unclassifiedTaskCount: number
+  }
+  scope: {
+    taskCount: number
+    inboxCount: number
+    inProgressCount: number
+    estimatedDevelopmentMs: number
+    likelyLowMs: number
+    likelyHighMs: number
+    estimatedQueueMs: number | null
+  }
+  tasks: Array<{
+    taskId: string
+    estimatedDevelopmentMs: number
+    remainingDevelopmentMs: number
+    likelyLowMs: number
+    likelyHighMs: number
+    sampleSize: number
+    source: 'project-effort' | 'global-effort' | 'project-priority' | 'project' | 'global-priority' | 'global' | 'none'
+  }>
 }
 
 /**
@@ -56,14 +93,27 @@ export function useTasks(projectId: string | undefined, milestoneId?: string) {
   })
 }
 
+export function useTaskForecast(projectId: string | undefined, milestoneId?: string) {
+  return useQuery({
+    queryKey: ['task-forecast', projectId, milestoneId || 'all'],
+    queryFn: async () => {
+      if (!projectId) return null
+      return api.getTaskForecast(projectId, milestoneId) as Promise<TaskForecast>
+    },
+    enabled: !!projectId,
+    refetchInterval: 30_000,
+  })
+}
+
 export function useCreateTask() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ projectId, ...data }: { projectId: string; title: string; description?: string; priority?: string; status?: string; prompt?: string; milestoneId?: string; subtasks?: { id: string; title: string; done: boolean }[] }) =>
+    mutationFn: ({ projectId, ...data }: { projectId: string; title: string; description?: string; priority?: string; effort?: EffortPoints; effortSource?: 'claude' | 'manual'; status?: string; prompt?: string; milestoneId?: string; subtasks?: { id: string; title: string; done: boolean }[] }) =>
       api.createTask(projectId, data),
     onSuccess: (_, variables) => {
       // Invalidate all task queries for this project (including milestone-scoped)
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },
@@ -106,6 +156,7 @@ export function useUpdateTask() {
     onSettled: (_, __, variables) => {
       // Always refetch to sync with server state
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },
@@ -119,6 +170,7 @@ export function useDeleteTask() {
       api.deleteTask(projectId, taskId),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },
@@ -132,6 +184,7 @@ export function useBulkUpdateTasks() {
       api.bulkUpdateTasks(projectId, taskIds, data),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },
@@ -145,6 +198,7 @@ export function useBulkDeleteTasks() {
       api.bulkDeleteTasks(projectId, taskIds),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },
@@ -158,6 +212,7 @@ export function useImportTasks() {
       api.importTasks(projectId, tasks),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },
@@ -170,6 +225,7 @@ export function useImportAllTasks() {
     mutationFn: (tasks: any[]) => api.importAllTasks(tasks),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tasks'] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast'] })
     },
   })
 }
@@ -181,6 +237,7 @@ export function useApplyCsvChanges() {
       api.applyCsvChanges(projectId, changes),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },
@@ -217,6 +274,7 @@ export function useReorderTasks() {
     },
     onSettled: (_, __, variables) => {
       queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
       queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
       scheduleAutoSyncPush(variables.projectId)
     },

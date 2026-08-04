@@ -30,6 +30,7 @@ import { BulkImportDialog } from './BulkImportDialog'
 import { ColumnBulkMenu } from './ColumnBulkMenu'
 import { SyncMenu } from '@/components/sync/SyncMenu'
 import { MilestoneSelector } from './MilestoneSelector'
+import { TaskForecastSummary } from './TaskForecastSummary'
 // Pulls in CodeMirror for the markdown preview — keep it out of the board's chunk.
 const ReportDialog = lazy(() =>
   import('@/components/reports/ReportDialog').then(m => ({ default: m.ReportDialog }))
@@ -624,6 +625,8 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           </Button>
         </div>
       </div>
+
+      <TaskForecastSummary projectId={projectId} milestoneId={milestoneId} />
 
       {viewMode === 'kanban' ? (
         <DndContext

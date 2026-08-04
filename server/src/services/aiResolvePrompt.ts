@@ -34,6 +34,7 @@ export function buildAiResolvePrompt(
 
   const priorityLabel: Record<string, string> = { urgent: 'URGENT', high: 'HIGH', medium: 'MEDIUM', low: 'LOW' };
   lines.push(`Priority: ${priorityLabel[task.priority] || task.priority}`);
+  lines.push(`Effort: ${task.effort ? task.effort + ' points' : 'not classified'}`);
   lines.push(`Task ID: ${task.id}`);
   lines.push(`Project ID: ${project.id}`);
   lines.push('');
@@ -47,13 +48,13 @@ export function buildAiResolvePrompt(
   lines.push('');
 
   lines.push('## IMPORTANT: When starting work on this task');
-  lines.push('First, improve the task title and description if they are vague or unclear.');
+  lines.push('First, improve the task title and description if they are vague or unclear, and ALWAYS set or correct effort using Fibonacci points (1 trivial, 2 small, 3 medium, 5 large/cross-layer, 8 very large or uncertain). Effort is implementation size, not priority.');
   lines.push(`Call this API to update the task:`);
   lines.push('');
   lines.push('```');
   lines.push(`curl -X PUT http://localhost:${serverPort}/api/projects/${project.id}/tasks/${task.id} \\`);
   lines.push(`  -H "Content-Type: application/json" \\`);
-  lines.push(`  -d '{"title": "<improved title>", "description": "<improved description>"}'`);
+  lines.push(`  -d '{"title": "<improved title>", "description": "<improved description>", "effort": <1|2|3|5|8>}'`);
   lines.push('```');
   lines.push('');
 

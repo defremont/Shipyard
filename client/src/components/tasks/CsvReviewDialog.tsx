@@ -56,6 +56,17 @@ function FieldValueEditor({ field, value, onChange }: { field: string; value: st
       </Select>
     )
   }
+  if (field === 'effort') {
+    return (
+      <Select value={value || 'none'} onValueChange={v => onChange(v === 'none' ? '' : v)}>
+        <SelectTrigger className="h-7 text-xs w-[120px]"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          <SelectItem value="none">Not estimated</SelectItem>
+          {[1, 2, 3, 5, 8].map(points => <SelectItem key={points} value={String(points)}>{points} pts</SelectItem>)}
+        </SelectContent>
+      </Select>
+    )
+  }
   if (field === 'status') {
     return (
       <Select value={value} onValueChange={onChange}>
@@ -235,7 +246,7 @@ export function CsvReviewDialog({ open, onOpenChange, diff, projectId }: CsvRevi
         const edited = modifiedEdits[mod.id]?.[field]
         const csvVal = mod.incoming[field as keyof CsvRow]
         const value = edited ?? csvVal
-        upd[field] = value
+        upd[field] = field === 'effort' ? (value ? Number(value) : null) : value
       }
       update.push(upd)
     }

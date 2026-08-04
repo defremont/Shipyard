@@ -3,7 +3,7 @@ import * as taskStore from './taskStore.js';
 import * as gitService from './gitService.js';
 import * as syncStore from './syncStore.js';
 import * as syncEngine from './sync/syncEngine.js';
-import type { Project, Task } from '../types/index.js';
+import type { Project, Task, EffortPoints } from '../types/index.js';
 
 // MCP Tool handlers - optimized for minimal token usage
 // Lists return slim summaries; use get_task for full details
@@ -49,6 +49,7 @@ function slimTask(t: Task) {
     title: t.title,
     status: t.status,
     priority: t.priority,
+    ...(t.effort ? { effort: t.effort } : {}),
     order: t.order,
   };
 }
@@ -100,10 +101,10 @@ export async function getTask(projectId: string, taskId: string): Promise<McpToo
   const task = await taskStore.getTask(projectId, taskId);
   if (!task) return fail(`Task "${taskId}" not found`);
   // Full task details (this is the tool for getting description/prompt)
-  const { id, number, title, description, priority, status, prompt, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks } = task;
+  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks } = task;
   return { content: [{ type: 'text', text: compact({
     id, number, projectId, ...(milestoneId ? { milestoneId } : {}),
-    title, description, priority, status, prompt,
+    title, description, priority, effort, effortSource, effortConfidence, status, prompt,
     createdAt, updatedAt, inboxAt, inProgressAt, doneAt,
     ...(subtasks?.length ? { subtasks } : {}),
   }) }] };
@@ -113,6 +114,7 @@ interface TaskInput {
   title: string;
   description?: string;
   priority?: string;
+  effort?: EffortPoints;
   status?: string;
   prompt?: string;
   milestoneId?: string;
@@ -123,12 +125,14 @@ export async function createTask(projectId: string, data: TaskInput): Promise<Mc
     title: data.title,
     description: data.description || '',
     priority: (data.priority as Task['priority']) || 'medium',
+    effort: data.effort,
+    effortSource: data.effort ? 'claude' : undefined,
     status: (data.status as Task['status']) || 'todo',
     prompt: data.prompt,
     milestoneId: data.milestoneId,
   });
   afterTaskMutation(projectId);
-  return ok({ id: task.id, number: task.number, title: task.title, status: task.status });
+  return ok({ id: task.id, number: task.number, title: task.title, status: task.status, effort: task.effort });
 }
 
 /**
@@ -142,6 +146,8 @@ export async function createTasks(projectId: string, tasks: TaskInput[], milesto
     title: t.title,
     description: t.description || '',
     priority: (t.priority as Task['priority']) || 'medium',
+    effort: t.effort,
+    effortSource: t.effort ? 'claude' : undefined,
     status: (t.status as Task['status']) || 'todo',
     prompt: t.prompt,
     milestoneId: t.milestoneId ?? milestoneId,
@@ -154,6 +160,7 @@ export async function updateTask(projectId: string, taskId: string, data: {
   title?: string;
   description?: string;
   priority?: string;
+  effort?: EffortPoints;
   status?: string;
   prompt?: string;
   milestoneId?: string;
@@ -162,6 +169,7 @@ export async function updateTask(projectId: string, taskId: string, data: {
   if (data.title !== undefined) updates.title = data.title;
   if (data.description !== undefined) updates.description = data.description;
   if (data.priority !== undefined) updates.priority = data.priority as Task['priority'];
+  if (data.effort !== undefined) { updates.effort = data.effort; updates.effortSource = 'claude'; }
   if (data.status !== undefined) updates.status = data.status as Task['status'];
   if (data.prompt !== undefined) updates.prompt = data.prompt;
   // 'default' is the virtual General milestone — stored as an absent field.
@@ -172,22 +180,24 @@ export async function updateTask(projectId: string, taskId: string, data: {
   const task = await taskStore.updateTask(projectId, taskId, updates);
   if (!task) return fail(`Task "${taskId}" not found`);
   afterTaskMutation(projectId);
-  return ok({ id: task.id, title: task.title, status: task.status, priority: task.priority, milestoneId: task.milestoneId ?? 'default' });
+  return ok({ id: task.id, title: task.title, status: task.status, priority: task.priority, effort: task.effort, milestoneId: task.milestoneId ?? 'default' });
 }
 
 export async function bulkUpdateTasks(projectId: string, taskIds: string[], data: {
   status?: string;
   priority?: string;
+  effort?: EffortPoints;
   milestoneId?: string;
 }): Promise<McpToolResult> {
   if (!Array.isArray(taskIds) || taskIds.length === 0) return fail('taskIds must be a non-empty array');
   const updates: Partial<Task> = {};
   if (data.status !== undefined) updates.status = data.status as Task['status'];
   if (data.priority !== undefined) updates.priority = data.priority as Task['priority'];
+  if (data.effort !== undefined) { updates.effort = data.effort; updates.effortSource = 'claude'; }
   if (data.milestoneId !== undefined) {
     updates.milestoneId = data.milestoneId === 'default' ? undefined : data.milestoneId;
   }
-  if (Object.keys(updates).length === 0) return fail('Nothing to update — pass status, priority or milestoneId');
+  if (Object.keys(updates).length === 0) return fail('Nothing to update — pass status, priority, effort or milestoneId');
 
   const result = await taskStore.bulkUpdateTasks(projectId, taskIds, updates);
   afterTaskMutation(projectId);
@@ -509,6 +519,7 @@ const TASK_ID = { type: 'string', description: 'The task ID' } as const;
 const MILESTONE_ID = { type: 'string', description: 'Milestone ID. Use "default" for the virtual "General" milestone.' } as const;
 const STATUS = { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'done'] } as const;
 const PRIORITY = { type: 'string', enum: ['urgent', 'high', 'medium', 'low'] } as const;
+const EFFORT = { type: 'number', enum: [1, 2, 3, 5, 8], description: 'Required implementation-size estimate: 1 trivial, 2 small, 3 medium, 5 large/cross-layer, 8 very large or uncertain. Effort is not urgency.' } as const;
 const PROVIDER_ID = { type: 'string', enum: ['trello', 'clickup'], description: 'Sync provider' } as const;
 
 const readOnly = { readOnlyHint: true } as const;
@@ -621,7 +632,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'get_task',
-    description: 'Get full task details: description, prompt (technical notes), subtasks and the status timestamps (inboxAt/inProgressAt/doneAt).',
+    description: 'Get full task details: description, prompt, effort estimate, subtasks and the status timestamps (inboxAt/inProgressAt/doneAt).',
     inputSchema: {
       type: 'object' as const,
       properties: { projectId: PROJECT_ID, taskId: TASK_ID },
@@ -631,7 +642,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'create_task',
-    description: 'Create a new task. "description" is what to do (user-facing); "prompt" holds the technical analysis. To create several at once, prefer create_tasks.',
+    description: 'Create a new task. ALWAYS set effort (1/2/3/5/8) from implementation size, independently of priority. "description" is what to do; "prompt" holds technical analysis. Prefer create_tasks for several tasks.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -639,6 +650,7 @@ export const MCP_TOOLS = [
         title: { type: 'string', description: 'Task title' },
         description: { type: 'string', description: 'What needs to be done, from the user/product point of view' },
         priority: PRIORITY,
+        effort: EFFORT,
         status: STATUS,
         prompt: { type: 'string', description: 'Technical details and implementation notes' },
         milestoneId: MILESTONE_ID,
@@ -648,7 +660,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'create_tasks',
-    description: 'Create many tasks in one atomic write. Much cheaper than repeated create_task calls and triggers a single sync push.',
+    description: 'Create many tasks in one atomic write. ALWAYS set effort (1/2/3/5/8) on every task based on implementation size, not urgency. Triggers one sync push.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -663,6 +675,7 @@ export const MCP_TOOLS = [
               title: { type: 'string' },
               description: { type: 'string' },
               priority: PRIORITY,
+              effort: EFFORT,
               status: STATUS,
               prompt: { type: 'string' },
               milestoneId: MILESTONE_ID,
@@ -685,6 +698,7 @@ export const MCP_TOOLS = [
         title: { type: 'string' },
         description: { type: 'string' },
         priority: PRIORITY,
+        effort: EFFORT,
         status: STATUS,
         prompt: { type: 'string' },
         milestoneId: { ...MILESTONE_ID, description: 'Move the task to this milestone. "default" moves it to General.' },
@@ -702,6 +716,7 @@ export const MCP_TOOLS = [
         taskIds: { type: 'array', items: { type: 'string' }, description: 'Task IDs to update' },
         status: STATUS,
         priority: PRIORITY,
+        effort: EFFORT,
         milestoneId: MILESTONE_ID,
       },
       required: ['projectId', 'taskIds'],
@@ -898,7 +913,7 @@ export async function handleToolCall(name: string, args: Record<string, any>): P
     case 'get_task':
       return getTask(args.projectId, args.taskId);
     case 'create_task':
-      return createTask(args.projectId, { title: args.title, description: args.description, priority: args.priority, status: args.status, prompt: args.prompt, milestoneId: args.milestoneId });
+      return createTask(args.projectId, { title: args.title, description: args.description, priority: args.priority, effort: args.effort, status: args.status, prompt: args.prompt, milestoneId: args.milestoneId });
     case 'create_tasks':
       return createTasks(args.projectId, args.tasks, args.milestoneId);
     case 'update_task':

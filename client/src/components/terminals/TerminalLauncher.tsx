@@ -38,7 +38,7 @@ function buildClaudeContext(projectName: string, projectPath: string, projectId:
   if (active.length > 0) {
     lines.push(`Active tasks (${active.length}):`)
     for (const t of active) {
-      lines.push(`- [${statusLabel[t.status]}] ${t.title} (${priorityLabel[t.priority]})${t.description ? ` — ${t.description}` : ''}`)
+      lines.push(`- [${statusLabel[t.status]}] ${t.title} (${priorityLabel[t.priority]}, ${t.effort ? t.effort + ' pts' : 'effort unclassified'})${t.description ? ` — ${t.description}` : ''}`)
       if (t.prompt) lines.push(`  Details: ${t.prompt.split('\n')[0]}${t.prompt.includes('\n') ? '...' : ''}`)
     }
   }
@@ -54,6 +54,7 @@ function buildClaudeContext(projectName: string, projectPath: string, projectId:
 
   lines.push('')
   lines.push('You can read and update the tasks JSON file directly to organize, add, or update tasks.')
+  lines.push('IMPORTANT: Whenever you create or refine a task, ALWAYS set effort to 1, 2, 3, 5, or 8 based on implementation size and uncertainty, independently of priority.')
   lines.push('IMPORTANT: Each task has timestamp fields (inboxAt, inProgressAt, doneAt) tracking when it entered each stage. NEVER remove or reset these. When changing status, add the new timestamp without erasing previous ones.')
 
   return lines.join('\n')

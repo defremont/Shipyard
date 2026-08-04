@@ -1,6 +1,8 @@
 {
   "name": "shipyard",
-  "version": "1.11.4",
+  "productName": "Shipyard",
+  "desktopName": "shipyard.desktop",
+  "version": "1.12.0",
   "description": "Local development dashboard for managing projects, tasks, git, and terminals",
   "author": {
     "name": "Shipyard Contributors",

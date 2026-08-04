@@ -69,7 +69,7 @@ const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProj
 
   const handleDuplicate = () => {
     createTask.mutate(
-      { projectId: task.projectId, title: `Copy of ${task.title}`, description: task.description || '', priority: task.priority, status: 'todo', prompt: task.prompt || '' },
+      { projectId: task.projectId, title: `Copy of ${task.title}`, description: task.description || '', priority: task.priority, effort: task.effort, effortSource: task.effort ? 'manual' : undefined, status: 'todo', prompt: task.prompt || '' },
       { onSuccess: () => toast.success('Task duplicated') }
     )
   }
@@ -107,7 +107,9 @@ const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProj
         {task.title}
       </span>
 
-      {task.subtasks && task.subtasks.length > 0 && (
+      {task.effort && (
+        <span className="text-[10px] text-muted-foreground tabular-nums">{task.effort} pts</span>
+      )}      {task.subtasks && task.subtasks.length > 0 && (
         <span className="text-[10px] text-muted-foreground shrink-0">
           {task.subtasks.filter((s: any) => s.done).length}/{task.subtasks.length}
         </span>

@@ -225,8 +225,9 @@ async function ensureBoard(config: SyncConfig, projectName: string, milestoneNam
 
 function renderDesc(task: Task): string {
   const desc = task.description || '';
+  const effort = task.effort ? `\n\n**Effort:** ${task.effort}` : '';
   const prompt = task.prompt ? `\n\n---\n**Details**\n${task.prompt}` : '';
-  return desc + prompt;
+  return desc + effort + prompt;
 }
 
 // ── Card ordering ─────────────────────────────────────────────────────────
@@ -538,6 +539,7 @@ export interface PulledTask {
   title: string;
   description: string;
   prompt?: string;
+  effort?: Task['effort'];
   status: TaskStatus;
   priority: TaskPriority;
   updatedAt: string;
@@ -619,7 +621,10 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
     }
 
     const desc = card.desc || '';
-    const split = desc.split(/\n\n---\n\*\*Details\*\*\n/);
+    const effortMatch = desc.match(/\n\n\*\*Effort:\*\*\s*(1|2|3|5|8)(?=\n|$)/);
+    const effort = effortMatch ? Number(effortMatch[1]) as Task['effort'] : undefined;
+    const withoutEffort = desc.replace(/\n\n\*\*Effort:\*\*\s*(1|2|3|5|8)(?=\n|$)/, '');
+    const split = withoutEffort.split(/\n\n---\n\*\*Details\*\*\n/);
     const description = split[0] ?? '';
     const prompt = split[1];
 
@@ -629,6 +634,7 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
       title: card.name,
       description,
       prompt,
+      effort,
       status,
       priority,
       updatedAt: card.dateLastActivity || new Date().toISOString(),

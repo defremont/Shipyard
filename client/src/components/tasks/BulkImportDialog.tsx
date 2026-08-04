@@ -16,6 +16,7 @@ interface ParsedTask {
   description: string
   prompt: string
   priority: string
+  effort?: 1 | 2 | 3 | 5 | 8
   status: string
   selected: boolean
 }
@@ -60,6 +61,7 @@ export function BulkImportDialog({ projectId, open, onOpenChange }: BulkImportDi
       description: '',
       prompt: '',
       priority: 'medium',
+      effort: undefined,
       status: 'todo',
       selected: true,
     })))
@@ -78,6 +80,8 @@ export function BulkImportDialog({ projectId, open, onOpenChange }: BulkImportDi
           title: t.title,
           description: t.description,
           priority: t.priority as any,
+          effort: t.effort,
+          effortSource: t.effort ? 'claude' : undefined,
           status: t.status as any,
           prompt: t.prompt,
         })
@@ -104,7 +108,7 @@ export function BulkImportDialog({ projectId, open, onOpenChange }: BulkImportDi
     setTasks(prev => prev.map((t, idx) => idx === i ? { ...t, selected: !t.selected } : t))
   }
 
-  const updateTask = (i: number, field: keyof ParsedTask, value: string) => {
+  const updateTask = (i: number, field: keyof ParsedTask, value: string | number | undefined) => {
     setTasks(prev => prev.map((t, idx) => idx === i ? { ...t, [field]: value } : t))
   }
 
@@ -208,6 +212,15 @@ export function BulkImportDialog({ projectId, open, onOpenChange }: BulkImportDi
                         <option value="high">high</option>
                         <option value="medium">medium</option>
                         <option value="low">low</option>
+                      </select>
+                      <select
+                        value={task.effort ? String(task.effort) : ''}
+                        onChange={e => updateTask(i, 'effort', e.target.value ? Number(e.target.value) : undefined)}
+                        className="text-[10px] bg-muted px-1.5 py-0.5 rounded-full border-none outline-none cursor-pointer"
+                        title="Fibonacci effort"
+                      >
+                        <option value="">effort?</option>
+                        {[1, 2, 3, 5, 8].map(value => <option key={value} value={value}>{value} pts</option>)}
                       </select>
                       <select
                         value={task.status}
