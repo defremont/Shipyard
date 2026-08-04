@@ -42,32 +42,45 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Prepare Apple notarization key
+      - name: Prepare Windows signing credentials
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WIN_CSC_LINK }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+        run: |
+          if (-not [string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE)) {
+            Add-Content -Path $env:GITHUB_ENV -Value "WIN_CSC_LINK=$($env:WINDOWS_CERTIFICATE)"
+            Add-Content -Path $env:GITHUB_ENV -Value "WIN_CSC_KEY_PASSWORD=$($env:WINDOWS_CERTIFICATE_PASSWORD)"
+          }
+
+      - name: Prepare macOS signing and notarization credentials
         if: runner.os == 'macOS'
         env:
+          MAC_CERTIFICATE: ${{ secrets.MAC_CSC_LINK }}
+          MAC_CERTIFICATE_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           APPLE_API_KEY_BASE64: ${{ secrets.APPLE_API_KEY }}
+          APPLE_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [[ -n "$APPLE_API_KEY_BASE64" ]]; then
+          if [[ -n "$MAC_CERTIFICATE" ]]; then
+            printf 'CSC_LINK=%s\n' "$MAC_CERTIFICATE" >> "$GITHUB_ENV"
+            printf 'CSC_KEY_PASSWORD=%s\n' "$MAC_CERTIFICATE_PASSWORD" >> "$GITHUB_ENV"
+          fi
+          if [[ -n "$APPLE_API_KEY_BASE64" && -n "$APPLE_KEY_ID" && -n "$APPLE_ISSUER" && -n "$APPLE_TEAM" ]]; then
             umask 077
             key_path="$RUNNER_TEMP/AuthKey_Shipyard.p8"
             printf '%s' "$APPLE_API_KEY_BASE64" | base64 -D > "$key_path"
-            echo "APPLE_API_KEY=$key_path" >> "$GITHUB_ENV"
+            printf 'APPLE_API_KEY=%s\n' "$key_path" >> "$GITHUB_ENV"
+            printf 'APPLE_API_KEY_ID=%s\n' "$APPLE_KEY_ID" >> "$GITHUB_ENV"
+            printf 'APPLE_API_ISSUER=%s\n' "$APPLE_ISSUER" >> "$GITHUB_ENV"
+            printf 'APPLE_TEAM_ID=%s\n' "$APPLE_TEAM" >> "$GITHUB_ENV"
             echo "NOTARIZATION_CONFIGURED=true" >> "$GITHUB_ENV"
           fi
 
       - name: Build and package
         run: ${{ matrix.cmd }}
-        env:
-          # Windows Authenticode signing (OV/EV certificate exported as PFX).
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          # macOS Developer ID signing and Apple notarization.
-          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
-          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-
       - name: Verify Windows signatures
         if: runner.os == 'Windows' && env.WIN_CSC_LINK != ''
         env:
