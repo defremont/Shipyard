@@ -11,6 +11,10 @@ import {
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
 import * as log from '../services/logService.js';
+import { mkdir, readdir, stat, unlink, writeFile } from 'fs/promises';
+import { join } from 'path';
+import { randomUUID } from 'crypto';
+import { DATA_DIR } from '../services/dataDir.js';
 
 // Track active WebSocket connections per session to prevent duplicate listeners
 const activeConnections = new Map<string, { socket: any; cleanup: () => void }>();
@@ -19,12 +23,66 @@ const activeConnections = new Map<string, { socket: any; cleanup: () => void }>(
 // while collapsing a TUI redraw burst into a single WebSocket frame.
 const OUTPUT_FLUSH_MS = 8;
 const OUTPUT_FLUSH_BYTES = 64 * 1024;
+const CLIPBOARD_IMAGE_DIR = join(DATA_DIR, 'terminal-clipboard');
+const MAX_CLIPBOARD_IMAGE_BYTES = 10 * 1024 * 1024;
+const CLIPBOARD_IMAGE_TTL_MS = 24 * 60 * 60 * 1000;
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/webp': 'webp',
+  'image/gif': 'gif',
+};
+
+async function pruneClipboardImages(): Promise<void> {
+  try {
+    const entries = await readdir(CLIPBOARD_IMAGE_DIR);
+    const cutoff = Date.now() - CLIPBOARD_IMAGE_TTL_MS;
+    await Promise.all(entries.map(async name => {
+      const filePath = join(CLIPBOARD_IMAGE_DIR, name);
+      try {
+        if ((await stat(filePath)).mtimeMs < cutoff) await unlink(filePath);
+      } catch {}
+    }));
+  } catch {}
+}
 
 export async function terminalWsRoutes(app: FastifyInstance) {
   // REST: Check if integrated terminal is available
   app.get('/api/terminal/status', async () => {
     return { available: isAvailable() };
   });
+
+  // A PTY cannot transport an OS clipboard image. Persist it briefly so the
+  // client can paste a local path that Claude CLI can read.
+  app.post<{
+    Params: { sessionId: string };
+    Body: { mimeType: string; data: string };
+  }>(
+    '/api/terminal/sessions/:sessionId/clipboard-image',
+    { bodyLimit: 14 * 1024 * 1024 },
+    async (request, reply) => {
+      const session = getSession(request.params.sessionId);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+
+      const { mimeType, data } = request.body || {};
+      const extension = IMAGE_EXTENSIONS[mimeType];
+      if (!extension || typeof data !== 'string') {
+        return reply.status(400).send({ error: 'Unsupported clipboard image' });
+      }
+
+      const image = Buffer.from(data, 'base64');
+      if (!image.length || image.length > MAX_CLIPBOARD_IMAGE_BYTES) {
+        return reply.status(413).send({ error: 'Clipboard image must be smaller than 10 MB' });
+      }
+
+      await mkdir(CLIPBOARD_IMAGE_DIR, { recursive: true });
+      void pruneClipboardImages();
+      const filePath = join(CLIPBOARD_IMAGE_DIR, `clipboard-${Date.now()}-${randomUUID()}.${extension}`);
+      await writeFile(filePath, image);
+      log.info('terminal', 'Clipboard image prepared for terminal', `${image.length} bytes`, session.projectId);
+      return { path: filePath, expiresInMs: CLIPBOARD_IMAGE_TTL_MS };
+    }
+  );
 
   // REST: List active sessions
   app.get<{ Querystring: { projectId?: string } }>(

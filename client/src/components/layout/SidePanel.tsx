@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useActivity } from '@/hooks/useActivity'
 import { ProjectsView } from './views/ProjectsView'
 import { ExplorerView } from './views/ExplorerView'
@@ -30,6 +30,7 @@ const titles: Record<string, string> = {
 export function SidePanel() {
   const { activity, panelOpen } = useActivity()
   const [width, setWidth] = useState<number>(loadWidth)
+  const panelRef = useRef<HTMLDivElement>(null)
 
   const startDrag = (e: React.MouseEvent) => {
     e.preventDefault()
@@ -39,11 +40,13 @@ export function SidePanel() {
     let latest = width
     const onMove = (ev: MouseEvent) => {
       latest = Math.min(Math.max(ev.clientX - ACTIVITY_BAR_WIDTH, MIN), MAX)
-      setWidth(latest)
+      // Keep the expensive sidebar tree out of the pointer-move render loop.
+      if (panelRef.current) panelRef.current.style.width = latest + 'px'
     }
     const onUp = () => {
       document.body.style.cursor = ''
       document.body.style.userSelect = ''
+      setWidth(latest)
       localStorage.setItem(WIDTH_KEY, String(latest))
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
@@ -64,7 +67,7 @@ export function SidePanel() {
   }
 
   return (
-    <div className="flex h-screen shrink-0 relative" style={{ width }}>
+    <div ref={panelRef} className="flex h-screen shrink-0 relative" style={{ width }}>
       <div className="flex-1 min-w-0 flex flex-col border-r bg-card/20 overflow-hidden">
         {/* Header (Claude view manages its own header) */}
         {activity !== 'claude' && (

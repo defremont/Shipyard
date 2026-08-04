@@ -4,6 +4,8 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { WebglAddon } from '@xterm/addon-webgl'
 import { getWebSocketUrl } from '@/hooks/useTerminal'
+import { api } from '@/lib/api'
+import { toast } from 'sonner'
 import '@xterm/xterm/css/xterm.css'
 
 interface IntegratedTerminalProps {
@@ -38,6 +40,15 @@ const TERMINAL_THEME = {
 }
 
 const MAX_RECONNECT_ATTEMPTS = 5
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',', 2)[1] || '')
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(blob)
+  })
+}
 
 /**
  * Swap the default DOM renderer for the WebGL one. The DOM renderer rebuilds a
@@ -184,10 +195,47 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
     // the \n → \r translation the PTY would misread as repeated Enter, and
     // wraps the text in bracketed-paste markers whenever the running program
     // asked for them, so the CLI receives one paste instead of N submissions.
-    const pasteFromClipboard = () => {
-      navigator.clipboard.readText().then(text => {
+    const pasteFromClipboard = async (clipboardData?: DataTransfer | null) => {
+      try {
+        let image: Blob | undefined
+        let text = ''
+
+        if (clipboardData) {
+          const imageItem = Array.from(clipboardData.items).find(item => item.type.startsWith('image/'))
+          image = imageItem?.getAsFile() || undefined
+          text = clipboardData.getData('text/plain')
+        } else if (navigator.clipboard.read) {
+          try {
+            const items = await navigator.clipboard.read()
+            const imageItem = items.find(item => item.types.some(type => type.startsWith('image/')))
+            const imageType = imageItem?.types.find(type => type.startsWith('image/'))
+            if (imageItem && imageType) image = await imageItem.getType(imageType)
+            if (!image) {
+              const textItem = items.find(item => item.types.includes('text/plain'))
+              if (textItem) text = await (await textItem.getType('text/plain')).text()
+            }
+          } catch {
+            // Some browsers grant readText while denying the richer read API.
+            text = await navigator.clipboard.readText()
+          }
+        } else {
+          text = await navigator.clipboard.readText()
+        }
+
+        if (image) {
+          const result = await api.uploadTerminalClipboardImage(sessionId, image.type, await blobToBase64(image))
+          term.paste(result.path)
+          toast.success('Imagem pronta para o Claude', {
+            description: 'O caminho temporário foi inserido no prompt.',
+          })
+          return
+        }
         if (text) term.paste(text)
-      }).catch(() => {})
+      } catch (error) {
+        toast.error('Não foi possível colar do clipboard', {
+          description: error instanceof Error ? error.message : 'Verifique a permissão de acesso ao clipboard.',
+        })
+      }
     }
 
     // Fit to container
@@ -224,7 +272,7 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
       // path is unreliable inside Electron's focus model.
       if (key === 'v') {
         ev.preventDefault()
-        pasteFromClipboard()
+        void pasteFromClipboard()
         return false
       }
       return true
@@ -234,16 +282,21 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
     // Windows Terminal / PuTTY convention. Middle-click pastes (X11 habit).
     const handleContextMenu = (ev: MouseEvent) => {
       ev.preventDefault()
-      if (!copySelection()) pasteFromClipboard()
+      if (!copySelection()) void pasteFromClipboard()
     }
     const handleMouseDown = (ev: MouseEvent) => {
       if (ev.button !== 1) return
       ev.preventDefault()
-      pasteFromClipboard()
+      void pasteFromClipboard()
     }
     const el = containerRef.current
+    const handlePaste = (ev: ClipboardEvent) => {
+      ev.preventDefault()
+      void pasteFromClipboard(ev.clipboardData)
+    }
     el.addEventListener('contextmenu', handleContextMenu)
     el.addEventListener('mousedown', handleMouseDown)
+    el.addEventListener('paste', handlePaste)
 
     // Send keystrokes to server
     const dataDisposable = term.onData((data) => {
@@ -269,6 +322,7 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
       clearTimeout(reconnectTimerRef.current)
       el.removeEventListener('contextmenu', handleContextMenu)
       el.removeEventListener('mousedown', handleMouseDown)
+      el.removeEventListener('paste', handlePaste)
       dataDisposable.dispose()
       binaryDisposable.dispose()
       if (wsRef.current) {

@@ -281,6 +281,12 @@ export const api = {
     ),
   writeToTerminalSession: (sessionId: string, data: string) =>
     request<{ success: boolean }>(`/terminal/sessions/${sessionId}/write`, { method: 'POST', body: JSON.stringify({ data }) }),
+  uploadTerminalClipboardImage: (sessionId: string, mimeType: string, data: string) =>
+    request<{ path: string; expiresInMs: number }>(`/terminal/sessions/${sessionId}/clipboard-image`, {
+      method: 'POST',
+      body: JSON.stringify({ mimeType, data }),
+      timeout: 20_000,
+    }),
   getAiResolvePrompt: (projectId: string, taskId: string) =>
     request<{ prompt: string }>(`/projects/${projectId}/tasks/${taskId}/ai-resolve`, { method: 'POST' }),
   getAiManagePrompt: (projectId: string, rawText: string) =>
