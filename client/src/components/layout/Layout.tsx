@@ -10,21 +10,25 @@ import { EditorTabsProvider } from '@/hooks/useEditorTabsContext'
 import { TerminalPanel } from '@/components/terminals/TerminalPanel'
 import { useIntegrationAutoPull } from '@/hooks/useIntegrationAutoPull'
 import { useElectronMenu } from '@/hooks/useElectronMenu'
+import { AppTitleBar } from './AppTitleBar'
 
 function LayoutInner() {
   useIntegrationAutoPull()
   useElectronMenu()
   return (
-    <div className="flex h-screen overflow-hidden">
-      <ActivityBar />
-      <SidePanel />
-      <main className="flex-1 flex flex-col overflow-hidden min-w-0">
-        <TabBar />
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-          <Outlet />
-        </div>
-        <TerminalPanel />
-      </main>
+    <div className="flex h-screen flex-col overflow-hidden">
+      <AppTitleBar />
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        <ActivityBar />
+        <SidePanel />
+        <main className="flex-1 flex flex-col overflow-hidden min-w-0">
+          <TabBar />
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+            <Outlet />
+          </div>
+          <TerminalPanel />
+        </main>
+      </div>
       <GlobalSearch />
       <FileContentSearch />
     </div>

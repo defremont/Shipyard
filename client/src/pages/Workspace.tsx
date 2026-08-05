@@ -319,7 +319,7 @@ export function Workspace() {
       <div className="flex-1 overflow-hidden flex min-h-0">
         <div className={cn(
           'flex-1 min-w-0 flex flex-col',
-          workspaceMode === 'tasks' && 'overflow-y-auto px-4 py-4 lg:px-6 scrollbar-dark'
+          workspaceMode === 'tasks' && 'overflow-y-auto px-3 py-2 scrollbar-dark'
         )}>
           {workspaceMode === 'tasks' ? (
             <TaskBoard

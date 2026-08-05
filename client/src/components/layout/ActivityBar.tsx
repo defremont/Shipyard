@@ -127,7 +127,7 @@ export function ActivityBar() {
   ]
 
   return (
-    <aside className="w-12 shrink-0 border-r bg-card/30 flex flex-col h-screen">
+    <aside className="w-12 shrink-0 border-r bg-card/30 flex flex-col h-full">
       <nav className="flex-1 flex flex-col items-stretch py-1">
         {items.map(item => (
           <ActivityButton

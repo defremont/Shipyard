@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain, type MenuItemConstructorOptions } from 'electron';
 import { join, resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { spawn, execSync, type ChildProcess } from 'child_process';
@@ -221,6 +221,26 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 
+ipcMain.on('titlebar-command', (_event, command: string) => {
+  if (!mainWindow) return;
+  const contents = mainWindow.webContents;
+  switch (command) {
+    case 'quit': isQuitting = true; app.quit(); break;
+    case 'undo': contents.undo(); break;
+    case 'redo': contents.redo(); break;
+    case 'cut': contents.cut(); break;
+    case 'copy': contents.copy(); break;
+    case 'paste': contents.paste(); break;
+    case 'select-all': contents.selectAll(); break;
+    case 'reload': contents.reload(); break;
+    case 'toggle-devtools': contents.toggleDevTools(); break;
+    case 'zoom-in': contents.setZoomFactor(Math.min(contents.getZoomFactor() + 0.1, 3)); break;
+    case 'zoom-out': contents.setZoomFactor(Math.max(contents.getZoomFactor() - 0.1, 0.5)); break;
+    case 'zoom-reset': contents.setZoomFactor(1); break;
+    case 'toggle-fullscreen': mainWindow.setFullScreen(!mainWindow.isFullScreen()); break;
+  }
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -231,6 +251,11 @@ function createWindow() {
     icon: existsSync(ICON_PATH) ? ICON_PATH : undefined,
     backgroundColor: '#09090b',
     show: false,
+    autoHideMenuBar: true,
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
+    ...(process.platform !== 'darwin' ? {
+      titleBarOverlay: { color: '#101014', symbolColor: '#b8b8c2', height: 35 },
+    } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -238,6 +263,7 @@ function createWindow() {
       sandbox: false,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
 
   // In dev mode with Vite, load from dev server; otherwise from Fastify
   if (isDev && process.env.VITE_DEV_SERVER) {

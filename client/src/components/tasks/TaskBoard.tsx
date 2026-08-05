@@ -198,11 +198,11 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, mil
     <div
       ref={setNodeRef}
       className={cn(
-        'group/col flex flex-col rounded-lg border bg-muted/30 min-h-[200px] transition-colors',
+        'group/col flex flex-col rounded-md border bg-muted/20 min-h-[160px] transition-colors',
         isOver && 'border-primary/50 bg-primary/5'
       )}
     >
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b">
+      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b">
         <Icon className={cn('h-3.5 w-3.5', col.color)} />
         <h3 className="text-xs font-medium">{col.label}</h3>
         <span className="text-xs text-muted-foreground/60 tabular-nums">{count}</span>
@@ -238,7 +238,7 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, mil
           )}
         </div>
       </div>
-      <div className="flex-1 p-2 space-y-2">
+      <div className="flex-1 p-1 space-y-1">
         {isAdding && projectId && (
           <InlineTaskInput
             projectId={projectId}
@@ -270,7 +270,7 @@ function BacklogSubHeader({ count, headerExtra, children }: { count: number; hea
     <div
       ref={setNodeRef}
       className={cn(
-        'rounded-md border border-dashed border-muted-foreground/20 px-1.5 py-1 transition-colors',
+        'mt-1 border-t border-border/70 pt-1 transition-colors',
         isOver && 'border-primary/50 bg-primary/5',
       )}
     >
@@ -279,7 +279,7 @@ function BacklogSubHeader({ count, headerExtra, children }: { count: number; hea
         <span className="text-muted-foreground/50">({count})</span>
         {headerExtra && <div className="ml-auto">{headerExtra}</div>}
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1">
         {children}
       </div>
     </div>
@@ -441,7 +441,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     result.done = sortTasks(result.done, sortBy)
     // Inbox is ordered: backlog tasks first, then todo tasks — keeps sub-sections
     // contiguous so a single SortableContext still works.
-    result.inbox = [...sortTasks(backlog, sortBy), ...sortTasks(todo, sortBy)]
+    result.inbox = [...sortTasks(todo, sortBy), ...sortTasks(backlog, sortBy)]
 
     return result
   }, [tasks, sortBy])
@@ -565,7 +565,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold flex items-center gap-1.5">
           Tasks
@@ -634,7 +634,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
         >
-          <div className="grid grid-cols-3 gap-2 lg:gap-3 2xl:gap-4">
+          <div className="grid grid-cols-3 gap-2">
             {columns.map(col => {
               const isDoneCol = col.key === 'done'
               const isInboxCol = col.key === 'inbox'
@@ -692,8 +692,21 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                 >
                   {allVisibleTasks.length > 0 ? (
                     <>
-                      {col.key === 'inbox' && inboxSplit.backlogCount > 0 ? (
+                      {col.key === 'inbox' && visibleTasks.some(t => t.status === 'backlog') ? (
                         <>
+                          {visibleTasks
+                            .filter(t => t.status !== 'backlog')
+                            .map(task => (
+                              <SortableTaskItem
+                                key={task.id}
+                                task={task}
+                                projectName={projectName}
+                                projectPath={projectPath}
+                                onEdit={handleEdit}
+                                onView={handleView}
+                                onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
+                              />
+                            ))}
                           <BacklogSubHeader
                             count={inboxSplit.backlogCount}
                             headerExtra={
@@ -719,25 +732,6 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                                 />
                               ))}
                           </BacklogSubHeader>
-                          {inboxSplit.todoCount > 0 && (
-                            <div className="flex items-center gap-1.5 px-0.5 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
-                              <span>To Do</span>
-                              <span className="text-muted-foreground/50">({inboxSplit.todoCount})</span>
-                            </div>
-                          )}
-                          {visibleTasks
-                            .filter(t => t.status !== 'backlog')
-                            .map(task => (
-                              <SortableTaskItem
-                                key={task.id}
-                                task={task}
-                                projectName={projectName}
-                                projectPath={projectPath}
-                                onEdit={handleEdit}
-                                onView={handleView}
-                                onAiResolve={terminalStatus?.available ? handleAiResolve : undefined}
-                              />
-                            ))}
                         </>
                       ) : (
                         visibleTasks.map(task => (

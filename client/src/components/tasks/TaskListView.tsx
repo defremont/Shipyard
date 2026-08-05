@@ -193,7 +193,12 @@ export function TaskListView({ tasks, projectName, projectPath, showProjectBadge
     return statusSections.map(section => ({
       ...section,
       tasks: tasks.filter(t => section.statuses.includes(t.status))
-        .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+        .sort((a, b) => {
+          if (section.key === 'inbox' && a.status !== b.status) {
+            return a.status === 'backlog' ? 1 : -1
+          }
+          return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        })
     }))
   }, [tasks])
 
@@ -214,7 +219,7 @@ export function TaskListView({ tasks, projectName, projectPath, showProjectBadge
   }, [])
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-1">
       {sections.map(section => {
         const limit = visibleCounts[section.key] || LIST_INITIAL_VISIBLE
         const visibleTasks = section.tasks.slice(0, limit)
@@ -223,7 +228,7 @@ export function TaskListView({ tasks, projectName, projectPath, showProjectBadge
           <div key={section.key} className="rounded-lg border bg-card">
             <button
               onClick={() => toggleSection(section.key)}
-              className="flex items-center gap-2 w-full px-3 py-2 hover:bg-accent/30 transition-colors rounded-t-lg"
+              className="flex items-center gap-2 w-full px-3 py-1.5 hover:bg-accent/30 transition-colors rounded-t-lg"
             >
               {collapsed.has(section.key) ? (
                 <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />

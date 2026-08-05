@@ -13,4 +13,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('menu-action', listener);
     return () => ipcRenderer.removeListener('menu-action', listener);
   },
+  sendTitlebarCommand: (command: string) => ipcRenderer.send('titlebar-command', command),
 });

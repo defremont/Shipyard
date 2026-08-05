@@ -33,7 +33,7 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        'group relative flex h-7 min-w-0 max-w-[160px] basis-0 flex-1 items-center gap-1 rounded px-1.5 transition-colors cursor-grab active:cursor-grabbing',
+        'group relative flex h-7 min-w-0 max-w-[160px] basis-0 flex-1 items-center gap-0.5 overflow-hidden px-1.5 transition-colors cursor-grab active:cursor-grabbing',
         isActive
           ? 'bg-background text-foreground shadow-sm ring-1 ring-border/80'
           : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
@@ -42,33 +42,39 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
       )}
     >
       <button
-        className={cn('min-w-0 flex-1 truncate text-left text-[11px] font-medium leading-none', isActive && 'pr-3')}
+        className="min-w-0 shrink truncate text-left text-[11px] font-medium leading-none"
         onClick={onSwitch}
         title={`${label} — ${project?.path || tabId}`}
       >
         {label}
       </button>
-      {hasLocalChanges && (
-        <span
-          className="hidden h-1.5 w-1.5 shrink-0 rounded-full bg-warning min-[900px]:block"
-          title="Uncommitted changes"
-        />
-      )}
-      <button
-        className={cn(
-          'absolute right-0.5 shrink-0 rounded bg-background/90 p-0.5 transition-opacity hover:bg-accent',
-          isActive
-            ? 'opacity-60 hover:opacity-100'
-            : 'opacity-0 group-hover:opacity-60 hover:!opacity-100'
+      <span className="relative h-4 w-4 shrink-0">
+        {hasLocalChanges && (
+          <span
+            className="absolute inset-0 flex items-center justify-center transition-opacity group-hover:opacity-0"
+            title="Uncommitted changes"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-warning" />
+          </span>
         )}
-        onClick={(event) => {
-          event.stopPropagation()
-          onClose()
-        }}
-        title={`Close ${label}`}
-      >
-        <X className="h-3 w-3" />
-      </button>
+        <button
+          className={cn(
+            'absolute inset-0 flex items-center justify-center rounded bg-background/90 transition-opacity hover:bg-accent hover:!opacity-100',
+            hasLocalChanges
+              ? 'opacity-0 group-hover:opacity-70'
+              : isActive
+                ? 'opacity-60'
+                : 'opacity-0 group-hover:opacity-60'
+          )}
+          onClick={(event) => {
+            event.stopPropagation()
+            onClose()
+          }}
+          title={`Close ${label}`}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      </span>
     </div>
   )
 })

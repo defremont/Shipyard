@@ -148,7 +148,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
   return (
     <div
       className={cn(
-        'group relative rounded-lg border bg-card transition-colors hover:border-primary/40 cursor-grab active:cursor-grabbing p-2',
+        'group relative rounded-md border bg-card transition-colors hover:border-primary/40 cursor-grab active:cursor-grabbing p-1.5',
         task.needsReview && 'border-primary/30 bg-primary/5',
         isAiResolving && 'ring-2 ring-primary/40 border-primary/30 animate-pulse'
       )}
@@ -160,7 +160,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-primary" />
         </span>
       )}
-      <div className="flex items-start gap-2">
+      <div className="flex items-start gap-1.5">
         <button onClick={handleStatusToggle} className="shrink-0 mt-0.5">
           {isAiResolving ? (
             <Sparkles className="h-3.5 w-3.5 text-primary animate-pulse" />
@@ -175,7 +175,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
 
         <div className="min-w-0 flex-1">
           <span
-            className={cn('text-sm line-clamp-2 cursor-pointer hover:text-primary transition-colors', task.status === 'done' && 'text-muted-foreground')}
+            className={cn('text-[13px] leading-4 line-clamp-2 cursor-pointer hover:text-primary transition-colors', task.status === 'done' && 'text-muted-foreground')}
             onClick={(e) => { e.stopPropagation(); onView?.(task) }}
           >
             {task.title}
@@ -204,7 +204,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
           )}
         </div>
 
-        <div className="hidden group-hover:flex items-center gap-0.5 absolute top-1.5 right-1.5 bg-card rounded-md shadow-sm border px-0.5 py-0.5 z-10">
+        <div className="hidden group-hover:flex items-center gap-0.5 absolute top-1 right-1 bg-card rounded-md shadow-sm border px-0.5 py-0.5 z-10">
           {onAiResolve && task.status === 'in_progress' && !isAiResolving && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -284,7 +284,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
         </div>
       </div>
 
-      <div className="flex items-center mt-1 gap-1">
+      <div className="flex items-center mt-0.5 gap-1 leading-none">
         <span className="text-[10px] text-muted-foreground/50 font-mono select-all">#{task.number || '?'}</span>
         <span className="flex-1" />
         {columnDate && (

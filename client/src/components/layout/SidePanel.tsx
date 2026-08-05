@@ -7,7 +7,7 @@ import { SourceControlView } from './views/SourceControlView'
 import { ClaudeView } from './views/ClaudeView'
 
 const WIDTH_KEY = 'shipyard:side-panel-width'
-const MIN = 200
+const MIN = 160
 const MAX = 600
 const DEFAULT = 280
 const ACTIVITY_BAR_WIDTH = 48
@@ -67,7 +67,7 @@ export function SidePanel() {
   }
 
   return (
-    <div ref={panelRef} className="flex h-screen shrink-0 relative" style={{ width }}>
+    <div ref={panelRef} className="flex h-full shrink-0 relative" style={{ width }}>
       <div className="flex-1 min-w-0 flex flex-col border-r bg-card/20 overflow-hidden">
         {/* Header (Claude view manages its own header) */}
         {activity !== 'claude' && (

@@ -285,6 +285,10 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   `menu-action` → preload expoe `electronAPI.onMenuAction` → hook `useElectronMenu`
   roteia (`navigate:<path>`) ou redispara CustomEvents (`shipyard:toggle-search`,
   `shipyard:toggle-file-search`, `shipyard:toggle-terminal`)
+- Desktop usa title bar customizada em `AppTitleBar.tsx`: logo, menus e busca ficam
+  na mesma linha arrastavel, com controles nativos da janela via `titleBarOverlay`.
+  Acoes de Edit/View sao limitadas no preload e chegam ao main pelo canal
+  `titlebar-command`; o menu nativo permanece oculto para nao duplicar altura.
 - Atalhos Ctrl+K / Ctrl+Shift+F / Ctrl+` sao do renderer; itens de menu usam
   `registerAccelerator: false` para mostrar o hint sem duplicar o handler
 - Terminal integrado (xterm) repassa esses atalhos globais via

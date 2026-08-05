@@ -76,7 +76,7 @@ function BacklogSubHeader({ count, children }: { count: number; children: React.
     <div
       ref={setNodeRef}
       className={cn(
-        'rounded-md border border-dashed border-muted-foreground/20 px-1.5 py-1 transition-colors',
+        'mt-1 border-t border-border/70 pt-1 transition-colors',
         isOver && 'border-primary/50 bg-primary/5',
       )}
     >
@@ -84,7 +84,7 @@ function BacklogSubHeader({ count, children }: { count: number; children: React.
         <span>Backlog</span>
         <span className="text-muted-foreground/50">({count})</span>
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1">
         {children}
       </div>
     </div>
@@ -138,16 +138,16 @@ function DroppableColumn({ col, children, count, taskIds, hiddenCount, onShowMor
     <div
       ref={setNodeRef}
       className={cn(
-        'flex flex-col rounded-lg border bg-muted/30 min-h-[200px] transition-colors',
+        'flex flex-col rounded-md border bg-muted/20 min-h-[160px] transition-colors',
         isOver && 'border-primary/50 bg-primary/5'
       )}
     >
-      <div className="flex items-center gap-2 px-3 py-2.5 border-b">
+      <div className="flex items-center gap-1.5 px-2 py-1.5 border-b">
         <Icon className={cn('h-3.5 w-3.5', col.color)} />
         <h3 className="text-xs font-medium">{col.label}</h3>
         <span className="text-xs text-muted-foreground/60 tabular-nums">{count}</span>
       </div>
-      <div className="flex-1 p-2 space-y-2 overflow-y-auto">
+      <div className="flex-1 p-1 space-y-1 overflow-y-auto">
         <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
           {children}
         </SortableContext>
@@ -284,7 +284,7 @@ export function TasksPage() {
 
     result.in_progress = sortTasks(result.in_progress, sortBy)
     result.done = sortTasks(result.done, sortBy)
-    result.inbox = [...sortTasks(backlog, sortBy), ...sortTasks(todo, sortBy)]
+    result.inbox = [...sortTasks(todo, sortBy), ...sortTasks(backlog, sortBy)]
 
     return result
   }, [filteredTasks, sortBy])
@@ -359,8 +359,8 @@ export function TasksPage() {
     <>
       <div className="flex-1 overflow-hidden flex flex-col">
         {/* Page header + filters */}
-        <div className="px-6 py-4 shrink-0">
-          <div className="flex items-center justify-between mb-3">
+        <div className="px-3 py-2 shrink-0">
+          <div className="flex items-center justify-between mb-2">
             <h1 className="text-sm font-semibold">All Tasks</h1>
             <div className="flex items-center gap-1">
               <div className="flex items-center border rounded-md">
@@ -446,7 +446,7 @@ export function TasksPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto px-6 pb-4 scrollbar-dark">
+        <div className="flex-1 overflow-auto px-3 pb-3 scrollbar-dark">
           {viewMode === 'kanban' ? (
             <DndContext
               sensors={sensors}
@@ -468,8 +468,19 @@ export function TasksPage() {
                       onShowMore={() => handleShowMore(col.key)}
                     >
                       {visibleTasks.length > 0 ? (
-                        col.key === 'inbox' && inboxSplit.backlogCount > 0 ? (
+                        col.key === 'inbox' && visibleTasks.some(t => t.status === 'backlog') ? (
                           <>
+                            {visibleTasks
+                              .filter(t => t.status !== 'backlog')
+                              .map(task => (
+                                <SortableGlobalTaskItem
+                                  key={task.id}
+                                  task={task}
+                                  project={projectMap.get(task.projectId)}
+                                  onEdit={handleEdit}
+                                  onView={handleView}
+                                />
+                              ))}
                             <BacklogSubHeader count={inboxSplit.backlogCount}>
                               {visibleTasks
                                 .filter(t => t.status === 'backlog')
@@ -483,23 +494,6 @@ export function TasksPage() {
                                   />
                                 ))}
                             </BacklogSubHeader>
-                            {inboxSplit.todoCount > 0 && (
-                              <div className="flex items-center gap-1.5 px-0.5 pt-2 pb-0.5 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
-                                <span>To Do</span>
-                                <span className="text-muted-foreground/50">({inboxSplit.todoCount})</span>
-                              </div>
-                            )}
-                            {visibleTasks
-                              .filter(t => t.status !== 'backlog')
-                              .map(task => (
-                                <SortableGlobalTaskItem
-                                  key={task.id}
-                                  task={task}
-                                  project={projectMap.get(task.projectId)}
-                                  onEdit={handleEdit}
-                                  onView={handleView}
-                                />
-                              ))}
                           </>
                         ) : (
                           visibleTasks.map(task => (
