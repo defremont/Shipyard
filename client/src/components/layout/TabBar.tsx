@@ -33,7 +33,7 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        'group relative flex h-7 min-w-0 max-w-[160px] basis-0 flex-1 items-center gap-0.5 overflow-hidden px-1.5 transition-colors cursor-grab active:cursor-grabbing',
+        'group relative flex h-7 min-w-0 max-w-[160px] basis-0 flex-1 items-center overflow-hidden transition-colors cursor-grab active:cursor-grabbing',
         isActive
           ? 'bg-background text-foreground shadow-sm ring-1 ring-border/80'
           : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
@@ -42,16 +42,16 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
       )}
     >
       <button
-        className="min-w-0 shrink truncate text-left text-[11px] font-medium leading-none"
+        className="flex h-full min-w-0 flex-1 items-center px-2 text-left text-[11px] font-medium leading-none"
         onClick={onSwitch}
         title={`${label} — ${project?.path || tabId}`}
       >
-        {label}
+        <span className="min-w-0 truncate">{label}</span>
       </button>
-      <span className="relative h-4 w-4 shrink-0">
+      <span className="ml-auto flex h-full shrink-0 items-center gap-0.5 pr-1">
         {hasLocalChanges && (
           <span
-            className="absolute inset-0 flex items-center justify-center transition-opacity group-hover:opacity-0"
+            className="flex h-4 w-3 items-center justify-center"
             title="Uncommitted changes"
           >
             <span className="h-1.5 w-1.5 rounded-full bg-warning" />
@@ -59,12 +59,8 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
         )}
         <button
           className={cn(
-            'absolute inset-0 flex items-center justify-center rounded bg-background/90 transition-opacity hover:bg-accent hover:!opacity-100',
-            hasLocalChanges
-              ? 'opacity-0 group-hover:opacity-70'
-              : isActive
-                ? 'opacity-60'
-                : 'opacity-0 group-hover:opacity-60'
+            'flex h-4 w-4 items-center justify-center rounded transition-opacity hover:bg-accent hover:!opacity-100',
+            isActive ? 'opacity-60' : 'opacity-0 group-hover:opacity-60 focus:opacity-100'
           )}
           onClick={(event) => {
             event.stopPropagation()

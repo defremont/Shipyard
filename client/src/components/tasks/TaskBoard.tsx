@@ -30,13 +30,13 @@ import { BulkImportDialog } from './BulkImportDialog'
 import { ColumnBulkMenu } from './ColumnBulkMenu'
 import { SyncMenu } from '@/components/sync/SyncMenu'
 import { MilestoneSelector } from './MilestoneSelector'
-import { TaskForecastSummary } from './TaskForecastSummary'
+import { TaskForecastInline, TaskForecastSummary } from './TaskForecastSummary'
 // Pulls in CodeMirror for the markdown preview — keep it out of the board's chunk.
 const ReportDialog = lazy(() =>
   import('@/components/reports/ReportDialog').then(m => ({ default: m.ReportDialog }))
 )
 import { SyncPanelExports } from '@/components/sync/SyncPanel'
-import { useTasks, useUpdateTask, useReorderTasks, useCreateTask, type Task } from '@/hooks/useTasks'
+import { useTasks, useTaskForecast, useUpdateTask, useReorderTasks, useCreateTask, type Task } from '@/hooks/useTasks'
 import { useTerminalStatus } from '@/hooks/useTerminal'
 import { tasksToCSV, parseCSV, diffTasks, type CsvDiff } from '@/lib/csv'
 import { buildColumnPrompt } from '@/lib/promptBuilder'
@@ -186,10 +186,10 @@ const itemsFirstCollision: CollisionDetection = (args) => {
   return closestCenter(args)
 }
 
-function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, milestoneId, onAddingChange, isAdding, hiddenCount, onShowMore, headerExtra }: {
-  col: ColumnConfig; children: React.ReactNode; count: number; taskIds: string[]
+function DroppableColumn({ col, children, count, totalCount, taskIds, onCopy, projectId, milestoneId, onAddingChange, isAdding, hiddenCount, onShowMore, forecast, headerExtra }: {
+  col: ColumnConfig; children: React.ReactNode; count: number; totalCount?: number; taskIds: string[]
   onCopy?: () => void; projectId?: string; milestoneId?: string; onAddingChange?: (adding: boolean) => void; isAdding?: boolean
-  hiddenCount?: number; onShowMore?: () => void; headerExtra?: React.ReactNode
+  hiddenCount?: number; onShowMore?: () => void; forecast?: React.ReactNode; headerExtra?: React.ReactNode
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: col.key })
   const Icon = col.icon
@@ -206,9 +206,10 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, mil
         <Icon className={cn('h-3.5 w-3.5', col.color)} />
         <h3 className="text-xs font-medium">{col.label}</h3>
         <span className="text-xs text-muted-foreground/60 tabular-nums">{count}</span>
+        {forecast}
         {/* Column actions stay hidden until the column is hovered — quieter chrome */}
         <div className="ml-auto flex items-center gap-1 opacity-0 group-hover/col:opacity-100 focus-within:opacity-100 transition-opacity">
-          {onCopy && count > 0 && (
+          {onCopy && (totalCount ?? count) > 0 && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <button onClick={onCopy} className="text-muted-foreground/50 hover:text-foreground transition-colors">
@@ -264,7 +265,7 @@ function DroppableColumn({ col, children, count, taskIds, onCopy, projectId, mil
   )
 }
 
-function BacklogSubHeader({ count, headerExtra, children }: { count: number; headerExtra?: React.ReactNode; children: React.ReactNode }) {
+function BacklogSubHeader({ count, forecast, headerExtra, children }: { count: number; forecast?: React.ReactNode; headerExtra?: React.ReactNode; children: React.ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: BACKLOG_DROP_ID })
   return (
     <div
@@ -277,6 +278,7 @@ function BacklogSubHeader({ count, headerExtra, children }: { count: number; hea
       <div className="flex items-center gap-1.5 px-0.5 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground/70 font-medium">
         <span>Backlog</span>
         <span className="text-muted-foreground/50">({count})</span>
+        {forecast}
         {headerExtra && <div className="ml-auto">{headerExtra}</div>}
       </div>
       <div className="space-y-1">
@@ -321,6 +323,7 @@ const SortableTaskItem = memo(function SortableTaskItem({ task, projectName, pro
 
 export function TaskBoard({ projectId, projectName, projectPath, milestoneId, onMilestoneChange, onOpenSettings }: TaskBoardProps) {
   const { data: tasks, isLoading } = useTasks(projectId, milestoneId)
+  const { data: taskForecast, isLoading: isForecastLoading } = useTaskForecast(projectId, milestoneId)
   const { isSyncing } = useAutoSync(projectId, milestoneId)
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings, staleTime: Infinity })
   const { data: terminalStatus } = useTerminalStatus()
@@ -579,7 +582,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           )}
         </h2>
         <div className="flex flex-wrap items-center gap-1">
-          <TaskForecastSummary projectId={projectId} milestoneId={milestoneId} />
+          <TaskForecastSummary projectId={projectId} forecast={taskForecast} isLoading={isForecastLoading} />
           <SyncMenu projectId={projectId} projectName={projectName} milestoneId={milestoneId} tasks={tasks || []} />
           {/* Secondary controls live in one overflow menu — the toolbar stays minimal */}
           <DropdownMenu>
@@ -658,7 +661,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
               const bulkScopeLabel = isInboxCol ? 'To Do' : col.label
               return (
                 <DroppableColumn
-                  key={col.key} col={col} count={colTasks.length} taskIds={taskIds}
+                  key={col.key} col={col} count={isInboxCol ? inboxSplit.todoCount : colTasks.length} totalCount={colTasks.length} taskIds={taskIds}
                   onCopy={() => handleCopyColumn(col.key)}
                   projectId={projectId}
                   milestoneId={milestoneId}
@@ -666,6 +669,16 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                   onAddingChange={(adding) => setAddingInColumn(adding ? col.key : null)}
                   hiddenCount={hiddenCount}
                   onShowMore={() => handleShowMore(col.key)}
+                  forecast={
+                    isInboxCol ? (
+                      <div className="flex items-center gap-1.5">
+                        <TaskForecastInline summary={taskForecast?.breakdown?.inbox} />
+                        <TaskForecastInline label="Total" summary={taskForecast?.breakdown?.inboxAndBacklog} />
+                      </div>
+                    ) : col.key === 'in_progress' ? (
+                      <TaskForecastInline summary={taskForecast?.breakdown?.inProgress} />
+                    ) : undefined
+                  }
                   headerExtra={
                     <>
                       {isDoneCol && unreadDone.length > 0 && (
@@ -709,6 +722,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                             ))}
                           <BacklogSubHeader
                             count={inboxSplit.backlogCount}
+                            forecast={<TaskForecastInline summary={taskForecast?.breakdown?.backlog} />}
                             headerExtra={
                               <ColumnBulkMenu
                                 projectId={projectId}

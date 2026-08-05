@@ -4,6 +4,13 @@ import { scheduleAutoSync as scheduleAutoSyncPush } from '@/lib/sync/autoSync'
 
 export type EffortPoints = 1 | 2 | 3 | 5 | 8
 
+export interface ForecastScopeSummary {
+  taskCount: number
+  estimatedDevelopmentMs: number
+  likelyLowMs: number
+  likelyHighMs: number
+}
+
 export interface Task {
   id: string
   number?: number
@@ -47,6 +54,12 @@ export interface TaskForecast {
     likelyLowMs: number
     likelyHighMs: number
     estimatedQueueMs: number | null
+  }
+  breakdown: {
+    inbox: ForecastScopeSummary
+    backlog: ForecastScopeSummary
+    inboxAndBacklog: ForecastScopeSummary
+    inProgress: ForecastScopeSummary
   }
   tasks: Array<{
     taskId: string

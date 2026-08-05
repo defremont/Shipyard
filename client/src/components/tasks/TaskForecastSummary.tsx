@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Clock3, TrendingUp } from 'lucide-react'
-import { useTaskForecast } from '@/hooks/useTasks'
+import type { ForecastScopeSummary, TaskForecast } from '@/hooks/useTasks'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -18,8 +18,7 @@ function formatDuration(ms: number | null): string {
 
 const confidenceLabel = { low: 'low', medium: 'medium', high: 'high' } as const
 
-export function TaskForecastSummary({ projectId, milestoneId }: { projectId: string; milestoneId?: string }) {
-  const { data: forecast, isLoading } = useTaskForecast(projectId, milestoneId)
+export function TaskForecastSummary({ projectId, forecast, isLoading }: { projectId: string; forecast?: TaskForecast | null; isLoading?: boolean }) {
   const [backfillOpen, setBackfillOpen] = useState(false)
 
   if (isLoading || !forecast || (forecast.scope.taskCount === 0 && forecast.history.unclassifiedTaskCount === 0)) return null
@@ -64,6 +63,12 @@ export function TaskForecastSummary({ projectId, milestoneId }: { projectId: str
               <div className="mt-0.5 text-lg font-semibold tabular-nums">{formatDuration(forecast.scope.estimatedDevelopmentMs)}</div>
               <div className="text-[10px] text-muted-foreground">Likely {formatDuration(forecast.scope.likelyLowMs)} to {formatDuration(forecast.scope.likelyHighMs)} - {confidenceLabel[forecast.confidence]} confidence</div>
             </div>
+            {forecast.breakdown && <div className="space-y-1">
+              <ForecastRow label="Inbox" summary={forecast.breakdown.inbox} />
+              <ForecastRow label="Backlog" summary={forecast.breakdown.backlog} />
+              <ForecastRow label="Inbox + Backlog" summary={forecast.breakdown.inboxAndBacklog} />
+              <ForecastRow label="In Progress" summary={forecast.breakdown.inProgress} />
+            </div>}
             <div className="grid grid-cols-2 gap-2 text-xs">
               <Metric label="Remaining tasks" value={String(forecast.scope.taskCount)} />
               <Metric label="History used" value={`${forecast.history.completedWithDevelopmentTime} tasks`} />
@@ -101,4 +106,34 @@ export function TaskForecastSummary({ projectId, milestoneId }: { projectId: str
 
 function Metric({ label, value }: { label: string; value: string }) {
   return <div className="rounded-md bg-muted/50 px-2.5 py-2"><div className="text-[10px] text-muted-foreground">{label}</div><div className="mt-0.5 font-medium tabular-nums">{value}</div></div>
+}
+
+function ForecastRow({ label, summary }: { label: string; summary: ForecastScopeSummary }) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-md bg-muted/40 px-2.5 py-1.5 text-xs">
+      <span>{label} <span className="text-muted-foreground">({summary.taskCount})</span></span>
+      <span className="text-right tabular-nums">
+        {summary.taskCount > 0 ? <>
+          <span className="font-medium">{formatDuration(summary.estimatedDevelopmentMs)}</span>
+          <span className="ml-1 text-[10px] text-muted-foreground">{formatDuration(summary.likelyLowMs)} to {formatDuration(summary.likelyHighMs)}</span>
+        </> : (
+          <span className="text-muted-foreground">-</span>
+        )}
+      </span>
+    </div>
+  )
+}
+
+export function TaskForecastInline({ label, summary }: { label?: string; summary?: ForecastScopeSummary }) {
+  if (!summary || summary.taskCount === 0 || summary.estimatedDevelopmentMs === 0) return null
+  return (
+    <span
+      className="inline-flex items-center gap-1 whitespace-nowrap text-[10px] font-normal normal-case tracking-normal text-muted-foreground tabular-nums"
+      title={`${label || 'Estimated remaining work'}: ${formatDuration(summary.estimatedDevelopmentMs)} (likely ${formatDuration(summary.likelyLowMs)} to ${formatDuration(summary.likelyHighMs)})`}
+    >
+      <Clock3 className="h-3 w-3" />
+      {label && <span>{label}</span>}
+      <span>{formatDuration(summary.estimatedDevelopmentMs)}</span>
+    </span>
+  )
 }

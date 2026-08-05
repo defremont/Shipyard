@@ -15,6 +15,13 @@ export interface TaskForecastItem {
   source: 'project-effort' | 'global-effort' | 'project-priority' | 'project' | 'global-priority' | 'global' | 'none';
 }
 
+export interface ForecastScopeSummary {
+  taskCount: number;
+  estimatedDevelopmentMs: number;
+  likelyLowMs: number;
+  likelyHighMs: number;
+}
+
 export interface TaskForecast {
   generatedAt: string;
   confidence: ForecastConfidence;
@@ -35,6 +42,12 @@ export interface TaskForecast {
     likelyLowMs: number;
     likelyHighMs: number;
     estimatedQueueMs: number | null;
+  };
+  breakdown: {
+    inbox: ForecastScopeSummary;
+    backlog: ForecastScopeSummary;
+    inboxAndBacklog: ForecastScopeSummary;
+    inProgress: ForecastScopeSummary;
   };
   tasks: TaskForecastItem[];
 }
@@ -114,6 +127,21 @@ function selectSample(history: HistoricalDuration[], task: Task): {
   return { rows: [], source: 'none' };
 }
 
+function summarizeScope(
+  activeTasks: Task[],
+  forecasts: TaskForecastItem[],
+  includes: (task: Task) => boolean,
+): ForecastScopeSummary {
+  const taskIds = new Set(activeTasks.filter(includes).map(task => task.id));
+  const items = forecasts.filter(item => taskIds.has(item.taskId));
+  return {
+    taskCount: taskIds.size,
+    estimatedDevelopmentMs: items.reduce((sum, item) => sum + item.remainingDevelopmentMs, 0),
+    likelyLowMs: items.reduce((sum, item) => sum + item.likelyLowMs, 0),
+    likelyHighMs: items.reduce((sum, item) => sum + item.likelyHighMs, 0),
+  };
+}
+
 export function buildTaskForecast(allTasks: Task[], projectId: string, scopedTasks: Task[], now = Date.now()): TaskForecast {
   const history = historyFrom(allTasks);
   const active = scopedTasks.filter(task => task.status !== 'done');
@@ -146,6 +174,8 @@ export function buildTaskForecast(allTasks: Task[], projectId: string, scopedTas
   const recentCutoff = now - 30 * 24 * 60 * 60 * 1_000;
   const effectiveSamples = forecasts.filter(item => item.sampleSize > 0).map(item => item.sampleSize);
   const minimumSample = effectiveSamples.length > 0 ? Math.min(...effectiveSamples) : 0;
+  const inboxAndBacklog = summarizeScope(active, forecasts, task => task.status === 'todo' || task.status === 'backlog');
+  const inProgress = summarizeScope(active, forecasts, task => task.status === 'in_progress');
 
   return {
     generatedAt: new Date(now).toISOString(),
@@ -161,12 +191,18 @@ export function buildTaskForecast(allTasks: Task[], projectId: string, scopedTas
     },
     scope: {
       taskCount: active.length,
-      inboxCount: active.filter(task => task.status === 'backlog' || task.status === 'todo').length,
-      inProgressCount: active.filter(task => task.status === 'in_progress').length,
+      inboxCount: inboxAndBacklog.taskCount,
+      inProgressCount: inProgress.taskCount,
       estimatedDevelopmentMs: forecasts.reduce((sum, item) => sum + item.remainingDevelopmentMs, 0),
       likelyLowMs: forecasts.reduce((sum, item) => sum + item.likelyLowMs, 0),
       likelyHighMs: forecasts.reduce((sum, item) => sum + item.likelyHighMs, 0),
       estimatedQueueMs: queueValues.length ? Math.round(quantile(queueValues, 0.5)) : null,
+    },
+    breakdown: {
+      inbox: summarizeScope(active, forecasts, task => task.status === 'todo'),
+      backlog: summarizeScope(active, forecasts, task => task.status === 'backlog'),
+      inboxAndBacklog,
+      inProgress,
     },
     tasks: forecasts,
   };

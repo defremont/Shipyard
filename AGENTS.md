@@ -155,6 +155,9 @@ interface Project {
 - Duracoes instantaneas/invalidas e acima de 180 dias sao ignoradas; tarefas em andamento usam duracao residual condicional.
 - Tasks antigas sem effort continuam validas. `POST /api/claude/classify-task-effort` gera sugestoes sem receber status/timestamps/duracao; o usuario revisa e `POST /api/projects/:id/tasks/effort/apply` grava somente as selecionadas com `effortSource: backfill`.
 - Endpoint: `GET /api/projects/:id/tasks/forecast?milestone=...`; mutations invalidam `['task-forecast', projectId]`.
+- A resposta do forecast inclui `breakdown` para `inbox` (`todo`), `backlog`,
+  `inboxAndBacklog` e `inProgress`; cada recorte soma estimativa restante e faixa
+  P25-P75. O kanban exibe esses totais nos cabecalhos e no popover geral.
 
 ### Timestamps de Status (cascading)
 Os timestamps sao cascading — etapas posteriores preenchem as anteriores automaticamente:
