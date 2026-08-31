@@ -65,7 +65,12 @@ export function Settings() {
     }
 
     if (exportOptions.has('tasks')) {
-      data.tasks = allTasks || []
+      // The cross-project list omits Trello comment and attachment bodies to
+      // keep the polled payload small, so a backup reads each project instead.
+      const perProject = await Promise.all(
+        (projects || []).map(p => api.getTasks(p.id).then(r => r.tasks).catch(() => []))
+      )
+      data.tasks = perProject.flat()
     }
 
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
@@ -78,7 +83,7 @@ export function Settings() {
 
     const parts = []
     if (exportOptions.has('settings')) parts.push('settings')
-    if (exportOptions.has('tasks')) parts.push(`${(allTasks || []).length} tasks`)
+    if (exportOptions.has('tasks')) parts.push(`${(data.tasks as unknown[]).length} tasks`)
     toast.success(`Exported: ${parts.join(', ')}`)
   }
 

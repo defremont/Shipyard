@@ -3,13 +3,17 @@ import * as taskStore from './taskStore.js';
 import * as gitService from './gitService.js';
 import * as syncStore from './syncStore.js';
 import * as syncEngine from './sync/syncEngine.js';
+import * as trelloSync from './sync/trelloSync.js';
 import type { Project, Task, EffortPoints } from '../types/index.js';
 
 // MCP Tool handlers - optimized for minimal token usage
 // Lists return slim summaries; use get_task for full details
 
 export interface McpToolResult {
-  content: Array<{ type: 'text'; text: string }>;
+  content: Array<
+    | { type: 'text'; text: string }
+    | { type: 'image'; data: string; mimeType: string }
+  >;
   isError?: boolean;
 }
 
@@ -101,13 +105,62 @@ export async function getTask(projectId: string, taskId: string): Promise<McpToo
   const task = await taskStore.getTask(projectId, taskId);
   if (!task) return fail(`Task "${taskId}" not found`);
   // Full task details (this is the tool for getting description/prompt)
-  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks } = task;
+  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks, attachments, comments } = task;
   return { content: [{ type: 'text', text: compact({
     id, number, projectId, ...(milestoneId ? { milestoneId } : {}),
     title, description, priority, effort, effortSource, effortConfidence, status, prompt,
     createdAt, updatedAt, inboxAt, inProgressAt, doneAt,
     ...(subtasks?.length ? { subtasks } : {}),
+    // Metadata only — call get_task_attachment to actually see an image.
+    ...(attachments?.length ? { attachments: attachments.map(a => ({ id: a.id, name: a.name, mimeType: a.mimeType, bytes: a.bytes, isImage: a.isImage })) } : {}),
+    ...(comments?.length ? { comments: comments.map(c => ({ author: c.author, text: c.text, date: c.date })) } : {}),
   }) }] };
+}
+
+// The API caps an image block at 5 MB and base64 inflates by ~4/3, so the raw
+// file has to stay under about 3.7 MB.
+const MAX_ATTACHMENT_BYTES = 3_700_000;
+
+/**
+ * Hand an agent the actual bytes of a client's screenshot. Trello requires an
+ * OAuth header for this, so the agent cannot fetch the URL itself.
+ */
+export async function getTaskAttachment(projectId: string, taskId: string, attachmentId: string): Promise<McpToolResult> {
+  const task = await taskStore.getTask(projectId, taskId);
+  if (!task) return fail(`Task "${taskId}" not found`);
+
+  const meta = task.attachments?.find(a => a.id === attachmentId);
+  if (!meta) return fail(`Attachment "${attachmentId}" not found on task ${taskId}`);
+
+  // Bail before downloading when the card already told us the size.
+  if (meta.bytes && meta.bytes > MAX_ATTACHMENT_BYTES) {
+    return { content: [{ type: 'text', text: `${compact({ id: meta.id, name: meta.name, mimeType: meta.mimeType, bytes: meta.bytes })}\nToo large to inline (limit ${MAX_ATTACHMENT_BYTES} bytes). Ask the user to describe it or to share a smaller version.` }] };
+  }
+
+  const link = await syncEngine.resolveTrelloCard(projectId, taskId, task.milestoneId);
+  if (!link) return fail('This task is not linked to a Trello card, so its attachments cannot be fetched');
+
+  let file: Awaited<ReturnType<typeof trelloSync.fetchAttachmentBytes>>;
+  try {
+    file = await trelloSync.fetchAttachmentBytes(link.config, link.cardId, attachmentId);
+  } catch (err: any) {
+    return fail(`Could not download the attachment: ${err?.message ?? err}`);
+  }
+  if (!file) return fail('The attachment is no longer available on Trello');
+
+  const info = compact({ id: meta.id, name: file.name, mimeType: file.mimeType, bytes: file.data.length });
+
+  if (!file.mimeType.startsWith('image/')) {
+    return { content: [{ type: 'text', text: `${info}\nThis attachment is not an image, so its contents are not included. Ask the user if you need it.` }] };
+  }
+  if (file.data.length > MAX_ATTACHMENT_BYTES) {
+    return { content: [{ type: 'text', text: `${info}\nImage is too large to inline (limit ${MAX_ATTACHMENT_BYTES} bytes).` }] };
+  }
+
+  return { content: [
+    { type: 'text', text: info },
+    { type: 'image', data: file.data.toString('base64'), mimeType: file.mimeType },
+  ] };
 }
 
 interface TaskInput {
@@ -632,11 +685,25 @@ export const MCP_TOOLS = [
   },
   {
     name: 'get_task',
-    description: 'Get full task details: description, prompt, effort estimate, subtasks and the status timestamps (inboxAt/inProgressAt/doneAt).',
+    description: 'Get full task details: description, prompt, effort estimate, subtasks, status timestamps (inboxAt/inProgressAt/doneAt), plus any comments and attachment metadata the client added on the synced Trello card. Use get_task_attachment to see an attached image.',
     inputSchema: {
       type: 'object' as const,
       properties: { projectId: PROJECT_ID, taskId: TASK_ID },
       required: ['projectId', 'taskId'],
+    },
+    annotations: readOnly,
+  },
+  {
+    name: 'get_task_attachment',
+    description: 'Fetch one attachment from the task\'s Trello card. Images come back inline so you can look at the screenshot a client attached. Get the attachmentId from get_task.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        projectId: PROJECT_ID,
+        taskId: TASK_ID,
+        attachmentId: { type: 'string' as const, description: 'Attachment id from get_task' },
+      },
+      required: ['projectId', 'taskId', 'attachmentId'],
     },
     annotations: readOnly,
   },
@@ -912,6 +979,8 @@ export async function handleToolCall(name: string, args: Record<string, any>): P
       return getAllTasks(args.status);
     case 'get_task':
       return getTask(args.projectId, args.taskId);
+    case 'get_task_attachment':
+      return getTaskAttachment(args.projectId, args.taskId, args.attachmentId);
     case 'create_task':
       return createTask(args.projectId, { title: args.title, description: args.description, priority: args.priority, effort: args.effort, status: args.status, prompt: args.prompt, milestoneId: args.milestoneId });
     case 'create_tasks':

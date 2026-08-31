@@ -8,6 +8,7 @@ import {
   listAiSessions,
   writeToSession,
   resizeSession,
+  setStateListener,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
 import * as log from '../services/logService.js';
@@ -221,10 +222,25 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         killSession(sessionId);
       });
 
+      // Tell the client when the Claude CLI is waiting on a human, so the tab
+      // can show it even while another tab is in front.
+      const currentState = setStateListener(sessionId, state => {
+        if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'state', state }));
+      });
+      if (currentState && socket.readyState === 1) {
+        socket.send(JSON.stringify({ type: 'state', state: currentState }));
+      }
+
       const cleanup = () => {
         if (flushTimer) clearTimeout(flushTimer);
         onData.dispose();
         onExit.dispose();
+        // A replaced connection's close handler runs after the new one has
+        // already registered its listener — only drop the listener if it is
+        // still ours, or a reconnect would silently lose state updates.
+        if (activeConnections.get(sessionId)?.socket === socket) {
+          setStateListener(sessionId, undefined);
+        }
       };
 
       // Track this as the active connection

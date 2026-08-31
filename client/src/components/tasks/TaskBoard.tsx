@@ -26,6 +26,7 @@ import { TaskEditor } from './TaskEditor'
 import { TaskViewer } from './TaskViewer'
 import { TaskListView } from './TaskListView'
 import { CsvReviewDialog } from './CsvReviewDialog'
+import { AiResolveDialog } from './AiResolveDialog'
 import { BulkImportDialog } from './BulkImportDialog'
 import { ColumnBulkMenu } from './ColumnBulkMenu'
 import { SyncMenu } from '@/components/sync/SyncMenu'
@@ -40,6 +41,7 @@ import { useTasks, useTaskForecast, useUpdateTask, useReorderTasks, useCreateTas
 import { useTerminalStatus } from '@/hooks/useTerminal'
 import { tasksToCSV, parseCSV, diffTasks, type CsvDiff } from '@/lib/csv'
 import { buildColumnPrompt } from '@/lib/promptBuilder'
+import { PENDING_NEW_TASK_KEY } from '@/lib/shortcuts'
 import { useAutoSync } from '@/hooks/useSheetSync'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
@@ -336,6 +338,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [csvReviewOpen, setCsvReviewOpen] = useState(false)
   const [csvDiff, setCsvDiff] = useState<CsvDiff | null>(null)
+  const [aiResolveTask, setAiResolveTask] = useState<Task | null>(null)
   const [sortBy, setSortBy] = useState<SortOption>(() =>
     (localStorage.getItem(`shipyard:sort:${projectId}`) as SortOption) || 'updated'
   )
@@ -379,13 +382,34 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     setEditorOpen(true)
   }
 
-  const handleAiResolve = useCallback(async (task: Task) => {
-    if (!terminalStatus?.available) {
-      toast.error('Integrated terminal required for AI resolution')
-      return
+  // Ctrl+N from anywhere in the app. The board is only mounted in tasks mode,
+  // so when the shortcut fires from the editor it also leaves a flag for the
+  // board to pick up once it mounts — otherwise the event lands on nobody.
+  useEffect(() => {
+    const openNew = () => {
+      sessionStorage.removeItem(PENDING_NEW_TASK_KEY)
+      handleNew()
     }
+    // Only honour a pending flag left for THIS project — otherwise a flag
+    // stranded by a project that failed to mount would pop a dialog here.
+    if (sessionStorage.getItem(PENDING_NEW_TASK_KEY) === projectId) openNew()
+    window.addEventListener('shipyard:new-task', openNew)
+    return () => window.removeEventListener('shipyard:new-task', openNew)
+  }, [projectId])
+
+  // The onAiResolve prop carries no event, so track the Shift key from the
+  // click's own capture phase — it runs before React's handlers in the same
+  // dispatch, so the ref is current when handleAiResolve reads it.
+  const shiftClickRef = useRef(false)
+  useEffect(() => {
+    const track = (e: MouseEvent) => { shiftClickRef.current = e.shiftKey }
+    window.addEventListener('click', track, true)
+    return () => window.removeEventListener('click', track, true)
+  }, [])
+
+  const runAiResolve = useCallback(async (task: Task, feedback?: string) => {
     try {
-      const { prompt } = await api.getAiResolvePrompt(projectId, task.id)
+      const { prompt } = await api.getAiResolvePrompt(projectId, task.id, feedback)
       window.dispatchEvent(new CustomEvent('shipyard:open-terminal', {
         detail: { projectId, type: 'ai-resolve', taskId: task.id, taskNumber: task.number, prompt }
       }))
@@ -393,7 +417,20 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     } catch (err: any) {
       toast.error(err.message || 'Failed to start AI resolution')
     }
-  }, [projectId, terminalStatus])
+  }, [projectId])
+
+  const handleAiResolve = useCallback((task: Task) => {
+    if (!terminalStatus?.available) {
+      toast.error('Integrated terminal required for AI resolution')
+      return
+    }
+    // Shift-click skips the feedback dialog and runs immediately
+    if (shiftClickRef.current) {
+      runAiResolve(task)
+      return
+    }
+    setAiResolveTask(task)
+  }, [terminalStatus, runAiResolve])
 
   const handleCsvExport = () => {
     if (!tasks?.length) { toast.info('No tasks to export'); return }
@@ -868,6 +905,17 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           />
         </Suspense>
       )}
+
+      <AiResolveDialog
+        task={aiResolveTask}
+        open={aiResolveTask !== null}
+        onOpenChange={(open) => { if (!open) setAiResolveTask(null) }}
+        onRun={(feedback) => {
+          const task = aiResolveTask
+          setAiResolveTask(null)
+          if (task) runAiResolve(task, feedback || undefined)
+        }}
+      />
 
       {csvDiff && (
         <CsvReviewDialog

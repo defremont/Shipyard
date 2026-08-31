@@ -425,7 +425,7 @@ function SectionTasks() {
       <Bullet title="Delete">Remove the task permanently.</Bullet>
       <Bullet title="Toggle status">Click the status icon on the card to cycle through states.</Bullet>
       <Bullet title="AI Improve">Use the wand button to have Claude improve the task's title, description, and details.</Bullet>
-      <Bullet title="Resolve with AI">For in-progress tasks, click the sparkles button to open Claude Code with the task context pre-loaded. A pulsing purple indicator appears while the AI session is active. When the task is completed by AI, it's flagged for human review.</Bullet>
+      <Bullet title="Run with AI">For in-progress tasks, click the sparkles button to open Claude Code with the task context pre-loaded. A small dialog lets you add a decision or extra context for that run — "use option B", "skip the migration" — which is handed to the agent as an instruction that outranks the task description; Shift-click skips the dialog. A pulsing indicator marks the running session, and the finished task is flagged for your review.</Bullet>
       <Bullet title="Mark all as read">In the Done column header, click the checkmark button to dismiss all completed tasks from the visible list.</Bullet>
 
       <H3>Column Actions</H3>
@@ -523,6 +523,18 @@ function SectionTerminal() {
       <Bullet title="Dev">Runs <code>pnpm dev</code> (or npm/yarn) in the project directory.</Bullet>
       <Bullet title="Claude">Opens Claude Code (<code>claude</code> command) in the project directory.</Bullet>
       <Bullet title="Claude YOLO">Opens Claude Code with auto-accept (<code>claude --dangerously-skip-permissions</code>).</Bullet>
+
+      <H3>Tab indicators</H3>
+      <P>
+        A tab tells you what its session is doing without you having to look at it. A pulsing
+        sparkle means an AI task is running, a green check means it finished, and a question mark
+        means Claude stopped and is waiting for you to answer something — a permission prompt or a
+        choice. The mark clears as soon as you open that tab.
+      </P>
+      <P>
+        Middle-click closes a tab, right-click opens the tab actions, and closing the active tab
+        moves you to the one next to it.
+      </P>
 
       <H3>Native Terminal Fallback</H3>
       <P>
@@ -637,6 +649,16 @@ function SectionSync() {
         <p><strong>Columns synced:</strong> id, title, description, priority, effort, status, prompt, updatedAt</p>
       </InfoBox>
 
+      <H3>Trello & ClickUp</H3>
+      <P>
+        Connect a board or list per milestone. Task changes are pushed automatically and the remote
+        side is pulled every 30 seconds, so what a client sees and what you see stay the same.
+      </P>
+      <Bullet title="Client screenshots">Images a client attaches to a Trello card show up on the task — thumbnails in the task dialog, click for full size — and a paperclip count appears on the card in the board.</Bullet>
+      <Bullet title="Client comments">Comments written on the card are pulled into the task and shown as a thread, newest last.</Bullet>
+      <Bullet title="Agents see them too">Claude reads the comments through the MCP server and can open an attached screenshot with <Kbd>get_task_attachment</Kbd>, so a request made entirely in Trello can be worked on without you retyping it.</Bullet>
+      <Bullet title="One direction">Attachments and comments are read-only in Shipyard — write them on the card, and they arrive on the next pull.</Bullet>
+
       <H3>JSON Export</H3>
       <P>
         Export all tasks of a project as a JSON file. Includes timestamps and metadata.
@@ -726,7 +748,20 @@ function SectionShortcuts() {
         <ShortcutRow keys="Ctrl + K" description="Open global search (projects, tasks, files)" />
         <ShortcutRow keys="Ctrl + Shift + F" description="Open file content search" />
         <ShortcutRow keys="Ctrl + `" description="Toggle terminal panel" />
+        <ShortcutRow keys="?" description="Show every shortcut in an overlay" />
       </div>
+
+      <H3>Tabs and tasks</H3>
+      <div className="border rounded-lg p-3">
+        <ShortcutRow keys="Ctrl + W" description="Close the active editor or project tab (desktop app only)" />
+        <ShortcutRow keys="Ctrl + N" description="New task in the active project (desktop app only)" />
+        <ShortcutRow keys="Middle click" description="Close a project, editor or terminal tab" />
+        <ShortcutRow keys="Right click" description="Tab and project actions" />
+      </div>
+      <P>
+        The browser keeps Ctrl + W and Ctrl + N for itself, so those two only work in the desktop
+        app. Everything else works in both.
+      </P>
 
       <H3>Global Search (Ctrl + K)</H3>
       <div className="border rounded-lg p-3">
@@ -751,8 +786,10 @@ function SectionShortcuts() {
 
       <H3>Navigation</H3>
       <P>
-        Click projects in the sidebar or dashboard to open them as tabs. Close tabs with the X button
-        or by clicking the active tab's close button.
+        Click projects in the sidebar or dashboard to open them as tabs. Close a tab with its X, with
+        the middle mouse button, or with Ctrl + W. Right-click a project anywhere — card, sidebar row
+        or tab — to open Claude, a dev server, a shell, the folder, the repository or the project
+        settings without opening it first.
       </P>
 
       <H3>Task Board</H3>
@@ -979,6 +1016,8 @@ function SectionMcp() {
       <Bullet title="create_task">Create a new task with title, description, priority, status</Bullet>
       <Bullet title="update_task">Update any task field (title, status, priority, etc.)</Bullet>
       <Bullet title="delete_task">Delete a task</Bullet>
+      <Bullet title="get_task">Full task details, including the comments and attachment list from the synced Trello card</Bullet>
+      <Bullet title="get_task_attachment">Fetch an attachment from the card — an image comes back inline, so the agent can look at a screenshot the client sent</Bullet>
       <Bullet title="get_git_status / get_git_log">Read-only git information</Bullet>
       <Bullet title="search_tasks">Search tasks by keyword across all projects</Bullet>
 

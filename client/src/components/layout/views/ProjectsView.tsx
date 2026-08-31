@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { useProjects, useRefreshProjects, type Project } from '@/hooks/useProjects'
 import { useAllTasks } from '@/hooks/useTasks'
 import { useTabs } from '@/hooks/useTabs'
+import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
 
 // Restrained, desaturated set — enough hues to tell projects apart without
 // turning the sidebar into a rainbow.
@@ -43,6 +44,7 @@ function ProjectItem({
 }) {
   const changes = (project.gitStaged ?? 0) + (project.gitUnstaged ?? 0) + (project.gitUntracked ?? 0)
   return (
+    <ProjectContextMenu project={project}>
     <button
       onClick={onClick}
       className={cn(
@@ -64,6 +66,7 @@ function ProjectItem({
         )}
       </div>
     </button>
+    </ProjectContextMenu>
   )
 }
 

@@ -11,6 +11,25 @@ export interface ForecastScopeSummary {
   likelyHighMs: number
 }
 
+export interface TaskAttachment {
+  id: string
+  name: string
+  url: string
+  mimeType?: string
+  bytes?: number
+  isImage?: boolean
+  date?: string
+  source: 'trello'
+}
+
+export interface TaskComment {
+  id: string
+  author?: string
+  text: string
+  date: string
+  source: 'trello'
+}
+
 export interface Task {
   id: string
   number?: number
@@ -32,6 +51,12 @@ export interface Task {
   doneAt?: string
   needsReview?: boolean
   subtasks?: { id: string; title: string; done: boolean }[]
+  /** Pulled from the remote board (Trello) — read-only in Shipyard. */
+  attachments?: TaskAttachment[]
+  comments?: TaskComment[]
+  /** The cross-project list endpoint sends counts instead of the bodies. */
+  attachmentCount?: number
+  commentCount?: number
 }
 
 export interface TaskForecast {

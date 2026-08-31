@@ -27,7 +27,10 @@ export function useElectronMenu() {
       } else if (
         action === 'toggle-search' ||
         action === 'toggle-file-search' ||
-        action === 'toggle-terminal'
+        action === 'toggle-terminal' ||
+        action === 'toggle-shortcuts' ||
+        action === 'close-tab' ||
+        action === 'new-task-request'
       ) {
         window.dispatchEvent(new CustomEvent(`shipyard:${action}`))
       }

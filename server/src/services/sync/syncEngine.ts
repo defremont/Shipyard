@@ -328,14 +328,43 @@ export async function linkClickupList(
   }
 }
 
+/**
+ * Find the Trello card a task is linked to. The link lives in the sync config
+ * state (cardMap), never on the task itself, and a project can have one
+ * integration per milestone — so when the caller doesn't know the milestone we
+ * search every enabled Trello config of the project.
+ */
+export async function resolveTrelloCard(
+  projectId: string,
+  taskId: string,
+  milestoneId?: string,
+): Promise<{ config: EffectiveConfig; cardId: string } | null> {
+  const candidates: string[] = [];
+  if (milestoneId) {
+    candidates.push(normalizeMilestone(milestoneId));
+  } else {
+    const configs = await store.listProjectConfigs(projectId);
+    for (const c of configs) {
+      if (c.providerId === 'trello' && c.enabled) candidates.push(c.milestoneId);
+    }
+  }
+
+  for (const mid of candidates) {
+    const config = await store.getEffectiveConfig(projectId, 'trello', mid);
+    const cardId = config?.state?.cardMap?.[taskId];
+    if (config && cardId) return { config, cardId };
+  }
+  return null;
+}
+
 async function fetchRemote(config: EffectiveConfig, providerId: SyncProviderId): Promise<RemoteTask[]> {
   if (providerId === 'trello') {
     const cards = await trello.pullCards(config);
-    return cards.map(c => ({ remoteId: c.cardId, taskId: c.taskId, title: c.title, description: c.description, prompt: c.prompt, status: c.status, priority: c.priority, updatedAt: c.updatedAt }));
+    return cards.map(c => ({ remoteId: c.cardId, taskId: c.taskId, title: c.title, description: c.description, prompt: c.prompt, effort: c.effort, status: c.status, priority: c.priority, updatedAt: c.updatedAt, attachments: c.attachments, comments: c.comments }));
   }
   if (providerId === 'clickup') {
     const tasks = await clickup.pullTasks(config);
-    return tasks.map(t => ({ remoteId: t.clickupId, taskId: t.taskId, title: t.title, description: t.description, prompt: t.prompt, status: t.status, priority: t.priority, updatedAt: t.updatedAt }));
+    return tasks.map(t => ({ remoteId: t.clickupId, taskId: t.taskId, title: t.title, description: t.description, prompt: t.prompt, effort: t.effort, status: t.status, priority: t.priority, updatedAt: t.updatedAt }));
   }
   return [];
 }

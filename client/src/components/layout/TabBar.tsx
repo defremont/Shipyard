@@ -1,11 +1,13 @@
 import { memo, useMemo, useState } from 'react'
-import { Home, X } from 'lucide-react'
+import { Home, X, XSquare } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 import { useTabs } from '@/hooks/useTabs'
 import { useProjects, type Project } from '@/hooks/useProjects'
+import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
+import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu'
 
-const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDragging, isDragOver, onSwitch, onClose, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
+const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDragging, isDragOver, onSwitch, onClose, onCloseOthers, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
   tabId: string
   project?: Project
   isActive: boolean
@@ -13,6 +15,7 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
   isDragOver: boolean
   onSwitch: () => void
   onClose: () => void
+  onCloseOthers: () => void
   onDragStart: (event: React.DragEvent) => void
   onDragEnd: () => void
   onDragOver: (event: React.DragEvent) => void
@@ -24,9 +27,15 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
     || (project?.gitUnstaged ?? 0) > 0
     || (project?.gitUntracked ?? 0) > 0
 
-  return (
+  const tab = (
     <div
       draggable
+      onAuxClick={(event) => {
+        if (event.button === 1) {
+          event.preventDefault()
+          onClose()
+        }
+      }}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
@@ -73,10 +82,35 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
       </span>
     </div>
   )
+
+  // Without a project record (a tab for a project that was removed) there is
+  // nothing to act on, so the plain tab is all we can offer.
+  if (!project) return tab
+
+  return (
+    <ProjectContextMenu
+      project={project}
+      extra={
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem onClick={onClose}>
+            <X />
+            Close Tab
+          </ContextMenuItem>
+          <ContextMenuItem onClick={onCloseOthers}>
+            <XSquare />
+            Close Other Tabs
+          </ContextMenuItem>
+        </>
+      }
+    >
+      {tab}
+    </ProjectContextMenu>
+  )
 })
 
 export function TabBar() {
-  const { tabs, activeTabId, switchTab, closeTab, reorderTabs } = useTabs()
+  const { tabs, activeTabId, switchTab, closeTab, closeOtherTabs, reorderTabs } = useTabs()
   const { data: projects } = useProjects()
   const location = useLocation()
   const navigate = useNavigate()
@@ -116,6 +150,7 @@ export function TabBar() {
             isDragOver={dragOverId === tab.id && draggingId !== tab.id}
             onSwitch={() => switchTab(tab.id)}
             onClose={() => closeTab(tab.id)}
+            onCloseOthers={() => closeOtherTabs(tab.id)}
             onDragStart={(event) => {
               setDraggingId(tab.id)
               event.dataTransfer.effectAllowed = 'move'

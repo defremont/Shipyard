@@ -14,10 +14,12 @@ const EditorPanel = lazy(() =>
 import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog'
 import { cn } from '@/lib/utils'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
+import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
 import { useTerminalStatus } from '@/hooks/useTerminal'
@@ -34,13 +36,10 @@ export function Workspace() {
     const saved = localStorage.getItem(`shipyard:workspace-mode:${projectId}`)
     return saved === 'editor' ? 'editor' : 'tasks'
   })
-  // Shared with TerminalLauncher via the same localStorage key — the launcher
-  // sidebar and the toolbar agree on whether `--dangerously-skip-permissions`
-  // is on for Claude Code launches in this project.
-  const [skipPermissions, setSkipPermissions] = useState(() => {
-    try { return localStorage.getItem('shipyard:skipPermissions') === 'true' } catch { return false }
-  })
-  const [claudePopoverOpen, setClaudePopoverOpen] = useState(false)
+  // Launching lives in one hook so the toolbar, the dashboard cards, the
+  // sidebar and the context menus all behave the same way — including the
+  // shared `--dangerously-skip-permissions` preference.
+  const { skipPermissions, setSkipPermissions, launchClaude } = useProjectLaunch()
 
   const setWorkspaceMode = useCallback((mode: 'tasks' | 'editor') => {
     _setWorkspaceMode(mode)
@@ -211,13 +210,18 @@ export function Workspace() {
           </div>
         </div>
 
-        {/* Claude is the core workflow — the only always-visible action */}
+        {/* Claude is the core workflow — one click, no popover in the way.
+            Right-click offers the YOLO variant and the rest of the project
+            actions. */}
         <div className="flex items-center gap-0.5 shrink-0 ml-2">
-          <Popover open={claudePopoverOpen} onOpenChange={setClaudePopoverOpen}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <PopoverTrigger asChild>
+          {/* Both triggers clone their child, so each needs a real DOM node to
+              attach to — the span is what the context menu binds to. */}
+          <ProjectContextMenu project={project} onOpenSettings={() => openSettings()}>
+            <span className="inline-flex">
+              <Tooltip>
+                <TooltipTrigger asChild>
                   <button
+                    onClick={() => launchClaude(project)}
                     className={cn(
                       'p-1.5 rounded-md hover:bg-accent transition-colors relative',
                       skipPermissions
@@ -230,42 +234,11 @@ export function Workspace() {
                       <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold text-warning leading-none">Y</span>
                     )}
                   </button>
-                </PopoverTrigger>
-              </TooltipTrigger>
-              <TooltipContent>{skipPermissions ? 'Claude Code (YOLO)' : 'Claude Code'}</TooltipContent>
-            </Tooltip>
-            <PopoverContent className="w-56 p-2" align="end">
-              <button
-                onClick={() => {
-                  setClaudePopoverOpen(false)
-                  handleLaunch(skipPermissions ? 'claude-yolo' : 'claude', 'Claude Code')
-                }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-accent transition-colors"
-              >
-                <Sparkles className={cn('h-3.5 w-3.5', skipPermissions ? 'text-warning' : 'text-primary')} />
-                <span className="font-medium">Open Claude Code{skipPermissions ? ' (YOLO)' : ''}</span>
-              </button>
-              <div className="border-t my-1" />
-              <label className="flex items-start gap-2 px-2 py-1.5 text-xs rounded-md hover:bg-accent cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={skipPermissions}
-                  onChange={(e) => {
-                    const next = e.target.checked
-                    setSkipPermissions(next)
-                    try { localStorage.setItem('shipyard:skipPermissions', String(next)) } catch { /* ignore */ }
-                  }}
-                  className="mt-0.5 h-3.5 w-3.5"
-                />
-                <div className="flex-1">
-                  <div className="font-medium">YOLO mode</div>
-                  <div className="text-[10px] text-muted-foreground">
-                    Launches Claude with <code>--dangerously-skip-permissions</code>.
-                  </div>
-                </div>
-              </label>
-            </PopoverContent>
-          </Popover>
+                </TooltipTrigger>
+                <TooltipContent>{skipPermissions ? 'Claude Code (YOLO)' : 'Claude Code'}</TooltipContent>
+              </Tooltip>
+            </span>
+          </ProjectContextMenu>
         </div>
 
         {/* Everything secondary lives in one overflow menu */}
@@ -276,6 +249,13 @@ export function Workspace() {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuCheckboxItem
+              checked={skipPermissions}
+              onCheckedChange={setSkipPermissions}
+            >
+              Skip permissions (YOLO)
+            </DropdownMenuCheckboxItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => handleLaunch('dev', 'Dev Server')}>
               <Play />
               Dev Server

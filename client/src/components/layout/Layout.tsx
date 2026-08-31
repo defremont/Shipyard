@@ -10,11 +10,14 @@ import { EditorTabsProvider } from '@/hooks/useEditorTabsContext'
 import { TerminalPanel } from '@/components/terminals/TerminalPanel'
 import { useIntegrationAutoPull } from '@/hooks/useIntegrationAutoPull'
 import { useElectronMenu } from '@/hooks/useElectronMenu'
+import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts'
+import { ShortcutsOverlay } from './ShortcutsOverlay'
 import { AppTitleBar } from './AppTitleBar'
 
 function LayoutInner() {
   useIntegrationAutoPull()
   useElectronMenu()
+  useGlobalShortcuts()
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <AppTitleBar />
@@ -31,6 +34,7 @@ function LayoutInner() {
       </div>
       <GlobalSearch />
       <FileContentSearch />
+      <ShortcutsOverlay />
     </div>
   )
 }

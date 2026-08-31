@@ -11,8 +11,10 @@ import { cn } from '@/lib/utils'
 import { useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
 import { buildTaskPrompt } from '@/lib/promptBuilder'
 import { useClaudeStatus, useAnalyzeTask } from '@/hooks/useClaude'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { TaskAttachments } from '@/components/tasks/TaskAttachments'
+import { TaskComments } from '@/components/tasks/TaskComments'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { playAiCompleteSound } from '@/lib/sounds'
@@ -33,7 +35,7 @@ function formatDate(date?: string) {
   catch { return null }
 }
 
-export function TaskViewer({ task, projectName, projectPath, open, onOpenChange, onEdit }: TaskViewerProps) {
+export function TaskViewer({ task: taskProp, projectName, projectPath, open, onOpenChange, onEdit }: TaskViewerProps) {
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: api.getSettings, staleTime: Infinity })
   const updateTask = useUpdateTask()
   const deleteTask = useDeleteTask()
@@ -41,6 +43,40 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
   const analyzeTask = useAnalyzeTask()
   const [deleteOpen, setDeleteOpen] = useState(false)
   const canAiImprove = !!(claudeStatus?.configured || claudeStatus?.cliAvailable)
+
+  // The caller passes a snapshot captured when the dialog opened, so a comment
+  // or screenshot the client adds on Trello meanwhile would never appear. Task
+  // queries are keyed per milestone, so scan the project's cached lists and
+  // keep whichever copy is newest — an inactive cache entry can be older than
+  // the prop we were handed.
+  const queryClient = useQueryClient()
+  let task = taskProp
+  if (taskProp) {
+    for (const [key, tasks] of queryClient.getQueriesData<Task[]>({ queryKey: ['tasks', taskProp.projectId] })) {
+      // Guard against a project literally named "all" colliding with the
+      // cross-project list, which carries counts instead of the bodies.
+      if (key.length !== 3) continue
+      const found = tasks?.find(t => t.id === taskProp.id)
+      if (found && new Date(found.updatedAt).getTime() > new Date(task!.updatedAt).getTime()) {
+        task = found
+      }
+    }
+  }
+
+  // Opened from the global Tasks page, the task comes from the cross-project
+  // list, which ships counts instead of comment bodies. Fetch the project's
+  // tasks so the dialog can actually show what the badges promise.
+  const needsBodies = !!taskProp && !!open
+    && ((taskProp.commentCount ?? 0) > 0 || (taskProp.attachmentCount ?? 0) > 0)
+    && !task?.comments && !task?.attachments
+  const { data: projectTasks } = useQuery({
+    queryKey: ['tasks', taskProp?.projectId ?? '', 'all'],
+    queryFn: () => api.getTasks(taskProp!.projectId).then(r => r.tasks as Task[]),
+    enabled: needsBodies,
+  })
+  if (needsBodies && projectTasks) {
+    task = projectTasks.find(t => t.id === taskProp!.id) ?? task
+  }
 
   // Clear "needs review" indicator when the user opens/views the task
   useEffect(() => {
@@ -140,6 +176,20 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
             </div>
           )}
 
+          {task.attachments && task.attachments.length > 0 && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Attachments</label>
+              <div className="mt-1.5">
+                <TaskAttachments
+                  projectId={task.projectId}
+                  taskId={task.id}
+                  milestoneId={task.milestoneId}
+                  attachments={task.attachments}
+                />
+              </div>
+            </div>
+          )}
+
           {task.subtasks && task.subtasks.length > 0 && (
             <div>
               <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -156,6 +206,17 @@ export function TaskViewer({ task, projectName, projectPath, open, onOpenChange,
                     <span className={cn('text-sm', st.done && 'text-muted-foreground')}>{st.title}</span>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {task.comments && task.comments.length > 0 && (
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                Comments ({task.comments.length})
+              </label>
+              <div className="mt-1.5">
+                <TaskComments comments={task.comments} />
               </div>
             </div>
           )}

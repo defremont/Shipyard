@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { useUpdateProject, type Project } from '@/hooks/useProjects'
+import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 import { useTasks, type Task } from '@/hooks/useTasks'
 import { tasksToCSV, parseCSV, diffTasks, type CsvDiff } from '@/lib/csv'
 import { getProvider } from '@/lib/sync/registry'
@@ -45,9 +46,8 @@ export function ProjectSettingsDialog({ project, open, onOpenChange, defaultTab 
   const [linkUrl, setLinkUrl] = useState('')
   const linkLabelRef = useRef<HTMLInputElement>(null)
   const [externalLink, setExternalLink] = useState(project.externalLink || '')
-  const [skipPermissions, setSkipPermissions] = useState(() => {
-    try { return localStorage.getItem('shipyard:skipPermissions') === 'true' } catch { return false }
-  })
+  // One shared preference across every surface that launches Claude.
+  const { skipPermissions, setSkipPermissions } = useProjectLaunch()
   const [activeTab, setActiveTab] = useState(defaultTab || 'general')
   const { data: tasks } = useTasks(project.id)
   const [exporting, setExporting] = useState<string | null>(null)
@@ -159,7 +159,7 @@ export function ProjectSettingsDialog({ project, open, onOpenChange, defaultTab 
                 >
                   <Star className={cn(
                     'h-4 w-4',
-                    project.favorite ? 'fill-yellow-500 text-yellow-500' : 'text-muted-foreground'
+                    project.favorite ? 'fill-warning text-warning' : 'text-muted-foreground'
                   )} />
                 </Button>
               </div>
@@ -340,15 +340,11 @@ export function ProjectSettingsDialog({ project, open, onOpenChange, defaultTab 
               <div className="space-y-2">
                 <label className="text-xs font-medium text-muted-foreground">Claude Code</label>
                 <button
-                  onClick={() => {
-                    const next = !skipPermissions
-                    setSkipPermissions(next)
-                    localStorage.setItem('shipyard:skipPermissions', String(next))
-                  }}
+                  onClick={() => setSkipPermissions(!skipPermissions)}
                   className="flex items-center justify-between w-full px-3 py-2.5 rounded-md border hover:bg-accent/50 transition-colors"
                 >
                   <div className="flex items-center gap-2.5">
-                    <Zap className={cn('h-4 w-4', skipPermissions ? 'text-yellow-500' : 'text-muted-foreground/50')} />
+                    <Zap className={cn('h-4 w-4', skipPermissions ? 'text-warning' : 'text-muted-foreground/50')} />
                     <div className="text-left">
                       <span className="text-xs font-medium">Skip permissions (YOLO mode)</span>
                       <p className="text-[10px] text-muted-foreground">Uses --dangerously-skip-permissions flag</p>
@@ -356,7 +352,7 @@ export function ProjectSettingsDialog({ project, open, onOpenChange, defaultTab 
                   </div>
                   <div className={cn(
                     'w-8 h-4.5 rounded-full transition-colors relative',
-                    skipPermissions ? 'bg-yellow-500' : 'bg-muted'
+                    skipPermissions ? 'bg-warning' : 'bg-muted'
                   )}>
                     <div className={cn(
                       'absolute top-0.5 h-3.5 w-3.5 rounded-full bg-white transition-transform',

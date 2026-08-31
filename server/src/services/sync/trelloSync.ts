@@ -1,6 +1,7 @@
-import type { Task } from '../../types/index.js';
+import type { Task, TaskAttachment, TaskComment } from '../../types/index.js';
 import type { EffectiveConfig } from '../syncStore.js';
 import { patchState } from '../syncStore.js';
+import * as log from '../logService.js';
 
 type SyncConfig = EffectiveConfig;
 
@@ -126,6 +127,107 @@ async function trelloRequest<T = any>(
 
     const message = typeof data === 'string' ? data : data?.message || `Status ${res.status}`;
     throw new Error(`Trello: ${message}`);
+  }
+}
+
+// A Trello card can hold two kinds of attachment: a file the client uploaded,
+// which Trello serves from its own hosts, and a plain link, whose URL is
+// whatever the client typed. Only the uploaded kind may ever receive our
+// credentials — sending the OAuth header to an arbitrary host would hand a
+// stranger a never-expiring read/write token for every board the user has.
+const TRELLO_ATTACHMENT_HOSTS = new Set([
+  'trello.com',
+  'api.trello.com',
+  'trello-attachments.s3.amazonaws.com',
+]);
+
+function isTrelloHosted(url: string): boolean {
+  let parsed: URL;
+  try { parsed = new URL(url); } catch { return false; }
+  if (parsed.protocol !== 'https:') return false;
+  const host = parsed.hostname.toLowerCase();
+  return TRELLO_ATTACHMENT_HOSTS.has(host)
+    || host.endsWith('.trello.com')
+    || host.endsWith('.trellousercontent.com');
+}
+
+const ATTACHMENT_ID_RE = /^[0-9a-f]{24}$/i;
+const ATTACHMENT_TIMEOUT_MS = 15_000;
+const MAX_ATTACHMENT_DOWNLOAD_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Download an attachment's bytes. Trello locked uploaded-attachment URLs behind
+ * an OAuth header — key/token in the query string (what trelloRequest does) is
+ * not enough, and the raw url in an <img> tag returns 401. So this is the only
+ * way the UI or an agent can ever see a client's screenshot.
+ *
+ * Returns null for anything we will not fetch: a bad id, a link attachment, or
+ * a file hosted somewhere other than Trello.
+ */
+export async function fetchAttachmentBytes(
+  config: SyncConfig,
+  cardId: string,
+  attachmentId: string,
+  opts: { preview?: boolean } = {},
+): Promise<{ data: Buffer; mimeType: string; name: string } | null> {
+  // The id lands in the request path; '../..' would walk us onto a different
+  // Trello endpoint once the URL parser normalises it.
+  if (!ATTACHMENT_ID_RE.test(attachmentId)) return null;
+
+  const attachment = await trelloRequest<TrelloAttachment>(
+    config,
+    `/cards/${cardId}/attachments/${attachmentId}`,
+    'GET',
+    { fields: 'name,url,mimeType,bytes,date,previews,isUpload' },
+  ).catch(() => null);
+  if (!attachment?.url) return null;
+  if (attachment.isUpload === false) return null;
+
+  // Previews are much smaller than the original — pick the first one wide
+  // enough to look sharp in the thumbnail grid and the lightbox.
+  let target = attachment.url;
+  if (opts.preview && attachment.previews?.length) {
+    const sorted = [...attachment.previews].sort((a, b) => a.width - b.width);
+    target = (sorted.find(p => p.width >= 400) ?? sorted[sorted.length - 1]).url;
+  }
+  if (!isTrelloHosted(target)) return null;
+
+  const { apiKey, token } = credentials(config);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), ATTACHMENT_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(target, {
+      headers: { Authorization: `OAuth oauth_consumer_key="${apiKey}", oauth_token="${token}"` },
+      // A redirect could walk the credentials off Trello, so follow it by hand.
+      redirect: 'manual',
+      signal: controller.signal,
+    });
+    if (res.status >= 300 && res.status < 400) {
+      const location = res.headers.get('location');
+      const next = location ? new URL(location, target).toString() : '';
+      if (!next || !isTrelloHosted(next)) return null;
+      res = await fetch(next, { redirect: 'error', signal: controller.signal });
+    }
+    if (!res.ok) throw new Error(`Trello: attachment download failed (status ${res.status})`);
+
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_DOWNLOAD_BYTES) {
+      throw new Error('Trello: attachment is too large to load');
+    }
+
+    const data = Buffer.from(await res.arrayBuffer());
+    if (data.length > MAX_ATTACHMENT_DOWNLOAD_BYTES) {
+      throw new Error('Trello: attachment is too large to load');
+    }
+
+    return {
+      data,
+      mimeType: res.headers.get('content-type') || attachment.mimeType || 'application/octet-stream',
+      name: attachment.name || 'attachment',
+    };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -523,6 +625,25 @@ export async function pushTasks(config: SyncConfig, tasks: Task[]): Promise<Push
   return { pushed, total: tasks.length, errors, boardUrl: state.boardUrl };
 }
 
+interface TrelloAttachment {
+  id: string;
+  name: string;
+  url: string;
+  mimeType?: string;
+  bytes?: number;
+  date?: string;
+  /** False for link attachments, whose url is whatever the client typed. */
+  isUpload?: boolean;
+  previews?: Array<{ url: string; width: number; height: number }>;
+}
+
+interface TrelloCommentAction {
+  id: string;
+  date: string;
+  data?: { card?: { id: string }; text?: string };
+  memberCreator?: { fullName?: string; username?: string };
+}
+
 interface TrelloCard {
   id: string;
   name: string;
@@ -531,6 +652,7 @@ interface TrelloCard {
   idLabels: string[];
   closed: boolean;
   dateLastActivity: string;
+  attachments?: TrelloAttachment[];
 }
 
 export interface PulledTask {
@@ -543,21 +665,94 @@ export interface PulledTask {
   status: TaskStatus;
   priority: TaskPriority;
   updatedAt: string;
+  /** Always present on a successful pull ([] when the card has none) so a
+   *  deletion on Trello propagates. */
+  attachments?: TaskAttachment[];
+  /** Undefined when the board-level comments request failed — the merge then
+   *  keeps whatever comments were pulled before. */
+  comments?: TaskComment[];
+}
+
+const MAX_ATTACHMENTS_PER_CARD = 20;
+const MAX_COMMENTS_PER_CARD = 50;
+const COMMENT_ACTIONS_LIMIT = 1000;
+
+const IMAGE_URL_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif|heic)(\?|$)/i;
+
+function mapAttachment(a: TrelloAttachment): TaskAttachment {
+  // Only an uploaded file can be rendered through the proxy; a link attachment
+  // points at an arbitrary host we will not fetch, so it stays a plain link.
+  const looksLikeImage = (a.mimeType ?? '').startsWith('image/') || IMAGE_URL_RE.test(a.url);
+  return {
+    id: a.id,
+    name: a.name,
+    url: a.url,
+    mimeType: a.mimeType || undefined,
+    bytes: a.bytes,
+    isImage: (a.isUpload !== false && looksLikeImage) || undefined,
+    date: a.date,
+    source: 'trello',
+  };
 }
 
 export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
   const state: TrelloState = config.state ?? {};
   if (!state.boardId) return [];
 
-  // Fetch cards, labels, and lists in parallel. Lists are needed so we can
-  // resolve a list id we didn't push to (e.g. a manually-named "Backlog"
-  // list created on Trello after we set up state.listIds, or an existing
-  // board the user linked to where lists rotated).
-  const [cards, labels, lists] = await Promise.all([
-    trelloRequest<TrelloCard[]>(config, `/boards/${state.boardId}/cards`, 'GET', { fields: 'name,desc,idList,idLabels,closed,dateLastActivity' }),
+  // Fetch cards, labels, lists, and comment actions in parallel. Lists are
+  // needed so we can resolve a list id we didn't push to (e.g. a manually-named
+  // "Backlog" list created on Trello after we set up state.listIds, or an
+  // existing board the user linked to where lists rotated). Attachments ride
+  // the cards request itself (attachments=true) — zero extra fan-out. Comments
+  // come from ONE board-level actions request; if it fails we degrade to
+  // attachments only (comments === null) rather than failing the whole pull.
+  const [cards, labels, lists, commentActions] = await Promise.all([
+    trelloRequest<TrelloCard[]>(config, `/boards/${state.boardId}/cards`, 'GET', {
+      fields: 'name,desc,idList,idLabels,closed,dateLastActivity',
+      attachments: 'true',
+      attachment_fields: 'name,url,mimeType,bytes,date,previews,isUpload',
+    }),
     trelloRequest<Array<{ id: string; name: string; color: string }>>(config, `/boards/${state.boardId}/labels`),
     trelloRequest<Array<{ id: string; name: string; closed: boolean }>>(config, `/boards/${state.boardId}/lists`, 'GET', { fields: 'name,closed' }),
+    trelloRequest<TrelloCommentAction[]>(config, `/boards/${state.boardId}/actions`, 'GET', {
+      filter: 'commentCard',
+      limit: String(COMMENT_ACTIONS_LIMIT),
+      fields: 'data,date',
+      memberCreator_fields: 'fullName,username',
+    }).catch((err: any): null => {
+      log.warn('sync', `Trello comments fetch failed — pulling without comments: ${err?.message ?? err}`, undefined, config.projectId);
+      return null;
+    }),
   ]);
+
+  // 1000 is Trello's per-request ceiling. On a board with more comment actions
+  // than that, older cards simply do not appear in the response — and reporting
+  // them as "no comments" would wipe comments we had already stored.
+  const commentsTruncated = commentActions?.length === COMMENT_ACTIONS_LIMIT;
+
+  // Comments per card, capped at the most recent 50 then re-sorted oldest-first
+  // so the thread reads top-to-bottom.
+  const commentsByCard = new Map<string, TaskComment[]>();
+  if (commentActions) {
+    for (const action of commentActions) {
+      const cardId = action.data?.card?.id;
+      if (!cardId || typeof action.data?.text !== 'string') continue;
+      let list = commentsByCard.get(cardId);
+      if (!list) { list = []; commentsByCard.set(cardId, list); }
+      list.push({
+        id: action.id,
+        author: action.memberCreator?.fullName || action.memberCreator?.username || undefined,
+        text: action.data.text,
+        date: action.date,
+        source: 'trello',
+      });
+    }
+    for (const list of commentsByCard.values()) {
+      list.sort((a, b) => timeOf(b.date) - timeOf(a.date));
+      if (list.length > MAX_COMMENTS_PER_CARD) list.length = MAX_COMMENTS_PER_CARD;
+      list.reverse();
+    }
+  }
 
   const labelById: Record<string, { name: string; color: string }> = {};
   for (const l of labels) labelById[l.id] = l;
@@ -628,6 +823,10 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
     const description = split[0] ?? '';
     const prompt = split[1];
 
+    const attachments = (card.attachments ?? [])
+      .slice(0, MAX_ATTACHMENTS_PER_CARD)
+      .map(mapAttachment);
+
     out.push({
       cardId: card.id,
       taskId: reverseCardMap[card.id],
@@ -638,6 +837,41 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
       status,
       priority,
       updatedAt: card.dateLastActivity || new Date().toISOString(),
+      attachments,
+      // Undefined means "we don't know" — the merge then keeps whatever was
+      // already stored. That is what we want when the request failed, and on a
+      // truncated board, where the window is filled in per card below.
+      ...(commentActions && !commentsTruncated
+        ? { comments: commentsByCard.get(card.id) ?? [] }
+        : {}),
+    });
+  }
+
+  // A board past the action ceiling only reports its most recent comments, and
+  // a card's older ones would look deleted. Boards this busy are rare, so pay
+  // for one request per card rather than lose a client's history.
+  if (commentsTruncated) {
+    await mapLimit(out, MAX_CONCURRENT_REQUESTS, async (task) => {
+      try {
+        const actions = await trelloRequest<TrelloCommentAction[]>(
+          config,
+          `/cards/${task.cardId}/actions`,
+          'GET',
+          { filter: 'commentCard', limit: String(MAX_COMMENTS_PER_CARD), fields: 'data,date', memberCreator_fields: 'fullName,username' },
+        );
+        task.comments = actions
+          .filter(a => typeof a.data?.text === 'string')
+          .map(a => ({
+            id: a.id,
+            author: a.memberCreator?.fullName || a.memberCreator?.username || undefined,
+            text: a.data!.text as string,
+            date: a.date,
+            source: 'trello' as const,
+          }))
+          .reverse();
+      } catch {
+        // Leave comments undefined so the merge keeps what it had.
+      }
     });
   }
 

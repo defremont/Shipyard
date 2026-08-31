@@ -131,7 +131,10 @@ export function EditorPanel({
   onInitContent,
 }: EditorPanelProps) {
   const saveFile = useSaveFile()
-  const [confirmClose, setConfirmClose] = useState<string | null>(null)
+  // A queue, not one path: "Close All" hands over several dirty files and each
+  // one has to be asked about in turn.
+  const [confirmQueue, setConfirmQueue] = useState<string[]>([])
+  const confirmClose = confirmQueue[0] ?? null
   const [previewPaths, setPreviewPaths] = useState<Set<string>>(new Set())
   const activeTab = tabs.find(t => t.path === activeTabPath)
   const isMarkdown = activeTab ? MARKDOWN_EXTENSIONS.has(activeTab.extension) : false
@@ -181,11 +184,23 @@ export function EditorPanel({
   const handleCloseTab = useCallback((path: string) => {
     const tab = tabs.find(t => t.path === path)
     if (tab?.isDirty) {
-      setConfirmClose(path)
+      setConfirmQueue(prev => (prev.includes(path) ? prev : [...prev, path]))
     } else {
       onCloseTab(path)
     }
   }, [tabs, onCloseTab])
+
+  // Ctrl+W closes the file being edited before it closes the project tab. The
+  // global handler cancels its event when we take it, so nothing else acts.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      if (!activeTabPath) return
+      event.preventDefault()
+      handleCloseTab(activeTabPath)
+    }
+    window.addEventListener('shipyard:close-editor-tab', handler)
+    return () => window.removeEventListener('shipyard:close-editor-tab', handler)
+  }, [activeTabPath, handleCloseTab])
 
   if (tabs.length === 0) {
     return (
@@ -276,23 +291,37 @@ export function EditorPanel({
             <p className="text-sm font-medium">Unsaved changes</p>
             <p className="text-xs text-muted-foreground">
               <span className="font-mono">{tabs.find(t => t.path === confirmClose)?.name}</span> has unsaved changes. Discard them?
+              {confirmQueue.length > 1 && (
+                <span className="block mt-1">{confirmQueue.length - 1} more unsaved {confirmQueue.length === 2 ? 'file' : 'files'} after this one.</span>
+              )}
             </p>
             <div className="flex gap-2 justify-end">
               <button
                 className="px-3 py-1.5 text-xs rounded bg-accent hover:bg-accent/80 transition-colors"
-                onClick={() => setConfirmClose(null)}
+                onClick={() => setConfirmQueue([])}
               >
                 Cancel
               </button>
               <button
-                className="px-3 py-1.5 text-xs rounded bg-red-600 hover:bg-red-700 text-white transition-colors"
+                className="px-3 py-1.5 text-xs rounded bg-destructive hover:bg-destructive/90 text-destructive-foreground transition-colors"
                 onClick={() => {
                   onCloseTab(confirmClose)
-                  setConfirmClose(null)
+                  setConfirmQueue(prev => prev.slice(1))
                 }}
               >
                 Discard
               </button>
+              {confirmQueue.length > 1 && (
+                <button
+                  className="px-3 py-1.5 text-xs rounded bg-destructive hover:bg-destructive/90 text-destructive-foreground transition-colors"
+                  onClick={() => {
+                    for (const path of confirmQueue) onCloseTab(path)
+                    setConfirmQueue([])
+                  }}
+                >
+                  Discard all
+                </button>
+              )}
             </div>
           </div>
         </div>

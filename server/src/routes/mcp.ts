@@ -175,6 +175,7 @@ export async function mcpRoutes(app: FastifyInstance) {
     <li>Create, rename and delete milestones</li>
     <li>Search across all tasks</li>
     <li>Sync tasks with Trello and ClickUp</li>
+    <li>View Trello comments and attachments on your tasks</li>
   </ul>
   <div class="actions">
     <form method="POST" action="/authorize">

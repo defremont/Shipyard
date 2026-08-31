@@ -1,6 +1,6 @@
 import { useState, useMemo, useSyncExternalStore, useCallback, memo } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Trash2, Copy, CopyPlus, Check, Circle, Sparkles, Wand2, Loader2 } from 'lucide-react'
+import { Pencil, Trash2, Copy, CopyPlus, Check, Circle, Sparkles, Wand2, Loader2, Paperclip, MessageSquare } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -62,6 +62,10 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
   const priority = priorityVisual(task.priority)
   const status = statusVisual(task.status)
   const PriorityIcon = priority.icon
+  // The cross-project list endpoint sends counts, the per-project one the
+  // full arrays.
+  const attachmentCount = task.attachments?.length ?? task.attachmentCount ?? 0
+  const commentCount = task.comments?.length ?? task.commentCount ?? 0
 
   const handleStatusToggle = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -200,6 +204,18 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
           )}          {task.subtasks && task.subtasks.length > 0 && (
             <span className="text-[10px] text-muted-foreground ml-1">
               {task.subtasks.filter(s => s.done).length}/{task.subtasks.length}
+            </span>
+          )}
+          {attachmentCount > 0 && (
+            <span className="text-[10px] text-muted-foreground ml-1 inline-flex items-center gap-0.5" title="Attachments from Trello">
+              <Paperclip className="h-2.5 w-2.5" />
+              {attachmentCount}
+            </span>
+          )}
+          {commentCount > 0 && (
+            <span className="text-[10px] text-muted-foreground ml-1 inline-flex items-center gap-0.5" title="Comments from Trello">
+              <MessageSquare className="h-2.5 w-2.5" />
+              {commentCount}
             </span>
           )}
         </div>

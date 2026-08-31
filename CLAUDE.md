@@ -66,6 +66,18 @@ interface Task {
   inboxAt?: string;         // quando entrou em backlog/todo
   inProgressAt?: string;    // quando moveu para in_progress
   doneAt?: string;          // quando foi concluida
+  attachments?: TaskAttachment[];  // vem do card do Trello (pull-only)
+  comments?: TaskComment[];        // vem do card do Trello (pull-only)
+}
+
+interface TaskAttachment {
+  id: string;  name: string;  url: string;
+  mimeType?: string;  bytes?: number;  isImage?: boolean;  date?: string;
+  source: 'trello';
+}
+
+interface TaskComment {
+  id: string;  author?: string;  text: string;  date: string;  source: 'trello';
 }
 
 interface Milestone {
@@ -101,6 +113,9 @@ interface Project {
   POST/DELETE /api/projects/:id/sync/:providerId (body/query: milestoneId — default 'default'/General)
   POST /api/projects/:id/sync/:providerId/push|pull|merge (body: { milestoneId? })
   POST /api/projects/:id/sync/{trello,clickup}/link (body: { milestoneId?, ... })
+  GET /api/projects/:id/tasks/:tid/attachment/:aid?milestoneId=&preview=1
+    (proxy autenticado — a URL do anexo no Trello exige header OAuth, um `<img>`
+     apontando direto para ela recebe 401)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Sistema**: GET /api/settings, POST /api/browse
 
@@ -161,9 +176,14 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Query keys incluem `subrepo`: `['git-status', projectId, subrepo]`
 
 ### MCP (servidor de ferramentas para agentes)
-- `mcpServer.ts` expoe 24 tools. Cobertura: projetos, milestones (CRUD),
+- `mcpServer.ts` expoe 29 tools. Cobertura: projetos, milestones (CRUD),
   tarefas (incl. `create_tasks`/`bulk_update_tasks`/`bulk_delete_tasks`/`reorder_tasks`),
   git (status/log/diff) e sync (`list_sync_integrations`/`sync_push`/`sync_pull`)
+- `get_task` devolve tambem os comentarios e os metadados de anexo vindos do
+  Trello; `get_task_attachment` baixa um anexo e retorna a imagem inline
+  (bloco `image` em base64, teto de 5 MB) — e assim que o agente enxerga o
+  print que o cliente anexou no card. `McpToolResult.content` aceita blocos
+  `text` e `image`
 - **Toda mutacao de task no MCP DEVE chamar `afterTaskMutation(projectId)`**
   (= `triggerAutoSync`). Sem isso o agente altera tarefas e o Trello/ClickUp
   fica desatualizado ate o usuario mexer na UI
@@ -215,6 +235,52 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   gera centenas de chunks minusculos)
 - Renderer WebGL com fallback automatico para DOM (`attachRenderer`)
 
+### Indicador de "esperando resposta" no terminal Claude
+- `startOutputWatcher` (terminalService.ts) observa a saida das sessoes Claude
+  (`claude`, `claude-yolo`, `ai-resolve`, `ai-manage`) e classifica em
+  `busy` / `awaiting-input` / `idle`. So **observa**: nunca escreve no PTY, nunca
+  toca na fila de escrita nem no flag `injecting` — escrever ali corromperia um
+  paste em andamento
+- Reaproveita `PROMPT_RE` (prompt ocioso) do injetor e acrescenta um padrao de
+  decisao (`Do you want`, opcoes numeradas, `(y/n)`), sempre depois de ~1.2s de
+  silencio. Qualquer input do usuario volta o estado para `busy`
+- O watcher so comeca depois que a injecao de prompt termina (`onInjected`) —
+  durante a espera o CLI mostra prompt ocioso e daria falso `idle`
+- Transicoes viram frame WS `{ type: 'state', state }`; o estado atual e
+  reenviado quando um socket conecta. No client vira `awaitingInput` no
+  `GlobalTab` (transitorio: resetado na validacao de sessoes no mount)
+
+### Atalhos globais e comportamento das abas
+- `useGlobalShortcuts` (chamado em `LayoutInner`) e a casa dos atalhos que valem
+  para o app inteiro: **Ctrl+W** (fecha aba), **Ctrl+N** (nova tarefa) e **?**
+  (overlay de atalhos). Atalhos de um componente continuam com o dono
+  (Ctrl+K, Ctrl+Shift+F, Ctrl+`, Ctrl+S) — registrar duas vezes dispara duplo
+- Ctrl+W com o terminal em foco **nao** e capturado: no shell essa tecla e
+  delete-word e roubá-la quebra a edicao da linha
+- Ctrl+W dispara `shipyard:close-editor-tab` como evento **cancelavel**: o
+  EditorPanel cancela quando fecha um arquivo (passando pela confirmacao de
+  alteracoes nao salvas); se ninguem cancelar, fecha a aba de projeto
+- Ctrl+N deixa `shipyard:pending-new-task` no sessionStorage alem de emitir o
+  evento — o TaskBoard so monta no modo tasks e sem a flag o evento se perde
+- Fonte unica dos atalhos exibidos: `client/src/lib/shortcuts.ts` (`SHORTCUTS`)
+- As tres barras de abas (projeto, editor, terminal) seguem as mesmas regras:
+  botao do meio fecha, botao direito abre menu de contexto, e ao fechar a aba
+  ativa a **adjacente** assume
+- Ctrl+W / Ctrl+N sao reservados pelo navegador: so funcionam no app desktop.
+  Itens de menu no Electron usam `registerAccelerator: false` (o renderer e quem
+  trata) e no macOS o `role: 'close'` foi trocado por item proprio, senao o
+  Cmd+W fecharia a janela antes de chegar no renderer
+
+### Menus de contexto de projeto
+- `ProjectContextMenu` e o menu unico de projeto, usado no card do Dashboard, na
+  linha da sidebar, na aba de projeto e no botao Claude da toolbar. Ordem fixa:
+  Workspace · Editor · Claude (+ variante skip permissions) · Dev · Shell ·
+  Pasta · Repositorio · Cloud · Favorito · Settings
+- `useProjectLaunch` e o unico caminho de launch: prefere o terminal integrado
+  (evento `shipyard:open-terminal`), cai para o nativo, compartilha a preferencia
+  `shipyard:skipPermissions` entre todos os pontos e padroniza os toasts.
+  Nao duplicar essa logica por componente
+
 ### AI Backend (CLI-first, padronizado)
 - `aiBackend.ts` e o UNICO ponto de entrada para features de IA server-side
   (chat, commit message, analyze-task, bulk-organize, manage-tasks)
@@ -250,6 +316,11 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `aiManagePrompt.ts`: monta prompt para Claude gerenciar MULTIPLAS tarefas a partir de texto livre
 - Auto-close: TerminalPanel detecta quando sessao AI termina e marca task como done se Claude nao o fez
 - Prompt reforça que Claude DEVE atualizar status da task via MCP ao concluir
+- "Run with AI" abre antes o `AiResolveDialog`, onde o usuario pode escrever uma
+  decisao ou contexto extra so para aquela execucao. O texto vai no corpo de
+  `POST /:id/tasks/:tid/ai-resolve` e vira a secao `## User decision feedback`
+  do prompt, declarada como instrucao que prevalece sobre a descricao.
+  Shift+clique pula o dialogo. Sem feedback, o prompt sai identico ao anterior
 
 ### Stores JSON (concorrencia)
 - `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)
@@ -303,6 +374,27 @@ sua propria sheet/board/list. O milestone "General" usa o id literal `'default'`
 - Tasks novas vindas do remoto recebem `milestoneId` automaticamente no merge
 - Board/list e nomeada `Shipyard · {project} · {milestone}` (ou so `Shipyard · {project}`
   para General)
+
+**Anexos e comentarios do Trello** (pull-only — o cliente escreve no card, o
+Shipyard so le):
+- `pullCards` pede `attachments=true` na propria chamada de cards (zero requests
+  extras) e busca os comentarios em UMA chamada de board
+  (`/boards/{id}/actions?filter=commentCard`, teto de 1000). Se essa chamada
+  falhar, o pull segue sem comentarios em vez de quebrar
+- Teto por card: 20 anexos, 50 comentarios (os mais recentes, reordenados do mais
+  antigo para o mais novo)
+- **Nunca** renderize esses campos no `desc` do card (`renderDesc`): o parser do
+  pull faz round-trip do desc e qualquer assimetria vira diff fantasma que
+  re-envia todos os cards a cada push
+- `fieldsChanged` (syncMerge) compara por ids ordenados — dado identico nao pode
+  contar como mudanca, senao o par pull/push entra em loop a cada 30s
+- `replaceTasks` reconstroi a task a partir de uma lista fixa de campos e e o
+  caminho de escrita de **todo** pull. Campo novo que nao for copiado do
+  `existing` la e apagado a cada ciclo (era assim que `subtasks` e `needsReview`
+  se perdiam)
+- Ver imagem: proxy `GET /api/projects/:id/tasks/:tid/attachment/:aid`
+  (`fetchAttachmentBytes` em trelloSync.ts monta o header
+  `Authorization: OAuth ...`). A URL crua do Trello devolve 401
 
 **Migracao v2 → v3**: integracoes Trello/ClickUp pre-existentes sao descartadas (creds
 globais sao mantidas) — usuarios reconectam cada milestone manualmente.

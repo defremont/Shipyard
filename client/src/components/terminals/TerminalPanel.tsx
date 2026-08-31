@@ -1,6 +1,9 @@
 import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react'
-import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2 } from 'lucide-react'
+import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2, MessageCircleQuestion } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
+} from '@/components/ui/context-menu'
 import {
   useTerminalStatus,
   useCreateTerminalSession,
@@ -25,6 +28,9 @@ interface GlobalTab {
   type: string
   exited: boolean
   hasNotification: boolean
+  /** Claude CLI is blocked on a decision. Transient — never trusted from
+   *  localStorage, the server replays the state when the socket reconnects. */
+  awaitingInput?: boolean
   taskId?: string
   taskNumber?: number
 }
@@ -138,11 +144,13 @@ export function TerminalPanel() {
       const visibleIds = [activeTabId, splitSessionId].filter(Boolean) as string[]
       if (visibleIds.length > 0) {
         setTabs(prev => {
-          const hasNotif = prev.some(t => visibleIds.includes(t.sessionId) && t.hasNotification)
-          if (!hasNotif) return prev
+          const needsClear = prev.some(
+            t => visibleIds.includes(t.sessionId) && (t.hasNotification || t.awaitingInput)
+          )
+          if (!needsClear) return prev
           return prev.map(t =>
-            visibleIds.includes(t.sessionId) && t.hasNotification
-              ? { ...t, hasNotification: false }
+            visibleIds.includes(t.sessionId) && (t.hasNotification || t.awaitingInput)
+              ? { ...t, hasNotification: false, awaitingInput: false }
               : t
           )
         })
@@ -165,7 +173,7 @@ export function TerminalPanel() {
         for (const t of prev) {
           if (serverIds.has(t.sessionId)) {
             const srv = serverMap.get(t.sessionId) as any
-            valid.push({ ...t, exited: false, hasNotification: false, taskId: t.taskId || srv?.taskId }) // Recover taskId
+            valid.push({ ...t, exited: false, hasNotification: false, awaitingInput: false, taskId: t.taskId || srv?.taskId }) // Recover taskId
           }
         }
         // Add any server sessions not in our persisted tabs (recovery)
@@ -363,9 +371,13 @@ export function TerminalPanel() {
     }
 
     setTabs(prev => {
+      const index = prev.findIndex(t => t.sessionId === sessionId)
       const next = prev.filter(t => t.sessionId !== sessionId)
       if (!isSplitLeft && !isSplitRight && activeTabIdRef.current === sessionId) {
-        setActiveTabId(next.length > 0 ? next[next.length - 1].sessionId : null)
+        // Adjacent tab, like the project and editor tab strips — jumping to
+        // the last tab loses the user's place.
+        const neighbour = next[Math.min(Math.max(index, 0), next.length - 1)]
+        setActiveTabId(neighbour ? neighbour.sessionId : null)
       }
       if (next.length === 0) setIsVisible(false)
       return next
@@ -462,14 +474,31 @@ export function TerminalPanel() {
   const handleTabExitRef = useRef(handleTabExit)
   handleTabExitRef.current = handleTabExit
 
+  // Claude CLI stopped to ask something. Flag the tab unless the user is
+  // already looking at it — otherwise the question sits unanswered behind
+  // another tab.
+  const handleTabState = useCallback((sessionId: string, state: 'busy' | 'awaiting-input' | 'idle') => {
+    const awaiting = state === 'awaiting-input'
+    const isVisibleToUser =
+      (activeTabIdRef.current === sessionId || splitSessionIdRef.current === sessionId) && isVisibleRef.current
+
+    setTabs(prev => {
+      const tab = prev.find(t => t.sessionId === sessionId)
+      if (!tab) return prev
+      const next = awaiting && !isVisibleToUser
+      if (!!tab.awaitingInput === next) return prev
+      return prev.map(t => (t.sessionId === sessionId ? { ...t, awaitingInput: next } : t))
+    })
+  }, [])
+
   // --- Bidirectional sync: terminal tabs <-> project tabs ---
 
   // Terminal tab click → also switch to that project's tab
   const handleTerminalTabClick = useCallback((sessionId: string) => {
     // Clear notification when user views this tab
     setTabs(prev => prev.map(t =>
-      t.sessionId === sessionId && t.hasNotification
-        ? { ...t, hasNotification: false }
+      t.sessionId === sessionId && (t.hasNotification || t.awaitingInput)
+        ? { ...t, hasNotification: false, awaitingInput: false }
         : t
     ))
     const tab = tabsRef.current.find(t => t.sessionId === sessionId)
@@ -559,7 +588,7 @@ export function TerminalPanel() {
             >
               <span className="relative">
                 <Terminal className="h-3.5 w-3.5" />
-                {tabs.some(t => t.hasNotification) && (
+                {tabs.some(t => t.hasNotification || t.awaitingInput) && (
                   <span className="absolute -top-1 -right-1 flex h-2 w-2">
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-warning" />
@@ -584,9 +613,16 @@ export function TerminalPanel() {
               const isRightPane = splitSessionId === tab.sessionId
               const isInPane = isLeftPane || isRightPane
               return (
+                <ContextMenu key={tab.sessionId}>
+                  <ContextMenuTrigger asChild>
                 <button
-                  key={tab.sessionId}
                   onClick={() => handleTerminalTabClick(tab.sessionId)}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault()
+                      handleCloseTab(tab.sessionId)
+                    }
+                  }}
                   className={cn(
                     'flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-sm transition-colors max-w-[200px] group',
                     isInPane
@@ -612,6 +648,9 @@ export function TerminalPanel() {
                   )}
                   {tab.taskId && !tab.exited && <Sparkles className="h-3 w-3 shrink-0 animate-pulse" />}
                   {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
+                  {tab.awaitingInput && !tab.exited && (
+                    <MessageCircleQuestion className="h-3 w-3 shrink-0 text-warning animate-pulse" />
+                  )}
                   {tab.hasNotification && (
                     <span className="relative flex h-2 w-2 shrink-0">
                       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
@@ -627,6 +666,35 @@ export function TerminalPanel() {
                     onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.sessionId) }}
                   />
                 </button>
+                  </ContextMenuTrigger>
+                  <ContextMenuContent className="w-48">
+                    <ContextMenuItem onClick={() => handleCloseTab(tab.sessionId)}>
+                      <X />
+                      Close
+                    </ContextMenuItem>
+                    <ContextMenuItem
+                      onClick={() => tabsRef.current
+                        .filter(t => t.sessionId !== tab.sessionId)
+                        .forEach(t => handleCloseTab(t.sessionId))}
+                    >
+                      <Columns2 />
+                      Close Others
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleCloseAll}>
+                      <XCircle />
+                      Close All
+                    </ContextMenuItem>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem onClick={handleOpenExternal}>
+                      <ExternalLink />
+                      Open in External Terminal
+                    </ContextMenuItem>
+                    <ContextMenuItem onClick={handleClearExited}>
+                      <Trash2 />
+                      Clear Exited Tabs
+                    </ContextMenuItem>
+                  </ContextMenuContent>
+                </ContextMenu>
               )
             })}
 
@@ -752,6 +820,7 @@ export function TerminalPanel() {
                     sessionId={tab.sessionId}
                     isActive={isShown}
                     onExit={handleTabExit}
+                    onStateChange={handleTabState}
                   />
                 </Suspense>
               </div>

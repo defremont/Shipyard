@@ -433,6 +433,14 @@ export function replaceTasks(projectId: string, incoming: Partial<Task>[], miles
         createdAt: t.createdAt || existing?.createdAt || now,
         updatedAt: t.updatedAt || now,
         order: t.order ?? i,
+        // This function rebuilds every task from a whitelist, and every sync
+        // pull writes through it. Fields the caller doesn't know about have to
+        // be carried over explicitly or a Sheets/Trello pull silently erases
+        // them.
+        subtasks: t.subtasks ?? existing?.subtasks,
+        needsReview: t.needsReview ?? existing?.needsReview,
+        attachments: t.attachments ?? existing?.attachments,
+        comments: t.comments ?? existing?.comments,
         ...buildCascadingTimestamps(status, now, {
           inboxAt: t.inboxAt || existing?.inboxAt,
           inProgressAt: t.inProgressAt || existing?.inProgressAt,

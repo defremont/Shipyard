@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback, memo } from 'react'
-import { ChevronDown, ChevronRight, Circle, Check, Pencil, Trash2, Copy, CopyPlus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Circle, Check, Pencil, Trash2, Copy, CopyPlus, Paperclip, MessageSquare } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -112,6 +112,19 @@ const TaskRow = memo(function TaskRow({ task, projectName, projectPath, showProj
       )}      {task.subtasks && task.subtasks.length > 0 && (
         <span className="text-[10px] text-muted-foreground shrink-0">
           {task.subtasks.filter((s: any) => s.done).length}/{task.subtasks.length}
+        </span>
+      )}
+
+      {(task.attachments?.length ?? task.attachmentCount ?? 0) > 0 && (
+        <span className="text-[10px] text-muted-foreground shrink-0 inline-flex items-center gap-0.5" title="Attachments from Trello">
+          <Paperclip className="h-2.5 w-2.5" />
+          {task.attachments?.length ?? task.attachmentCount}
+        </span>
+      )}
+      {(task.comments?.length ?? task.commentCount ?? 0) > 0 && (
+        <span className="text-[10px] text-muted-foreground shrink-0 inline-flex items-center gap-0.5" title="Comments from Trello">
+          <MessageSquare className="h-2.5 w-2.5" />
+          {task.comments?.length ?? task.commentCount}
         </span>
       )}
 

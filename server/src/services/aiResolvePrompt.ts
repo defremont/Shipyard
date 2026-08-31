@@ -4,6 +4,7 @@ export function buildAiResolvePrompt(
   task: Task,
   project: Project,
   serverPort: number = 5420,
+  feedback?: string,
 ): string {
   const lines: string[] = [];
 
@@ -29,6 +30,14 @@ export function buildAiResolvePrompt(
   if (task.prompt) {
     lines.push('## Technical details');
     lines.push(task.prompt);
+    lines.push('');
+  }
+
+  if (feedback) {
+    lines.push('## User decision feedback');
+    lines.push(feedback);
+    lines.push('');
+    lines.push('This is the user\'s direct instruction for this run — it overrides any conflicting guidance in the description or technical details above.');
     lines.push('');
   }
 

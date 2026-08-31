@@ -353,13 +353,21 @@ function createApplicationMenu() {
         { label: 'Dashboard', accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenuAction('navigate:/') },
         { label: 'Tasks', click: () => sendMenuAction('navigate:/tasks') },
         { type: 'separator' },
-        { label: 'Settings', accelerator: 'CmdOrCtrl+,', click: () => sendMenuAction('navigate:/settings') },
+        { label: 'New Task', accelerator: 'CmdOrCtrl+N', registerAccelerator: false, click: () => sendMenuAction('new-task-request') },
+        // On macOS { role: 'close' } would claim Cmd+W at OS level and close
+        // the whole window, so the renderer would never see it.
+        { label: 'Close Tab', accelerator: 'CmdOrCtrl+W', registerAccelerator: false, click: () => sendMenuAction('close-tab') },
+        ...(isMac ? [{ label: 'Close Window', accelerator: 'Cmd+Shift+W', role: 'close' as const }] : []),
         { type: 'separator' },
-        isMac ? { role: 'close' as const } : {
-          label: 'Quit',
-          accelerator: 'CmdOrCtrl+Q',
-          click: () => { isQuitting = true; app.quit(); },
-        },
+        { label: 'Settings', accelerator: 'CmdOrCtrl+,', click: () => sendMenuAction('navigate:/settings') },
+        ...(isMac ? [] : [
+          { type: 'separator' as const },
+          {
+            label: 'Quit',
+            accelerator: 'CmdOrCtrl+Q',
+            click: () => { isQuitting = true; app.quit(); },
+          },
+        ]),
       ],
     },
     { role: 'editMenu' },
@@ -384,6 +392,7 @@ function createApplicationMenu() {
     {
       label: 'Help',
       submenu: [
+        { label: 'Keyboard Shortcuts', accelerator: 'Shift+/', registerAccelerator: false, click: () => sendMenuAction('toggle-shortcuts') },
         { label: 'Help & Documentation', click: () => sendMenuAction('navigate:/help') },
         { label: 'Logs', click: () => sendMenuAction('navigate:/logs') },
         { type: 'separator' },

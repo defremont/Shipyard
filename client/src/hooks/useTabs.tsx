@@ -11,6 +11,7 @@ interface TabsContextType {
   activeTabId: string | null
   openTab: (projectId: string) => void
   closeTab: (id: string) => void
+  closeOtherTabs: (keepId: string) => void
   switchTab: (id: string) => void
   reorderTabs: (fromId: string, toId: string) => void
 }
@@ -113,6 +114,21 @@ export function TabsProvider({ children }: { children: ReactNode }) {
     })
   }, [activeTabId, navigate])
 
+  /** Close every tab but one, in a single update. Doing it with repeated
+   *  closeTab calls navigates to a neighbour that is about to be closed. */
+  const closeOtherTabs = useCallback((keepId: string) => {
+    setTabs(prev => {
+      const keep = prev.find(t => t.id === keepId)
+      if (!keep || prev.length <= 1) return prev
+      for (const tab of prev) {
+        if (tab.id !== keepId) closedRef.current.add(tab.id)
+      }
+      closedRef.current.delete(keepId)
+      setTimeout(() => navigate(keep.path), 0)
+      return [keep]
+    })
+  }, [navigate])
+
   const switchTab = useCallback((id: string) => {
     const tab = tabs.find(t => t.id === id)
     if (tab) navigate(tab.path)
@@ -132,7 +148,7 @@ export function TabsProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <TabsContext.Provider value={{ tabs, activeTabId, openTab, closeTab, switchTab, reorderTabs }}>
+    <TabsContext.Provider value={{ tabs, activeTabId, openTab, closeTab, closeOtherTabs, switchTab, reorderTabs }}>
       {children}
     </TabsContext.Provider>
   )

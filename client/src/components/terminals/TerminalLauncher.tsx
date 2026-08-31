@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
 import { useTerminalStatus } from '@/hooks/useTerminal'
+import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 import { useTasks, type Task } from '@/hooks/useTasks'
 import { useMcpStatus } from '@/hooks/useMcp'
 import { useClaudeStatus } from '@/hooks/useClaude'
@@ -76,9 +77,9 @@ export function TerminalLauncher({ projectId, projectPath, projectName }: Termin
   const mcpActive = mcpStatus?.enabled ?? false
   const aiAvailable = claudeStatus?.configured || claudeStatus?.cliAvailable
   const [taskManagerOpen, setTaskManagerOpen] = useState(false)
-  const [skipPermissions, setSkipPermissions] = useState(() => {
-    try { return localStorage.getItem('shipyard:skipPermissions') === 'true' } catch { return false }
-  })
+  // Shared with the workspace toolbar, the dashboard cards and every context
+  // menu — a local copy here would drift the moment one of them flips it.
+  const { skipPermissions, setSkipPermissions } = useProjectLaunch()
 
   const claudeType = skipPermissions ? 'claude-yolo' : 'claude'
 
@@ -210,10 +211,7 @@ export function TerminalLauncher({ projectId, projectPath, projectName }: Termin
                 <input
                   type="checkbox"
                   checked={skipPermissions}
-                  onChange={e => {
-                    setSkipPermissions(e.target.checked)
-                    localStorage.setItem('shipyard:skipPermissions', String(e.target.checked))
-                  }}
+                  onChange={e => setSkipPermissions(e.target.checked)}
                   className="rounded border-muted-foreground/30 h-3 w-3"
                 />
                 <span className="text-[10px] text-muted-foreground ml-1.5">YOLO</span>

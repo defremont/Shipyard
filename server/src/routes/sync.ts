@@ -358,6 +358,46 @@ export async function syncRoutes(app: FastifyInstance) {
     },
   );
 
+  // Trello locks attachment downloads behind an OAuth header, so an <img> tag
+  // pointing at the raw card URL gets a 401. This proxies the bytes with the
+  // stored credentials — it is the only way the UI can show a screenshot a
+  // client attached to their card.
+  app.get<{
+    Params: { projectId: string; taskId: string; attachmentId: string };
+    Querystring: { milestoneId?: string; preview?: string };
+  }>(
+    '/api/projects/:projectId/tasks/:taskId/attachment/:attachmentId',
+    async (request, reply) => {
+      const { projectId, taskId, attachmentId } = request.params;
+      const milestoneId = pickMilestoneId(request.query?.milestoneId);
+      const link = await engine.resolveTrelloCard(projectId, taskId, milestoneId);
+      if (!link) return reply.status(404).send({ error: 'Task is not linked to a Trello card' });
+
+      try {
+        const file = await trello.fetchAttachmentBytes(link.config, link.cardId, attachmentId, {
+          preview: request.query?.preview === '1',
+        });
+        if (!file) return reply.status(404).send({ error: 'Attachment not found or not viewable' });
+        // Never echo a remote content-type back as-is: anything but an image
+        // would be served as that type from the app's own origin. SVG counts as
+        // "anything else" — it is a document that can carry script, and the
+        // uploader chooses its declared type.
+        const type = file.mimeType.split(';')[0].trim().toLowerCase();
+        const isImage = type.startsWith('image/') && type !== 'image/svg+xml';
+        return reply
+          .header('content-type', isImage ? type : 'application/octet-stream')
+          .header('content-disposition', isImage ? 'inline' : 'attachment')
+          .header('x-content-type-options', 'nosniff')
+          .header('cache-control', 'private, max-age=3600')
+          .send(file.data);
+      } catch (err: any) {
+        const message = err?.message ?? 'Attachment download failed';
+        log.warn('sync', `Trello attachment fetch failed: ${message}`, undefined, projectId);
+        return reply.status(502).send({ error: message });
+      }
+    },
+  );
+
   app.post<{
     Params: { projectId: string };
     Body: { boardId?: string; milestoneId?: string };

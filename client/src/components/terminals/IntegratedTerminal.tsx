@@ -8,10 +8,13 @@ import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import '@xterm/xterm/css/xterm.css'
 
+export type TerminalState = 'busy' | 'awaiting-input' | 'idle'
+
 interface IntegratedTerminalProps {
   sessionId: string
   isActive: boolean
   onExit?: (sessionId: string, code: number) => void
+  onStateChange?: (sessionId: string, state: TerminalState) => void
 }
 
 const TERMINAL_THEME = {
@@ -72,7 +75,7 @@ function attachRenderer(term: Terminal): () => void {
   }
 }
 
-export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTerminalProps) {
+export function IntegratedTerminal({ sessionId, isActive, onExit, onStateChange }: IntegratedTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -83,6 +86,8 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
   // Use ref for onExit to avoid re-creating WS on every render
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
+  const onStateChangeRef = useRef(onStateChange)
+  onStateChangeRef.current = onStateChange
 
   const connectWs = useCallback(() => {
     if (disposedRef.current || !termRef.current) return
@@ -119,6 +124,9 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
           case 'exit':
             termRef.current?.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`)
             onExitRef.current?.(sessionId, msg.code)
+            break
+          case 'state':
+            onStateChangeRef.current?.(sessionId, msg.state)
             break
           case 'error':
             termRef.current?.write(`\r\n\x1b[31m[Error: ${msg.data}]\x1b[0m\r\n`)

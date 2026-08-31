@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import type { Task } from '../../types/index.js';
+import type { Task, TaskAttachment, TaskComment } from '../../types/index.js';
 
 // Bidirectional merge: local tasks vs pulled remote tasks (Trello cards or
 // ClickUp tasks, already normalized to PulledTask shape). Strategy:
@@ -23,6 +23,11 @@ export interface RemoteTask {
   status: Task['status'];
   priority: Task['priority'];
   updatedAt: string;
+  // Attachments and comments only ever exist on the remote board, so the
+  // remote copy is authoritative. Undefined means "the provider didn't report
+  // them this pull" — keep whatever we already had.
+  attachments?: TaskAttachment[];
+  comments?: TaskComment[];
 }
 
 export interface MergeResult {
@@ -34,6 +39,18 @@ export interface MergeResult {
 
 function normalizeTitle(s: string): string {
   return (s || '').trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/** Stable fingerprint of attachments/comments so re-pulling identical data
+ *  never reads as a change (which would churn a pull→push loop), while a new
+ *  client screenshot, a deleted one, or an edited comment does. Editing a
+ *  comment on Trello keeps its id, so the text has to be part of the key. */
+function fingerprint(items?: Array<{ id: string; text?: string; url?: string; name?: string }>): string {
+  if (!items) return '';
+  return items
+    .map(i => `${i.id}|${i.text ?? ''}|${i.url ?? ''}|${i.name ?? ''}`)
+    .sort()
+    .join('\n');
 }
 
 export function mergeRemoteIntoLocal(
@@ -87,6 +104,24 @@ export function mergeRemoteIntoLocal(
 
     if (localIdx >= 0) {
       const local = result[localIdx];
+
+      // Attachments and comments only ever exist on the board — Shipyard never
+      // writes them — so the remote copy always wins, no timestamp gate. Left
+      // inside the gate below, a client's new comment would stay invisible
+      // whenever a local edit happened to be more recent.
+      const remoteMedia: Partial<Task> = {};
+      if (r.attachments !== undefined && fingerprint(r.attachments) !== fingerprint(local.attachments)) {
+        remoteMedia.attachments = r.attachments;
+      }
+      if (r.comments !== undefined && fingerprint(r.comments) !== fingerprint(local.comments)) {
+        remoteMedia.comments = r.comments;
+      }
+      const mediaChanged = Object.keys(remoteMedia).length > 0;
+      if (mediaChanged) {
+        result[localIdx] = { ...local, ...remoteMedia };
+        updated++;
+      }
+
       const remoteNewer = new Date(r.updatedAt).getTime() > new Date(local.updatedAt).getTime();
       if (remoteNewer) {
         const fieldsChanged =
@@ -100,19 +135,25 @@ export function mergeRemoteIntoLocal(
         // Trello's dateLastActivity, no real change). Otherwise we'd churn
         // a pull→push loop every 30s with no actual data change.
         if (fieldsChanged) {
+          // Build on result[localIdx], not on `local` — the media merge above
+          // may already have written to it.
+          const editedByHand = r.effort !== undefined && r.effort !== local.effort;
           result[localIdx] = {
-            ...local,
+            ...result[localIdx],
             title: r.title || local.title,
             description: r.description ?? local.description,
             prompt: r.prompt ?? local.prompt,
             effort: r.effort ?? local.effort,
-            effortSource: r.effort ? 'manual' : local.effortSource,
+            // Only an actual change on the board makes the estimate manual —
+            // otherwise every unrelated pull would relabel an AI estimate.
+            effortSource: editedByHand ? 'manual' : local.effortSource,
+            effortConfidence: editedByHand ? undefined : local.effortConfidence,
             status: r.status,
             priority: r.priority,
             updatedAt: r.updatedAt,
             ...statusTimestamps(local, r.status, r.updatedAt),
           };
-          updated++;
+          if (!mediaChanged) updated++;
         }
       }
     } else {
@@ -132,6 +173,8 @@ export function mergeRemoteIntoLocal(
         order: result.length,
         createdAt: now,
         updatedAt: now,
+        ...(r.attachments?.length ? { attachments: r.attachments } : {}),
+        ...(r.comments?.length ? { comments: r.comments } : {}),
         ...(normalizedMilestone ? { milestoneId: normalizedMilestone } : {}),
         ...statusTimestamps(undefined, r.status, now),
       };

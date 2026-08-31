@@ -30,7 +30,16 @@ export async function taskRoutes(app: FastifyInstance) {
   // All tasks across all projects
   app.get('/api/tasks/all', async () => {
     const tasks = await taskStore.getAllTasks();
-    return { tasks };
+    // This reads every project's task file and is polled app-wide, so the
+    // Trello comment bodies stay out of it — the lists only ever draw a count,
+    // and the task dialog reads the full copy from the project's own query.
+    return {
+      tasks: tasks.map(({ comments, attachments, ...task }) => ({
+        ...task,
+        ...(comments?.length ? { commentCount: comments.length } : {}),
+        ...(attachments?.length ? { attachmentCount: attachments.length } : {}),
+      })),
+    };
   });
 
   // ── Milestone CRUD ──────────────────────────────
@@ -269,7 +278,7 @@ export async function taskRoutes(app: FastifyInstance) {
   );
 
   // Build AI resolution prompt for a task
-  app.post<{ Params: { projectId: string; taskId: string } }>(
+  app.post<{ Params: { projectId: string; taskId: string }; Body: { feedback?: string } }>(
     '/api/projects/:projectId/tasks/:taskId/ai-resolve',
     async (request, reply) => {
       const { projectId, taskId } = request.params;
@@ -280,8 +289,13 @@ export async function taskRoutes(app: FastifyInstance) {
       const project = projects.find(p => p.id === projectId);
       if (!project) return reply.status(404).send({ error: 'Project not found' });
 
+      // Optional per-run user feedback — trimmed and capped so a stray paste
+      // cannot blow up the prompt.
+      const rawFeedback = typeof request.body?.feedback === 'string' ? request.body.feedback.trim() : '';
+      const feedback = rawFeedback ? rawFeedback.slice(0, 4000) : undefined;
+
       const port = (request.server.addresses()?.[0] as any)?.port || 5420;
-      const prompt = buildAiResolvePrompt(task, project, port);
+      const prompt = buildAiResolvePrompt(task, project, port, feedback);
       return { prompt };
     }
   );

@@ -14,6 +14,8 @@ try {
   console.log('node-pty not available — integrated terminal disabled (native launchers still work)');
 }
 
+export type TerminalState = 'busy' | 'awaiting-input' | 'idle';
+
 export interface TerminalSession {
   id: string;
   projectId: string;
@@ -24,6 +26,12 @@ export interface TerminalSession {
   taskId?: string;
   /** True while prompt injection is in progress — resize is deferred */
   injecting?: boolean;
+  /** Claude-type sessions only: what the CLI is doing right now */
+  state?: TerminalState;
+  /** Set by the WS layer — called on every state transition */
+  onStateChange?: (state: TerminalState) => void;
+  /** True once the output watcher has been attached (never attach twice) */
+  watching?: boolean;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -137,6 +145,7 @@ export async function createSession(
     pty,
     createdAt: new Date().toISOString(),
     ...(taskId ? { taskId } : {}),
+    ...(CLAUDE_SESSION_TYPES.has(type) ? { state: 'busy' as TerminalState } : {}),
   };
 
   sessions.set(id, session);
@@ -150,9 +159,13 @@ export async function createSession(
     }, delay);
   }
 
-  // For AI resolve/manage sessions: inject prompt when Claude CLI is ready
+  // For AI resolve/manage sessions: inject prompt when Claude CLI is ready.
+  // The output watcher only starts once injection is done — during the ready
+  // wait the CLI shows an idle prompt that would read as a false 'idle'.
   if (prompt && (type === 'ai-resolve' || type === 'ai-manage' || type === 'claude-yolo')) {
-    injectPromptWhenReady(id, prompt);
+    injectPromptWhenReady(id, prompt, () => startOutputWatcher(id));
+  } else if (CLAUDE_SESSION_TYPES.has(type)) {
+    startOutputWatcher(id);
   }
 
   return id;
@@ -172,14 +185,15 @@ export function killSession(id: string): boolean {
   sessions.delete(id);
   clearQueue(id);
   pendingResizes.delete(id);
+  stopOutputWatcher(id);
   return true;
 }
 
-export function listSessions(projectId?: string): Omit<TerminalSession, 'pty'>[] {
-  const list: Omit<TerminalSession, 'pty'>[] = [];
+export function listSessions(projectId?: string): Omit<TerminalSession, 'pty' | 'onStateChange'>[] {
+  const list: Omit<TerminalSession, 'pty' | 'onStateChange'>[] = [];
   for (const session of sessions.values()) {
     if (!projectId || session.projectId === projectId) {
-      const { pty, ...rest } = session;
+      const { pty, onStateChange, ...rest } = session;
       list.push(rest);
     }
   }
@@ -213,11 +227,11 @@ function applyPendingResize(id: string): void {
   try { session.pty.resize(pending.cols, pending.rows); } catch {}
 }
 
-export function listAiSessions(): Omit<TerminalSession, 'pty'>[] {
-  const list: Omit<TerminalSession, 'pty'>[] = [];
+export function listAiSessions(): Omit<TerminalSession, 'pty' | 'onStateChange'>[] {
+  const list: Omit<TerminalSession, 'pty' | 'onStateChange'>[] = [];
   for (const session of sessions.values()) {
     if (session.taskId) {
-      const { pty, ...rest } = session;
+      const { pty, onStateChange, ...rest } = session;
       list.push(rest);
     }
   }
@@ -392,6 +406,7 @@ export function writeToSession(id: string, data: string): boolean {
   if (!sessions.has(id)) return false;
   // Short input (keystrokes) still goes through the queue so it can never
   // land in the middle of a paste that is currently being drained.
+  noteSessionInput(id);
   return enqueueChunks(id, safeChunks(data).map(data => ({ data, delayAfter: CHUNK_DELAY })));
 }
 
@@ -443,7 +458,11 @@ export function writeChunked(
  * resize operations are deferred — ConPTY on Windows can lose data when resize
  * and write happen concurrently.
  */
-export function injectPromptWhenReady(sessionId: string, prompt: string): void {
+// Regex to detect Claude CLI's idle prompt at the end of output.
+// Matches lines ending with `> ` or `❯ ` (with optional ANSI escapes).
+const PROMPT_RE = /(?:^|\n)\s*(?:\x1b\[[0-9;]*m)*[>❯]\s*(?:\x1b\[[0-9;]*m)*\s*$/;
+
+export function injectPromptWhenReady(sessionId: string, prompt: string, onInjected?: () => void): void {
   const session = sessions.get(sessionId);
   if (!session) return;
 
@@ -453,10 +472,6 @@ export function injectPromptWhenReady(sessionId: string, prompt: string): void {
   const MAX_WAIT = 30_000;   // 30s max wait before giving up and sending anyway
   const SETTLE_TIME = 1_200; // 1.2s of silence = CLI is ready
   const MIN_WAIT = 3_000;    // Always wait at least 3s (shell + claude startup)
-
-  // Regex to detect Claude CLI's idle prompt at the end of output.
-  // Matches lines ending with `> ` or `❯ ` (with optional ANSI escapes).
-  const PROMPT_RE = /(?:^|\n)\s*(?:\x1b\[[0-9;]*m)*[>❯]\s*(?:\x1b\[[0-9;]*m)*\s*$/;
 
   // Listen for PTY output to track when it last produced data
   const disposable = session.pty.onData((data: string) => {
@@ -516,8 +531,101 @@ export function injectPromptWhenReady(sessionId: string, prompt: string): void {
       const s2 = sessions.get(sessionId);
       if (s2) s2.injecting = false;
       applyPendingResize(sessionId);
+      onInjected?.();
     });
   }
+}
+
+// ── Awaiting-input detection ───────────────────────────────────────────
+//
+// Claude CLI stops and waits: a permission dialog, a numbered choice, or just
+// an idle prompt once it has finished. Unless that tab happens to be visible,
+// the user never notices. So we watch the output of every Claude session and
+// tell the client when the CLI is waiting on a human.
+
+const CLAUDE_SESSION_TYPES = new Set(['claude', 'claude-yolo', 'ai-resolve', 'ai-manage']);
+
+// A permission dialog or a numbered choice list — the CLI is blocked on a
+// decision, not merely idle.
+const DECISION_RE = /Do you want|❯\s*\d[.)]|\(y\/n\)/i;
+
+const WATCH_SETTLE_TIME = 1_200; // same silence window the injector trusts
+const WATCH_TICK = 300;
+
+function setSessionState(id: string, state: TerminalState): void {
+  const session = sessions.get(id);
+  if (!session || session.state === state) return;
+  session.state = state;
+  try { session.onStateChange?.(state); } catch {}
+}
+
+/**
+ * Observe a Claude session's output and classify it as busy / awaiting-input /
+ * idle. Strictly read-only: it never writes to the PTY and never touches the
+ * write queue or the `injecting` flag, so it cannot interleave with a paste.
+ */
+const watchers = new Map<string, { timer: NodeJS.Timeout; dispose: () => void }>();
+
+function stopOutputWatcher(id: string): void {
+  const watcher = watchers.get(id);
+  if (!watcher) return;
+  watchers.delete(id);
+  clearInterval(watcher.timer);
+  try { watcher.dispose(); } catch {}
+}
+
+function startOutputWatcher(sessionId: string): void {
+  const session = sessions.get(sessionId);
+  if (!session || session.watching) return;
+  session.watching = true;
+
+  let tail = '';
+  let lastOutputTime = Date.now();
+  let sawOutput = false;
+
+  const disposable = session.pty.onData((data: string) => {
+    lastOutputTime = Date.now();
+    sawOutput = true;
+    tail += data;
+    if (tail.length > 8_000) tail = tail.slice(-4_000);
+    setSessionState(sessionId, 'busy');
+  });
+
+  const timer = setInterval(() => {
+    if (!sessions.has(sessionId)) {
+      stopOutputWatcher(sessionId);
+      return;
+    }
+    if (!sawOutput) return;
+    if (Date.now() - lastOutputTime < WATCH_SETTLE_TIME) return;
+
+    // Output has settled — decide what the CLI is showing, then start a fresh
+    // buffer. Keeping the old text would let one answered permission dialog
+    // re-flag the tab on every later pause.
+    const settled = tail;
+    tail = '';
+    sawOutput = false;
+    if (DECISION_RE.test(settled)) {
+      setSessionState(sessionId, 'awaiting-input');
+    } else if (PROMPT_RE.test(settled)) {
+      setSessionState(sessionId, 'idle');
+    }
+  }, WATCH_TICK);
+
+  watchers.set(sessionId, { timer, dispose: () => disposable.dispose() });
+}
+
+/** Any keystroke or paste means the user answered — back to busy. */
+function noteSessionInput(id: string): void {
+  const session = sessions.get(id);
+  if (session?.state && session.state !== 'busy') setSessionState(id, 'busy');
+}
+
+export function setStateListener(id: string, listener: ((state: TerminalState) => void) | undefined): TerminalState | null {
+  const session = sessions.get(id);
+  if (!session) return null;
+  session.onStateChange = listener;
+  return session.state ?? null;
 }
 
 const MAX_RETRIES = 2;
@@ -563,7 +671,7 @@ function sendPromptWithRetry(
 
 // Clean up all sessions on server shutdown
 function cleanupAll() {
-  for (const id of sessions.keys()) clearQueue(id);
+  for (const id of sessions.keys()) { clearQueue(id); stopOutputWatcher(id); }
   for (const session of sessions.values()) {
     try { session.pty.kill(); } catch {}
   }

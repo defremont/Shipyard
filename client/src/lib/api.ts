@@ -289,8 +289,11 @@ export const api = {
       body: JSON.stringify({ mimeType, data }),
       timeout: 20_000,
     }),
-  getAiResolvePrompt: (projectId: string, taskId: string) =>
-    request<{ prompt: string }>(`/projects/${projectId}/tasks/${taskId}/ai-resolve`, { method: 'POST' }),
+  getAiResolvePrompt: (projectId: string, taskId: string, feedback?: string) =>
+    request<{ prompt: string }>(`/projects/${projectId}/tasks/${taskId}/ai-resolve`, {
+      method: 'POST',
+      ...(feedback?.trim() ? { body: JSON.stringify({ feedback }) } : {}),
+    }),
   getAiManagePrompt: (projectId: string, rawText: string) =>
     request<{ prompt: string }>(`/projects/${projectId}/ai-manage-prompt`, { method: 'POST', body: JSON.stringify({ rawText }) }),
 

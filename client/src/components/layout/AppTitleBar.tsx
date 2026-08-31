@@ -35,7 +35,10 @@ export function AppTitleBar() {
   if (!electronAPI?.isElectron) return null
 
   const command = (value: TitlebarCommand) => electronAPI.sendTitlebarCommand?.(value)
-  const dispatch = (action: 'toggle-search' | 'toggle-file-search' | 'toggle-terminal') => {
+  const dispatch = (
+    action: 'toggle-search' | 'toggle-file-search' | 'toggle-terminal'
+      | 'toggle-shortcuts' | 'close-tab' | 'new-task-request'
+  ) => {
     window.dispatchEvent(new CustomEvent(`shipyard:${action}`))
   }
   const isMac = electronAPI.platform === 'darwin'
@@ -50,6 +53,9 @@ export function AppTitleBar() {
         <MenuButton label="File">
           <DropdownMenuItem onClick={() => navigate('/')}>Dashboard<Shortcut>Ctrl+Shift+D</Shortcut></DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/tasks')}>Tasks</DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={() => dispatch('new-task-request')}>New Task<Shortcut>Ctrl+N</Shortcut></DropdownMenuItem>
+          <DropdownMenuItem onClick={() => dispatch('close-tab')}>Close Tab<Shortcut>Ctrl+W</Shortcut></DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={() => navigate('/settings')}>Settings<Shortcut>Ctrl+,</Shortcut></DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -78,6 +84,7 @@ export function AppTitleBar() {
           <DropdownMenuItem onClick={() => command('toggle-fullscreen')}>Full Screen</DropdownMenuItem>
         </MenuButton>
         <MenuButton label="Help">
+          <DropdownMenuItem onClick={() => dispatch('toggle-shortcuts')}>Keyboard Shortcuts<Shortcut>?</Shortcut></DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/help')}>Help & Documentation</DropdownMenuItem>
           <DropdownMenuItem onClick={() => navigate('/logs')}>Logs</DropdownMenuItem>
           <DropdownMenuSeparator />

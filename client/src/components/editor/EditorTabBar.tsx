@@ -1,5 +1,8 @@
-import { X, GitCompareArrows } from 'lucide-react'
+import { X, XSquare, XCircle, Copy, GitCompareArrows } from 'lucide-react'
 import { FileIcon } from '@/components/files/FileIcon'
+import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
+} from '@/components/ui/context-menu'
 import { cn } from '@/lib/utils'
 import type { EditorTab } from '@/hooks/useEditorTabs'
 
@@ -13,11 +16,19 @@ interface EditorTabBarProps {
 export function EditorTabBar({ tabs, activeTabPath, onSelectTab, onCloseTab }: EditorTabBarProps) {
   if (tabs.length === 0) return null
 
+  // Saved files close outright; the dirty ones go into the editor's
+  // confirmation queue, which asks about each in turn.
+  const closeMany = (targets: EditorTab[]) => {
+    for (const t of targets.filter(t => !t.isDirty)) onCloseTab(t.path)
+    for (const t of targets.filter(t => t.isDirty)) onCloseTab(t.path)
+  }
+
   return (
     <div className="flex items-center border-b bg-card/80 overflow-x-auto scrollbar-dark shrink-0">
       {tabs.map(tab => (
+        <ContextMenu key={tab.path}>
+          <ContextMenuTrigger asChild>
         <div
-          key={tab.path}
           className={cn(
             'flex items-center gap-1.5 px-3 py-1.5 text-xs border-r cursor-pointer group min-w-0 max-w-[180px]',
             'hover:bg-accent/50 transition-colors',
@@ -26,6 +37,12 @@ export function EditorTabBar({ tabs, activeTabPath, onSelectTab, onCloseTab }: E
               : 'text-muted-foreground'
           )}
           onClick={() => onSelectTab(tab.path)}
+          onAuxClick={e => {
+            if (e.button === 1) {
+              e.preventDefault()
+              onCloseTab(tab.path)
+            }
+          }}
         >
           <FileIcon
             name={tab.name}
@@ -50,6 +67,27 @@ export function EditorTabBar({ tabs, activeTabPath, onSelectTab, onCloseTab }: E
             <X className="h-3 w-3" />
           </button>
         </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent className="w-44">
+            <ContextMenuItem onClick={() => onCloseTab(tab.path)}>
+              <X />
+              Close
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => closeMany(tabs.filter(t => t.path !== tab.path))}>
+              <XSquare />
+              Close Others
+            </ContextMenuItem>
+            <ContextMenuItem onClick={() => closeMany(tabs)}>
+              <XCircle />
+              Close All
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+            <ContextMenuItem onClick={() => navigator.clipboard.writeText(tab.path)}>
+              <Copy />
+              Copy Path
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
       ))}
     </div>
   )

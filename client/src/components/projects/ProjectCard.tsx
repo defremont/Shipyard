@@ -4,9 +4,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { cn } from '@/lib/utils'
-import { useLaunchTerminal, useOpenFolder, useUpdateProject, type Project } from '@/hooks/useProjects'
+import { useUpdateProject, type Project } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
-import { toast } from 'sonner'
+import { useProjectLaunch } from '@/hooks/useProjectLaunch'
+import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
 
 export interface TaskCounts {
   inbox: number
@@ -23,16 +24,12 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
   const { openTab } = useTabs()
-  const launchTerminal = useLaunchTerminal()
-  const openFolder = useOpenFolder()
+  const { launchClaude, launchDev, launchShell, openFolder } = useProjectLaunch()
   const updateProject = useUpdateProject()
 
-  const handleLaunch = (e: React.MouseEvent, type: string) => {
+  const runAction = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation()
-    launchTerminal.mutate(
-      { projectId: project.id, type },
-      { onSuccess: () => toast.success(`Launched ${type}`) }
-    )
+    action()
   }
 
   const toggleFavorite = (e: React.MouseEvent) => {
@@ -44,6 +41,7 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
   const activeTasks = (taskCounts?.inbox || 0) + (taskCounts?.inProgress || 0)
 
   return (
+    <ProjectContextMenu project={project}>
     <div
       className="rounded-lg border bg-card px-3 py-2.5 cursor-pointer hover:border-primary/40 transition-all group space-y-1.5"
       onClick={() => openTab(project.id)}
@@ -122,7 +120,7 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
       <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity -mb-0.5">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-primary" onClick={e => handleLaunch(e, 'claude')}>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-primary" onClick={e => runAction(e, () => launchClaude(project))}>
               <Sparkles className="h-2.5 w-2.5" />
             </Button>
           </TooltipTrigger>
@@ -130,7 +128,7 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-success" onClick={e => handleLaunch(e, 'dev')}>
+            <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-success" onClick={e => runAction(e, () => launchDev(project))}>
               <Play className="h-2.5 w-2.5" />
             </Button>
           </TooltipTrigger>
@@ -138,7 +136,7 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
         </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => handleLaunch(e, 'shell')}>
+            <Button variant="ghost" size="icon" className="h-5 w-5" onClick={e => runAction(e, () => launchShell(project))}>
               <Monitor className="h-2.5 w-2.5" />
             </Button>
           </TooltipTrigger>
@@ -147,7 +145,7 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon" className="h-5 w-5"
-              onClick={e => { e.stopPropagation(); openFolder.mutate(project.id, { onSuccess: () => toast.success('Opened') }) }}>
+              onClick={e => runAction(e, () => openFolder(project))}>
               <FolderOpen className="h-2.5 w-2.5" />
             </Button>
           </TooltipTrigger>
@@ -155,5 +153,6 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
         </Tooltip>
       </div>
     </div>
+    </ProjectContextMenu>
   )
 }

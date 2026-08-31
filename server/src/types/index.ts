@@ -29,6 +29,25 @@ export interface Subtask {
   done: boolean;
 }
 
+export interface TaskAttachment {
+  id: string;
+  name: string;
+  url: string;
+  mimeType?: string;
+  bytes?: number;
+  isImage?: boolean;
+  date?: string;
+  source: 'trello';
+}
+
+export interface TaskComment {
+  id: string;
+  author?: string;
+  text: string;
+  date: string;
+  source: 'trello';
+}
+
 export type EffortPoints = 1 | 2 | 3 | 5 | 8;
 export type EffortSource = 'claude' | 'manual' | 'backfill';
 export type EffortConfidence = 'low' | 'medium' | 'high';
@@ -55,6 +74,8 @@ export interface Task {
   doneAt?: string;        // When moved to done
   needsReview?: boolean;  // True when AI resolved — cleared when user views the task
   subtasks?: Subtask[];
+  attachments?: TaskAttachment[];  // Pulled from the remote board — remote is authoritative
+  comments?: TaskComment[];        // Pulled from the remote board — remote is authoritative
 }
 
 export interface Milestone {
