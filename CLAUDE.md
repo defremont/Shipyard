@@ -59,6 +59,9 @@ interface Task {
   description: string;      // O QUE fazer (visao usuario/produto)
   prompt?: string;          // HOW/WHY tecnico (causas, arquivos, solucoes)
   priority: 'urgent' | 'high' | 'medium' | 'low';
+  effort?: 1 | 2 | 3 | 5 | 8;      // tamanho de implementacao (opcional, por compatibilidade)
+  effortSource?: 'claude' | 'manual' | 'backfill';
+  effortConfidence?: 'low' | 'medium' | 'high';
   status: 'backlog' | 'todo' | 'in_progress' | 'done';
   order: number;
   createdAt: string;
@@ -100,11 +103,11 @@ interface Project {
 
 **Projetos**: GET /api/projects, PATCH /:id, POST scan/add/remove/refresh
 **Milestones**: GET/POST /:id/milestones, PUT/DELETE /:id/milestones/:mid
-**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace
+**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
 **Git**: GET /:id/git/status|diff|log|branches, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
-**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), WS /ws/terminal/:id
-**Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|summarize, DELETE config
+**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
+**Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
 **Sync**:
   POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
@@ -150,6 +153,9 @@ interface Project {
   (`ui/dropdown-menu.tsx`) ou aparecem apenas no hover (acoes de coluna do kanban:
   `group/col` + `opacity-0 group-hover/col:opacity-100`). Nao adicionar botoes
   sempre-visiveis a toolbars sem justificativa de fluxo
+- Abas de projetos compartilham toda a largura disponivel (`basis-0 flex-1 min-w-0`),
+  permanecem todas visiveis e truncam os nomes; nao reintroduzir scroll horizontal
+  nem menu de abas excedentes
 - Painel lateral fecha automaticamente em rotas full-page (`/settings`, `/logs`,
   `/help`) e restaura a preferencia ao voltar — ver `FULL_PAGE_ROUTES` em
   `useActivity.tsx`
@@ -166,6 +172,17 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `done` → define `inboxAt` + `inProgressAt` + `doneAt`
 
 **NUNCA remova timestamps existentes** ao editar tarefas. Ao mover entre colunas, adicione o novo sem apagar anteriores. Formato: ISO 8601 (`new Date().toISOString()`). Implementado via `buildCascadingTimestamps()` em taskStore.ts.
+
+### Previsao de tarefas
+- `taskForecast.ts` calcula sob demanda usando timestamps; estimativas nao sao persistidas nas tasks.
+- Duracao de desenvolvimento = `inProgressAt` -> `doneAt`; espera = `inboxAt`/`createdAt` -> `inProgressAt`.
+- Usa mediana e quartis (P25-P75), preferindo mesmo projeto + mesmo `effort`; depois usa effort global e fallbacks por projeto/prioridade/historico global (cache de 60s).
+- Duracoes instantaneas/invalidas e acima de 180 dias sao ignoradas; tarefas em andamento usam duracao residual condicional.
+- Tasks antigas sem effort continuam validas. `POST /api/claude/classify-task-effort` gera sugestoes sem receber status/timestamps/duracao; o usuario revisa e `POST /api/projects/:id/tasks/effort/apply` grava somente as selecionadas com `effortSource: backfill`.
+- Endpoint: `GET /api/projects/:id/tasks/forecast?milestone=...`; mutations invalidam `['task-forecast', projectId]`.
+- A resposta do forecast inclui `breakdown` para `inbox` (`todo`), `backlog`,
+  `inboxAndBacklog` e `inProgress`; cada recorte soma estimativa restante e faixa
+  P25-P75. O kanban exibe esses totais nos cabecalhos e no popover geral.
 
 ### Multi-repo Git (sub-repositorios)
 - Projeto pode conter sub-pastas com `.git` proprio (ex: `client/` e `server/` dentro de `Sistema01/`)
@@ -187,6 +204,9 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - **Toda mutacao de task no MCP DEVE chamar `afterTaskMutation(projectId)`**
   (= `triggerAutoSync`). Sem isso o agente altera tarefas e o Trello/ClickUp
   fica desatualizado ate o usuario mexer na UI
+- `create_task`/`create_tasks`/`update_task`/`bulk_update_tasks` aceitam `effort`
+  Fibonacci (1/2/3/5/8). Agentes DEVEM sempre atribuir/revisar effort pelo tamanho
+  tecnico, nunca inferi-lo da prioridade
 - `update_task`/`bulk_update_tasks` aceitam `milestoneId` (`'default'` = General)
 - Tools read-only levam `annotations.readOnlyHint`; destrutivas, `destructiveHint`
 - Ao adicionar tool: registrar em `MCP_TOOLS` **e** no `handleToolCall`, e atualizar
@@ -227,6 +247,9 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   Enter e submeter linha a linha
 - Botao direito: copia se ha selecao, senao cola. Botao do meio cola.
   Com mouse tracking ligado (Claude CLI), selecionar exige **Shift**+arrastar
+- Imagens coladas com Ctrl+V sao salvas temporariamente em `data/terminal-clipboard/`
+  e o caminho absoluto e inserido no prompt; limite de 10 MB e limpeza oportunista
+  apos 24h
 - `safeChunks()` (server) nunca corta um par surrogate nem uma sequencia de escape.
   Cortar `\x1b[201~` ao meio prende o CLI em bracketed-paste e engole o prompt
 - Toda escrita no PTY passa por uma **fila por sessao** — sem ela uma tecla

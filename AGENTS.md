@@ -1,3 +1,6 @@
+<!-- Mirror of CLAUDE.md for agents that read AGENTS.md. Same content by
+     design: file names, routes and commands below are the real ones. -->
+
 # Shipyard - Local Development Dashboard
 
 Dashboard web local (localhost) para gerenciamento de projetos, tarefas, git, terminais e AI. Complementa o VS Code.
@@ -24,7 +27,7 @@ shipyard.cmd      # Windows: batch file na raiz
 
 ```
 client/src/
-  components/   # ui/ (shadcn), layout/, projects/, tasks/, git/, Codex/,
+  components/   # ui/ (shadcn), layout/, projects/, tasks/, git/, claude/,
                 # terminals/, editor/, files/, sync/, mcp/, onboarding/
   hooks/        # useProjects, useTasks, useGit, useClaude, useTerminal,
                 # useMilestones, useSheetSync, useFiles, useEditorTabs, useLogs, useMcp
@@ -32,7 +35,7 @@ client/src/
   lib/          # api.ts (fetch wrapper), sync/ (provider pattern)
 
 server/src/
-  routes/       # projects, tasks, git, terminals, terminalWs, Codex, mcp,
+  routes/       # projects, tasks, git, terminals, terminalWs, claude, mcp,
                 # files, logs, sync, settings
   services/     # projectDiscovery, gitService, taskStore, terminalLauncher,
                 # terminalService, aiBackend, claudeService, claudeContextBuilder,
@@ -40,7 +43,7 @@ server/src/
                 # mcpServer, mcpAuth, logService, settingsStore, dataDir
 
 data/           # Persistencia (auto-criado)
-  projects.json, settings.json, Codex.json, .Codex-key,
+  projects.json, settings.json, claude.json, .claude-key,
   mcp-config.json, mcp-auth.json, server.log,
   sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
@@ -58,10 +61,10 @@ interface Task {
   title: string;
   description: string;      // O QUE fazer (visao usuario/produto)
   prompt?: string;          // HOW/WHY tecnico (causas, arquivos, solucoes)
-  effort?: 1 | 2 | 3 | 5 | 8; // tamanho de implementacao; opcional para compatibilidade
+  priority: 'urgent' | 'high' | 'medium' | 'low';
+  effort?: 1 | 2 | 3 | 5 | 8;      // tamanho de implementacao (opcional, por compatibilidade)
   effortSource?: 'claude' | 'manual' | 'backfill';
   effortConfidence?: 'low' | 'medium' | 'high';
-  priority: 'urgent' | 'high' | 'medium' | 'low';
   status: 'backlog' | 'todo' | 'in_progress' | 'done';
   order: number;
   createdAt: string;
@@ -69,6 +72,18 @@ interface Task {
   inboxAt?: string;         // quando entrou em backlog/todo
   inProgressAt?: string;    // quando moveu para in_progress
   doneAt?: string;          // quando foi concluida
+  attachments?: TaskAttachment[];  // vem do card do Trello (pull-only)
+  comments?: TaskComment[];        // vem do card do Trello (pull-only)
+}
+
+interface TaskAttachment {
+  id: string;  name: string;  url: string;
+  mimeType?: string;  bytes?: number;  isImage?: boolean;  date?: string;
+  source: 'trello';
+}
+
+interface TaskComment {
+  id: string;  author?: string;  text: string;  date: string;  source: 'trello';
 }
 
 interface Milestone {
@@ -95,7 +110,7 @@ interface Project {
 **Git**: GET /:id/git/status|diff|log|branches, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
 **Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
-**Codex AI**: GET /api/Codex/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
+**Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
 **Sync**:
   POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
@@ -104,6 +119,9 @@ interface Project {
   POST/DELETE /api/projects/:id/sync/:providerId (body/query: milestoneId — default 'default'/General)
   POST /api/projects/:id/sync/:providerId/push|pull|merge (body: { milestoneId? })
   POST /api/projects/:id/sync/{trello,clickup}/link (body: { milestoneId?, ... })
+  GET /api/projects/:id/tasks/:tid/attachment/:aid?milestoneId=&preview=1
+    (proxy autenticado — a URL do anexo no Trello exige header OAuth, um `<img>`
+     apontando direto para ela recebe 401)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Sistema**: GET /api/settings, POST /api/browse
 
@@ -120,7 +138,7 @@ interface Project {
 - Tokens de cor em `client/src/index.css` (CSS vars) mapeados no tailwind config.
   Alem dos padroes shadcn: `--success` (verde), `--warning` (ambar), `--sidebar`.
   `--primary` e a cor de marca (azul) — usada para acoes primarias, foco, links,
-  estados ativos, features de IA/Codex e status inbox/todo
+  estados ativos, features de IA/Claude e status inbox/todo
 - Semantica de cor: inbox/todo = `primary` · in_progress = `warning` ·
   done = `success` · urgent/erro/delete = `destructive`. **NUNCA** usar classes
   literais de paleta (`text-purple-500`, `bg-yellow-500`...) para semantica de
@@ -132,13 +150,15 @@ interface Project {
   (ambar) tem cor; medium/low sao neutros
 - Tasks done: **sem** `line-through` e **sem** `opacity` no card — titulo em
   `text-muted-foreground` + check verde. Legibilidade > decoracao
-- **Cromo minimo**: toolbars mostram so as acoes do fluxo principal (Codex,
+- **Cromo minimo**: toolbars mostram so as acoes do fluxo principal (Claude,
   New Task, milestone, toggle Tasks/Editor). Acoes secundarias (sort, view mode,
   import/export, report, dev server, shell, links, settings) vivem em menus "⋯"
   (`ui/dropdown-menu.tsx`) ou aparecem apenas no hover (acoes de coluna do kanban:
   `group/col` + `opacity-0 group-hover/col:opacity-100`). Nao adicionar botoes
   sempre-visiveis a toolbars sem justificativa de fluxo
-- Abas de projetos compartilham toda a largura disponivel (`basis-0 flex-1 min-w-0`), permanecem todas visiveis e truncam os nomes; nao reintroduzir scroll horizontal nem menu de abas excedentes
+- Abas de projetos compartilham toda a largura disponivel (`basis-0 flex-1 min-w-0`),
+  permanecem todas visiveis e truncam os nomes; nao reintroduzir scroll horizontal
+  nem menu de abas excedentes
 - Painel lateral fecha automaticamente em rotas full-page (`/settings`, `/logs`,
   `/help`) e restaura a preferencia ao voltar — ver `FULL_PAGE_ROUTES` em
   `useActivity.tsx`
@@ -147,6 +167,14 @@ interface Project {
 - **description**: O QUE fazer, visao usuario/produto, sem referencias a codigo
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao
 - Para tarefas done: prompt contem resumo da implementacao
+
+### Timestamps de Status (cascading)
+Os timestamps sao cascading — etapas posteriores preenchem as anteriores automaticamente:
+- `todo`/`backlog` → define `inboxAt`
+- `in_progress` → define `inboxAt` + `inProgressAt`
+- `done` → define `inboxAt` + `inProgressAt` + `doneAt`
+
+**NUNCA remova timestamps existentes** ao editar tarefas. Ao mover entre colunas, adicione o novo sem apagar anteriores. Formato: ISO 8601 (`new Date().toISOString()`). Implementado via `buildCascadingTimestamps()` em taskStore.ts.
 
 ### Previsao de tarefas
 - `taskForecast.ts` calcula sob demanda usando timestamps; estimativas nao sao persistidas nas tasks.
@@ -159,14 +187,6 @@ interface Project {
   `inboxAndBacklog` e `inProgress`; cada recorte soma estimativa restante e faixa
   P25-P75. O kanban exibe esses totais nos cabecalhos e no popover geral.
 
-### Timestamps de Status (cascading)
-Os timestamps sao cascading — etapas posteriores preenchem as anteriores automaticamente:
-- `todo`/`backlog` → define `inboxAt`
-- `in_progress` → define `inboxAt` + `inProgressAt`
-- `done` → define `inboxAt` + `inProgressAt` + `doneAt`
-
-**NUNCA remova timestamps existentes** ao editar tarefas. Ao mover entre colunas, adicione o novo sem apagar anteriores. Formato: ISO 8601 (`new Date().toISOString()`). Implementado via `buildCascadingTimestamps()` em taskStore.ts.
-
 ### Multi-repo Git (sub-repositorios)
 - Projeto pode conter sub-pastas com `.git` proprio (ex: `client/` e `server/` dentro de `Sistema01/`)
 - `detectSubRepos()` em projectDiscovery.ts escaneia 1 nivel de profundidade
@@ -176,14 +196,21 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Query keys incluem `subrepo`: `['git-status', projectId, subrepo]`
 
 ### MCP (servidor de ferramentas para agentes)
-- `mcpServer.ts` expoe 24 tools. Cobertura: projetos, milestones (CRUD),
+- `mcpServer.ts` expoe 29 tools. Cobertura: projetos, milestones (CRUD),
   tarefas (incl. `create_tasks`/`bulk_update_tasks`/`bulk_delete_tasks`/`reorder_tasks`),
   git (status/log/diff) e sync (`list_sync_integrations`/`sync_push`/`sync_pull`)
+- `get_task` devolve tambem os comentarios e os metadados de anexo vindos do
+  Trello; `get_task_attachment` baixa um anexo e retorna a imagem inline
+  (bloco `image` em base64, teto de 5 MB) — e assim que o agente enxerga o
+  print que o cliente anexou no card. `McpToolResult.content` aceita blocos
+  `text` e `image`
 - **Toda mutacao de task no MCP DEVE chamar `afterTaskMutation(projectId)`**
   (= `triggerAutoSync`). Sem isso o agente altera tarefas e o Trello/ClickUp
   fica desatualizado ate o usuario mexer na UI
+- `create_task`/`create_tasks`/`update_task`/`bulk_update_tasks` aceitam `effort`
+  Fibonacci (1/2/3/5/8). Agentes DEVEM sempre atribuir/revisar effort pelo tamanho
+  tecnico, nunca inferi-lo da prioridade
 - `update_task`/`bulk_update_tasks` aceitam `milestoneId` (`'default'` = General)
-- `create_task`/`create_tasks`/`update_task`/`bulk_update_tasks` aceitam `effort` Fibonacci (1/2/3/5/8). Agentes DEVEM sempre atribuir/revisar effort com base no tamanho tecnico, nunca inferi-lo da prioridade.
 - Tools read-only levam `annotations.readOnlyHint`; destrutivas, `destructiveHint`
 - Ao adicionar tool: registrar em `MCP_TOOLS` **e** no `handleToolCall`, e atualizar
   a lista de permissoes da tela de consentimento OAuth em `routes/mcp.ts`
@@ -217,13 +244,15 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Terminal integrado: xterm.js + node-pty (optional dep) + WebSocket
 
 ### Terminal integrado — copiar/colar e performance
-- Imagens coladas com Ctrl+V sao salvas temporariamente em `data/terminal-clipboard/` e o caminho absoluto e inserido no prompt; limite de 10 MB e limpeza oportunista apos 24h
 - **Colar SEMPRE via `term.paste()`** (client). Ele converte `\n` → `\r` e aplica
   os marcadores de bracketed paste (`\x1b[200~`…`\x1b[201~`) quando o programa os
-  pediu. Enviar o texto cru pelo WebSocket faz o Codex CLI ler cada `\n` como
+  pediu. Enviar o texto cru pelo WebSocket faz o Claude CLI ler cada `\n` como
   Enter e submeter linha a linha
 - Botao direito: copia se ha selecao, senao cola. Botao do meio cola.
-  Com mouse tracking ligado (Codex CLI), selecionar exige **Shift**+arrastar
+  Com mouse tracking ligado (Claude CLI), selecionar exige **Shift**+arrastar
+- Imagens coladas com Ctrl+V sao salvas temporariamente em `data/terminal-clipboard/`
+  e o caminho absoluto e inserido no prompt; limite de 10 MB e limpeza oportunista
+  apos 24h
 - `safeChunks()` (server) nunca corta um par surrogate nem uma sequencia de escape.
   Cortar `\x1b[201~` ao meio prende o CLI em bracketed-paste e engole o prompt
 - Toda escrita no PTY passa por uma **fila por sessao** — sem ela uma tecla
@@ -232,13 +261,59 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   gera centenas de chunks minusculos)
 - Renderer WebGL com fallback automatico para DOM (`attachRenderer`)
 
+### Indicador de "esperando resposta" no terminal Claude
+- `startOutputWatcher` (terminalService.ts) observa a saida das sessoes Claude
+  (`claude`, `claude-yolo`, `ai-resolve`, `ai-manage`) e classifica em
+  `busy` / `awaiting-input` / `idle`. So **observa**: nunca escreve no PTY, nunca
+  toca na fila de escrita nem no flag `injecting` — escrever ali corromperia um
+  paste em andamento
+- Reaproveita `PROMPT_RE` (prompt ocioso) do injetor e acrescenta um padrao de
+  decisao (`Do you want`, opcoes numeradas, `(y/n)`), sempre depois de ~1.2s de
+  silencio. Qualquer input do usuario volta o estado para `busy`
+- O watcher so comeca depois que a injecao de prompt termina (`onInjected`) —
+  durante a espera o CLI mostra prompt ocioso e daria falso `idle`
+- Transicoes viram frame WS `{ type: 'state', state }`; o estado atual e
+  reenviado quando um socket conecta. No client vira `awaitingInput` no
+  `GlobalTab` (transitorio: resetado na validacao de sessoes no mount)
+
+### Atalhos globais e comportamento das abas
+- `useGlobalShortcuts` (chamado em `LayoutInner`) e a casa dos atalhos que valem
+  para o app inteiro: **Ctrl+W** (fecha aba), **Ctrl+N** (nova tarefa) e **?**
+  (overlay de atalhos). Atalhos de um componente continuam com o dono
+  (Ctrl+K, Ctrl+Shift+F, Ctrl+`, Ctrl+S) — registrar duas vezes dispara duplo
+- Ctrl+W com o terminal em foco **nao** e capturado: no shell essa tecla e
+  delete-word e roubá-la quebra a edicao da linha
+- Ctrl+W dispara `shipyard:close-editor-tab` como evento **cancelavel**: o
+  EditorPanel cancela quando fecha um arquivo (passando pela confirmacao de
+  alteracoes nao salvas); se ninguem cancelar, fecha a aba de projeto
+- Ctrl+N deixa `shipyard:pending-new-task` no sessionStorage alem de emitir o
+  evento — o TaskBoard so monta no modo tasks e sem a flag o evento se perde
+- Fonte unica dos atalhos exibidos: `client/src/lib/shortcuts.ts` (`SHORTCUTS`)
+- As tres barras de abas (projeto, editor, terminal) seguem as mesmas regras:
+  botao do meio fecha, botao direito abre menu de contexto, e ao fechar a aba
+  ativa a **adjacente** assume
+- Ctrl+W / Ctrl+N sao reservados pelo navegador: so funcionam no app desktop.
+  Itens de menu no Electron usam `registerAccelerator: false` (o renderer e quem
+  trata) e no macOS o `role: 'close'` foi trocado por item proprio, senao o
+  Cmd+W fecharia a janela antes de chegar no renderer
+
+### Menus de contexto de projeto
+- `ProjectContextMenu` e o menu unico de projeto, usado no card do Dashboard, na
+  linha da sidebar, na aba de projeto e no botao Claude da toolbar. Ordem fixa:
+  Workspace · Editor · Claude (+ variante skip permissions) · Dev · Shell ·
+  Pasta · Repositorio · Cloud · Favorito · Settings
+- `useProjectLaunch` e o unico caminho de launch: prefere o terminal integrado
+  (evento `shipyard:open-terminal`), cai para o nativo, compartilha a preferencia
+  `shipyard:skipPermissions` entre todos os pontos e padroniza os toasts.
+  Nao duplicar essa logica por componente
+
 ### AI Backend (CLI-first, padronizado)
 - `aiBackend.ts` e o UNICO ponto de entrada para features de IA server-side
   (chat, commit message, analyze-task, bulk-organize, manage-tasks)
-- Prioridade fixa: **1)** token OAuth do Codex CLI (`~/.Codex/.credentials.json`,
+- Prioridade fixa: **1)** token OAuth do Claude CLI (`~/.claude/.credentials.json`,
   usa assinatura — chamada direta a API com `Authorization: Bearer` +
   `anthropic-beta: oauth-2025-04-20`, NUNCA `x-api-key`) → **2)** subprocess
-  `Codex -p` → **3)** API key configurada no Shipyard
+  `claude -p` → **3)** API key configurada no Shipyard
 - NUNCA ler `process.env.ANTHROPIC_API_KEY` — pertence a outras ferramentas
 - `generateText()` para one-shot, `streamText()` para chat SSE
 - Novas features de IA DEVEM usar aiBackend, nao chamar Anthropic direto
@@ -261,13 +336,17 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   sessao de trabalho); popover abre o detalhe. Cor por severidade: <75% neutro,
   75-89% `warning`, >=90% `destructive`
 
-### AI Task Management (Codex CLI)
-- `claudeCliService.ts`: detecta e executa Codex CLI (`Codex`) como subprocess
-- `aiResolvePrompt.ts`: monta prompt para Codex resolver UMA tarefa (inclui contexto do projeto + task + MCP tools disponiveis)
-- `aiManagePrompt.ts`: monta prompt para Codex gerenciar MULTIPLAS tarefas a partir de texto livre
-- Auto-close: TerminalPanel detecta quando sessao AI termina e marca task como done se Codex nao o fez
-- Prompt reforça que Codex DEVE atualizar status da task via MCP ao concluir
-- Todo fluxo de IA que cria, analisa, organiza ou resolve tasks DEVE atribuir/revisar `effort` Fibonacci (1/2/3/5/8) pelo tamanho tecnico. Prioridade mede urgencia/impacto e nao serve como proxy de complexidade.
+### AI Task Management (Claude CLI)
+- `claudeCliService.ts`: detecta e executa Claude CLI (`claude`) como subprocess
+- `aiResolvePrompt.ts`: monta prompt para Claude resolver UMA tarefa (inclui contexto do projeto + task + MCP tools disponiveis)
+- `aiManagePrompt.ts`: monta prompt para Claude gerenciar MULTIPLAS tarefas a partir de texto livre
+- Auto-close: TerminalPanel detecta quando sessao AI termina e marca task como done se Claude nao o fez
+- Prompt reforça que Claude DEVE atualizar status da task via MCP ao concluir
+- "Run with AI" abre antes o `AiResolveDialog`, onde o usuario pode escrever uma
+  decisao ou contexto extra so para aquela execucao. O texto vai no corpo de
+  `POST /:id/tasks/:tid/ai-resolve` e vira a secao `## User decision feedback`
+  do prompt, declarada como instrucao que prevalece sobre a descricao.
+  Shift+clique pula o dialogo. Sem feedback, o prompt sai identico ao anterior
 
 ### Stores JSON (concorrencia)
 - `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)
@@ -277,21 +356,10 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 
 ### Electron
 - Server roda como child process via spawn (`ELECTRON_RUN_AS_NODE=1`)
-- Identidade de distribuicao e estavel: `appId`/AppUserModelID
-  `com.shipyard.dev`, `productName` Shipyard, executavel Linux `shipyard` e desktop
-  file `shipyard.desktop`. Nao alterar sem plano de migracao: isso quebra upgrades,
-  atalhos fixados no Windows e associacao de janela no Linux
-- Releases aceitam assinatura Authenticode via `WIN_CSC_LINK`/
-  `WIN_CSC_KEY_PASSWORD`; macOS usa Developer ID + notarizacao via secrets
-  `MAC_CSC_*` e `APPLE_*` definidos no workflow de release
 - Menu de aplicacao em `createApplicationMenu()` (main.ts) envia acoes via IPC
   `menu-action` → preload expoe `electronAPI.onMenuAction` → hook `useElectronMenu`
   roteia (`navigate:<path>`) ou redispara CustomEvents (`shipyard:toggle-search`,
   `shipyard:toggle-file-search`, `shipyard:toggle-terminal`)
-- Desktop usa title bar customizada em `AppTitleBar.tsx`: logo, menus e busca ficam
-  na mesma linha arrastavel, com controles nativos da janela via `titleBarOverlay`.
-  Acoes de Edit/View sao limitadas no preload e chegam ao main pelo canal
-  `titlebar-command`; o menu nativo permanece oculto para nao duplicar altura.
 - Atalhos Ctrl+K / Ctrl+Shift+F / Ctrl+` sao do renderer; itens de menu usam
   `registerAccelerator: false` para mostrar o hint sem duplicar o handler
 - Terminal integrado (xterm) repassa esses atalhos globais via
@@ -309,13 +377,11 @@ sua propria sheet/board/list. O milestone "General" usa o id literal `'default'`
 - URL validada: so permite `https://script.google.com/macros/s/...`
 - Auto-push: debounce 2s; auto-pull: polling 30s com merge bidirecional
 - Anti-loop: `lastPushAt` guard impede pull nos 10s apos push
-- A coluna `effort` e sincronizada e permanece opcional para planilhas antigas.
 
 **Trello / ClickUp** (server-side, schema v3 em `data/sync-config.json`):
 - Creds globais em `providers[providerId]` (apiKey/token), config em `projects[id][provider][milestoneId]`
 - Push: server-side debounce 2.5s em mutations de task — empurra TODOS os milestones
   habilitados do projeto, cada um para sua propria board/list
-- `effort` viaja nos metadados das descricoes Trello/ClickUp e e preservado no merge.
 
 **Ordenacao dos cards no Trello** (`computePositions` em trelloSync.ts):
 - O Trello so ordena lista por data de criacao ou alfabeticamente, e o agente MCP
@@ -335,6 +401,27 @@ sua propria sheet/board/list. O milestone "General" usa o id literal `'default'`
 - Board/list e nomeada `Shipyard · {project} · {milestone}` (ou so `Shipyard · {project}`
   para General)
 
+**Anexos e comentarios do Trello** (pull-only — o cliente escreve no card, o
+Shipyard so le):
+- `pullCards` pede `attachments=true` na propria chamada de cards (zero requests
+  extras) e busca os comentarios em UMA chamada de board
+  (`/boards/{id}/actions?filter=commentCard`, teto de 1000). Se essa chamada
+  falhar, o pull segue sem comentarios em vez de quebrar
+- Teto por card: 20 anexos, 50 comentarios (os mais recentes, reordenados do mais
+  antigo para o mais novo)
+- **Nunca** renderize esses campos no `desc` do card (`renderDesc`): o parser do
+  pull faz round-trip do desc e qualquer assimetria vira diff fantasma que
+  re-envia todos os cards a cada push
+- `fieldsChanged` (syncMerge) compara por ids ordenados — dado identico nao pode
+  contar como mudanca, senao o par pull/push entra em loop a cada 30s
+- `replaceTasks` reconstroi a task a partir de uma lista fixa de campos e e o
+  caminho de escrita de **todo** pull. Campo novo que nao for copiado do
+  `existing` la e apagado a cada ciclo (era assim que `subtasks` e `needsReview`
+  se perdiam)
+- Ver imagem: proxy `GET /api/projects/:id/tasks/:tid/attachment/:aid`
+  (`fetchAttachmentBytes` em trelloSync.ts monta o header
+  `Authorization: OAuth ...`). A URL crua do Trello devolve 401
+
 **Migracao v2 → v3**: integracoes Trello/ClickUp pre-existentes sao descartadas (creds
 globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 
@@ -345,7 +432,7 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 
 ## Regras para Contribuicao
 
-1. **SEMPRE atualize este AGENTS.md** quando mudar arquitetura, rotas, modelos ou convencoes
+1. **SEMPRE atualize este CLAUDE.md** quando mudar arquitetura, rotas, modelos ou convencoes
 2. Dados persistem em JSON — nao introduza banco de dados sem discutir
 3. Novos hooks seguem padrao de `useTasks.ts` (react-query + api.ts wrapper)
 4. Componentes UI usam shadcn/ui (`npx shadcn@latest add <component>`)
