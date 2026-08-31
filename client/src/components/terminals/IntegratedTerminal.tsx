@@ -233,15 +233,15 @@ export function IntegratedTerminal({ sessionId, isActive, onExit, onStateChange 
         if (image) {
           const result = await api.uploadTerminalClipboardImage(sessionId, image.type, await blobToBase64(image))
           term.paste(result.path)
-          toast.success('Imagem pronta para o Claude', {
-            description: 'O caminho temporário foi inserido no prompt.',
+          toast.success('Image ready for Claude', {
+            description: 'Its temporary path was inserted in the prompt.',
           })
           return
         }
         if (text) term.paste(text)
       } catch (error) {
-        toast.error('Não foi possível colar do clipboard', {
-          description: error instanceof Error ? error.message : 'Verifique a permissão de acesso ao clipboard.',
+        toast.error('Could not paste from the clipboard', {
+          description: error instanceof Error ? error.message : 'Check the clipboard access permission.',
         })
       }
     }
