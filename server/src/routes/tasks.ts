@@ -13,6 +13,19 @@ const EFFORT_POINTS = new Set([1, 2, 3, 5, 8]);
 function validEffort(value: unknown): value is 1 | 2 | 3 | 5 | 8 {
   return typeof value === 'number' && EFFORT_POINTS.has(value);
 }
+/** The client may send a subtask still being typed; keep only well-formed entries. */
+function sanitizeSubtasks(input: unknown): { subtasks: { id: string; title: string; done: boolean }[] } | null {
+  if (!Array.isArray(input)) return null;
+  const subtasks = input
+    .filter((s): s is { id?: string; title: string; done?: boolean } => !!s && typeof s.title === 'string' && s.title.trim().length > 0)
+    .map(s => ({
+      id: typeof s.id === 'string' && s.id ? s.id : Math.random().toString(36).slice(2, 12),
+      title: s.title.trim(),
+      done: s.done === true,
+    }));
+  return subtasks.length > 0 ? { subtasks } : null;
+}
+
 async function getForecastHistory() {
   const now = Date.now();
   if (forecastHistoryCache && forecastHistoryCache.expiresAt > now) return forecastHistoryCache.tasks;
@@ -129,7 +142,7 @@ export async function taskRoutes(app: FastifyInstance) {
     afterTaskMutation(request.params.projectId);
     return result;
   });
-  app.post<{ Params: { projectId: string }; Body: { title: string; description?: string; priority?: string; effort?: number; effortSource?: 'claude' | 'manual'; effortConfidence?: 'low' | 'medium' | 'high'; status?: string; prompt?: string; milestoneId?: string } }>(
+  app.post<{ Params: { projectId: string }; Body: { title: string; description?: string; priority?: string; effort?: number; effortSource?: 'claude' | 'manual'; effortConfidence?: 'low' | 'medium' | 'high'; status?: string; prompt?: string; milestoneId?: string; subtasks?: { id?: string; title: string; done?: boolean }[] } }>(
     '/api/projects/:projectId/tasks',
     async (request, reply) => {
       try {
@@ -144,6 +157,7 @@ export async function taskRoutes(app: FastifyInstance) {
           status: (request.body.status as any) || 'todo',
           prompt: request.body.prompt,
           milestoneId: request.body.milestoneId,
+          ...(sanitizeSubtasks(request.body.subtasks) ?? {}),
         });
         log.info('tasks', `Task created: ${task.title}`, undefined, request.params.projectId);
         afterTaskMutation(request.params.projectId);

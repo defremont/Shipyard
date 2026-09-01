@@ -38,6 +38,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
     scope: 'Tasks',
     items: [
       { keys: 'Ctrl+N', label: 'New task in the active project', desktopOnly: true },
+      { keys: 'Ctrl+Enter', label: 'Save the task dialog from any field' },
       { keys: 'Shift+click', label: 'Run with AI without the feedback dialog' },
     ],
   },
