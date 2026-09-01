@@ -11,6 +11,8 @@ import {
   setStateListener,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
+import * as taskStore from '../services/taskStore.js';
+import * as worktreeService from '../services/worktreeService.js';
 import * as log from '../services/logService.js';
 import { mkdir, readdir, stat, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -106,7 +108,19 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       const project = projects.find(p => p.id === projectId);
       if (!project) return reply.status(404).send({ error: 'Project not found' });
 
-      const sessionId = await createSession(projectId, project.path, type, cols, rows, project.name, taskId, prompt, agent);
+      // A session tied to a task runs in that task's worktree when the
+      // worktree-per-task setting is on — that is what lets two agents work
+      // on the same repo at once. Anything else runs in the project folder.
+      let cwd = project.path;
+      if (taskId) {
+        const task = await taskStore.getTask(projectId, taskId);
+        if (task) {
+          const worktree = await worktreeService.ensureTaskWorktree(project, task);
+          cwd = worktree.path;
+        }
+      }
+
+      const sessionId = await createSession(projectId, project.path, type, cols, rows, project.name, taskId, prompt, agent, cwd);
       if (!sessionId) {
         log.error('terminal', 'Failed to create terminal session', `type=${type}`, projectId);
         return reply.status(500).send({ error: 'Failed to create terminal session' });
@@ -123,6 +137,7 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         createdAt: session?.createdAt,
         taskId: session?.taskId,
         agent: session?.agent,
+        cwd: session?.cwd,
       };
     }
   );

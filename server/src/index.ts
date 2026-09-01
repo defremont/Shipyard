@@ -17,8 +17,10 @@ import { mcpRoutes } from './routes/mcp.js';
 import { fileRoutes } from './routes/files.js';
 import { logRoutes } from './routes/logs.js';
 import { reportRoutes } from './routes/reports.js';
+import { worktreeRoutes } from './routes/worktrees.js';
 import { initProjectDiscovery } from './services/projectDiscovery.js';
 import { loadSettings } from './services/settingsStore.js';
+import { startWorktreeCleanup } from './services/worktreeService.js';
 import { isAvailable as isTerminalAvailable } from './services/terminalService.js';
 import { getCliStatus as isClaudeCliAvailable } from './services/claudeCliService.js';
 import * as log from './services/logService.js';
@@ -92,6 +94,7 @@ await app.register(mcpRoutes);
 await app.register(fileRoutes);
 await app.register(logRoutes);
 await app.register(reportRoutes);
+await app.register(worktreeRoutes);
 
 // SPA fallback: serve index.html for all non-API, non-WS routes
 if (STATIC_DIR) {
@@ -103,6 +106,7 @@ if (STATIC_DIR) {
 await log.initLogs();
 await loadSettings();
 await initProjectDiscovery();
+startWorktreeCleanup();
 
 try {
   await app.listen({ port: PORT, host: HOST });

@@ -296,3 +296,102 @@ export async function getCommitsSince(projectPath: string, since: string, until?
 
   return commits;
 }
+
+// ── Worktrees ────────────────────────────────────────────
+
+export interface WorktreeEntry {
+  path: string;
+  head?: string;
+  branch?: string;
+  bare?: boolean;
+  detached?: boolean;
+}
+
+/** Every worktree of a repo, main one included, from `git worktree list`. */
+export async function listWorktrees(projectPath: string): Promise<WorktreeEntry[]> {
+  const git = getGit(projectPath);
+  let raw: string;
+  try {
+    raw = await git.raw(['worktree', 'list', '--porcelain']);
+  } catch {
+    return [];
+  }
+
+  const entries: WorktreeEntry[] = [];
+  let current: WorktreeEntry | null = null;
+  for (const line of raw.split('\n')) {
+    const text = line.trim();
+    if (text.startsWith('worktree ')) {
+      if (current) entries.push(current);
+      current = { path: text.slice('worktree '.length) };
+    } else if (!current) {
+      continue;
+    } else if (text.startsWith('HEAD ')) {
+      current.head = text.slice('HEAD '.length);
+    } else if (text.startsWith('branch ')) {
+      current.branch = text.slice('branch '.length).replace(/^refs\/heads\//, '');
+    } else if (text === 'bare') {
+      current.bare = true;
+    } else if (text === 'detached') {
+      current.detached = true;
+    }
+  }
+  if (current) entries.push(current);
+  return entries;
+}
+
+/** Drop worktree records whose directory no longer exists. */
+export async function pruneWorktrees(projectPath: string): Promise<void> {
+  const git = getGit(projectPath);
+  try {
+    await git.raw(['worktree', 'prune']);
+  } catch {
+    // Not a repo, or nothing to prune — either way there is nothing to do.
+  }
+}
+
+/**
+ * Check out `branch` into `dest` as a new worktree. The branch is created off
+ * the repo's current HEAD when it doesn't exist yet; an existing branch is
+ * reused, which makes the call safe to repeat for the same task.
+ */
+export async function createWorktree(projectPath: string, branch: string, dest: string): Promise<void> {
+  const git = getGit(projectPath);
+  // A stale record (directory deleted by hand) would make `add` refuse.
+  await pruneWorktrees(projectPath);
+
+  const branches = await git.branch();
+  const exists = branches.all.includes(branch);
+  const args = exists
+    ? ['worktree', 'add', dest, branch]
+    : ['worktree', 'add', '-b', branch, dest];
+  await git.raw(args);
+}
+
+/**
+ * Remove a worktree directory and its git record. Falls back to deleting the
+ * directory when git refuses (uncommitted changes) only if `force` is set —
+ * otherwise the caller gets the error and can keep the work.
+ */
+export async function removeWorktree(projectPath: string, dest: string, force = true): Promise<void> {
+  const git = getGit(projectPath);
+  try {
+    await git.raw(force ? ['worktree', 'remove', '--force', dest] : ['worktree', 'remove', dest]);
+  } catch (err) {
+    if (!force) throw err;
+    // The record can outlive the directory (or the other way round) — clean
+    // both sides by hand so a retry doesn't hit the same wall.
+    await fsp.rm(dest, { recursive: true, force: true });
+    await pruneWorktrees(projectPath);
+  }
+}
+
+/** Delete a local branch. Used after its worktree is gone. */
+export async function deleteBranch(projectPath: string, branch: string, force = true): Promise<void> {
+  const git = getGit(projectPath);
+  try {
+    await git.raw(['branch', force ? '-D' : '-d', branch]);
+  } catch {
+    // Already gone, or still checked out somewhere — not worth failing over.
+  }
+}

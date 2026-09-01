@@ -5,18 +5,27 @@ export function buildAiResolvePrompt(
   project: Project,
   serverPort: number = 5420,
   feedback?: string,
+  /** Where the agent actually runs — a task worktree, when it has one. */
+  workdir?: string,
 ): string {
   const lines: string[] = [];
+  const cwd = workdir || project.path;
+  const inWorktree = cwd !== project.path;
 
   lines.push(`# Task: ${task.title}`);
   lines.push('');
   lines.push('## Context');
   lines.push(`Project: ${project.name}`);
-  lines.push(`Path: ${project.path}`);
+  lines.push(`Path: ${cwd}`);
   if (project.techStack.length > 0) {
     lines.push(`Stack: ${project.techStack.join(', ')}`);
   }
-  if (project.gitBranch) {
+  if (inWorktree) {
+    lines.push(`Branch: ${task.worktreeBranch || 'task branch'}`);
+    lines.push(`Main checkout: ${project.path}`);
+    lines.push('');
+    lines.push('This is a git worktree of the project, created for this task alone so other agents can work on the same repo at the same time. Work and commit here — do not touch the main checkout.');
+  } else if (project.gitBranch) {
     lines.push(`Branch: ${project.gitBranch}`);
   }
   lines.push('');
@@ -50,7 +59,7 @@ export function buildAiResolvePrompt(
 
   lines.push('## Instructions');
   lines.push('1. Read the task description and technical details above carefully');
-  lines.push(`2. Explore the codebase at ${project.path} to understand the current state`);
+  lines.push(`2. Explore the codebase at ${cwd} to understand the current state`);
   lines.push('3. Implement the required changes');
   lines.push('4. Test your implementation');
   lines.push('5. Create a git commit with your changes using a clear, concise commit message that describes what was done (do NOT use --no-verify or skip hooks)');

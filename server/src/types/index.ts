@@ -77,6 +77,8 @@ export interface Task {
   subtasks?: Subtask[];
   attachments?: TaskAttachment[];  // Pulled from the remote board — remote is authoritative
   comments?: TaskComment[];        // Pulled from the remote board — remote is authoritative
+  worktreePath?: string;   // Isolated git worktree the agent runs in (worktree-per-task)
+  worktreeBranch?: string; // Branch checked out in that worktree
 }
 
 export interface Milestone {
@@ -107,6 +109,10 @@ export interface Settings {
   customAgents?: AgentDefinition[];
   // Agent used when a task doesn't name one
   defaultAgent?: string;
+  // Give every started task its own git worktree so agents can run in parallel
+  worktreePerTask?: boolean;
+  // Where those worktrees live (default: {DATA_DIR}/worktrees)
+  worktreeBasePath?: string;
 }
 
 // ── Coding agents (CLIs that can run a task) ────────────

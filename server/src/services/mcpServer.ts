@@ -4,6 +4,7 @@ import * as gitService from './gitService.js';
 import * as syncStore from './syncStore.js';
 import * as syncEngine from './sync/syncEngine.js';
 import * as trelloSync from './sync/trelloSync.js';
+import * as worktreeService from './worktreeService.js';
 import type { Project, Task, EffortPoints } from '../types/index.js';
 
 // MCP Tool handlers - optimized for minimal token usage
@@ -259,7 +260,10 @@ export async function bulkUpdateTasks(projectId: string, taskIds: string[], data
 
 export async function bulkDeleteTasks(projectId: string, taskIds: string[]): Promise<McpToolResult> {
   if (!Array.isArray(taskIds) || taskIds.length === 0) return fail('taskIds must be a non-empty array');
+  const wanted = new Set(taskIds);
+  const doomed = (await taskStore.getTasks(projectId)).filter(t => wanted.has(t.id) && t.worktreePath);
   const result = await taskStore.bulkDeleteTasks(projectId, taskIds);
+  for (const task of doomed) await worktreeService.removeTaskWorktree(task, { clearTask: false });
   afterTaskMutation(projectId);
   return ok(result);
 }
@@ -272,8 +276,14 @@ export async function reorderTasks(projectId: string, taskIds: string[]): Promis
 }
 
 export async function deleteTask(projectId: string, taskId: string): Promise<McpToolResult> {
+  // Read first: once the task is gone there is nothing left pointing at its
+  // worktree, and the folder would sit there until the orphan sweep.
+  const existing = await taskStore.getTask(projectId, taskId);
   const deleted = await taskStore.deleteTask(projectId, taskId);
   if (!deleted) return fail(`Task "${taskId}" not found`);
+  if (existing?.worktreePath) {
+    await worktreeService.removeTaskWorktree(existing, { clearTask: false });
+  }
   afterTaskMutation(projectId);
   return ok({ deleted: taskId });
 }
@@ -492,6 +502,14 @@ export async function startTask(projectId: string, taskId: string): Promise<McpT
     return { content: [{ type: 'text', text: `Failed to start task "${taskId}"` }], isError: true };
   }
   afterTaskMutation(projectId);
+
+  // Worktree per task (opt-in): the agent gets its own checkout so a second
+  // agent on the same repo can work at the same time. Off, or on a folder
+  // that is not a repo, this leaves the project path untouched.
+  const project = await resolveProject(projectId);
+  const worktree = project ? await worktreeService.ensureTaskWorktree(project, updated) : null;
+  const cwd = worktree?.path || project?.path;
+
   return {
     content: [{
       type: 'text',
@@ -505,6 +523,8 @@ export async function startTask(projectId: string, taskId: string): Promise<McpT
           prompt: updated.prompt,
           status: updated.status,
           priority: updated.priority,
+          ...(cwd ? { cwd } : {}),
+          ...(worktree?.branch ? { worktree: worktree.path, branch: worktree.branch } : {}),
         },
       }),
     }],
@@ -869,7 +889,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'start_task',
-    description: 'Move a task to in_progress and return its full content (title, description, prompt). Use this as step 1 when an agent begins work — replaces update_task for this common case.',
+    description: 'Move a task to in_progress and return its full content (title, description, prompt) plus the directory to work in. Use this as step 1 when an agent begins work — replaces update_task for this common case. When worktree-per-task is on, the task gets its own git worktree and branch: work in the returned cwd, not in the project folder.',
     inputSchema: {
       type: 'object' as const,
       properties: {

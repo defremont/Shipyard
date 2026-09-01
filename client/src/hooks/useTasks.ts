@@ -59,6 +59,9 @@ export interface Task {
   /** The cross-project list endpoint sends counts instead of the bodies. */
   attachmentCount?: number
   commentCount?: number
+  /** Isolated checkout this task runs in, when worktree per task is on. */
+  worktreePath?: string
+  worktreeBranch?: string
 }
 
 export interface TaskForecast {

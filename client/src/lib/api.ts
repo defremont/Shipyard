@@ -16,6 +16,31 @@ export interface Agent {
   available?: boolean
 }
 
+export interface WorktreeInfo {
+  path: string
+  branch?: string
+  projectId: string
+  projectName?: string
+  taskId: string
+  taskNumber?: number
+  taskTitle: string
+  taskStatus: 'backlog' | 'todo' | 'in_progress' | 'done'
+  doneAt?: string
+  /** The recorded folder is no longer on disk. */
+  missing: boolean
+  /** The automatic sweep would remove it on its next pass. */
+  stale: boolean
+}
+
+export interface WorktreeSettings {
+  enabled: boolean
+  basePath: string
+  custom: boolean
+  defaultBasePath: string
+  ttlDays: number
+  worktrees: WorktreeInfo[]
+}
+
 export interface SyncProviderStatus {
   providerId: 'trello' | 'clickup';
   connected: boolean;
@@ -377,6 +402,16 @@ export const api = {
   getAgents: () => request<{ agents: Agent[]; defaultAgent: string }>('/agents'),
   saveAgents: (body: { agents?: Agent[]; defaultAgent?: string }) =>
     request<{ agents: Agent[]; defaultAgent: string }>('/agents', { method: 'PUT', body: JSON.stringify(body) }),
+
+  // Worktree per task (isolated checkout so agents can run in parallel)
+  getWorktrees: () => request<WorktreeSettings>('/worktrees'),
+  saveWorktreeConfig: (body: { enabled?: boolean; basePath?: string | null }) =>
+    request<Omit<WorktreeSettings, 'worktrees'>>('/worktrees', { method: 'PUT', body: JSON.stringify(body) }),
+  cleanWorktrees: (all?: boolean) =>
+    request<{ removed: number; orphans: number; errors: number; kept: number }>('/worktrees/clean', {
+      method: 'POST',
+      body: JSON.stringify({ all: !!all }),
+    }),
 
   // Browse filesystem
   browse: (path: string) => request<{ directories: { name: string; path: string }[] }>('/browse', { method: 'POST', body: JSON.stringify({ path }) }),

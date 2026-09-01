@@ -28,6 +28,8 @@ export interface TerminalSession {
   taskId?: string;
   /** Which agent CLI this session is running (AgentDefinition.id) */
   agent?: string;
+  /** Directory the shell runs in — the task worktree when it has one */
+  cwd: string;
   /** True while prompt injection is in progress — resize is deferred */
   injecting?: boolean;
   /** Claude-type sessions only: what the CLI is doing right now */
@@ -79,8 +81,14 @@ export async function createSession(
   taskId?: string,
   prompt?: string,
   agentId?: string,
+  /** Overrides projectPath — a task running in its own worktree passes it. */
+  cwd?: string,
 ): Promise<string | null> {
   if (!nodePty) return null;
+
+  // Everything below (dev command lookup, agent launch, the shell itself)
+  // works in this directory; projectPath only names the project.
+  const workdir = cwd || projectPath;
 
   const id = nanoid(10);
   const shell = getDefaultShell();
@@ -106,7 +114,7 @@ export async function createSession(
   let injectPrompt = false;
 
   if (type === 'dev') {
-    initialCommand = await detectDevCommand(projectPath);
+    initialCommand = await detectDevCommand(workdir);
   } else if (type === 'claude' && !agentId) {
     // Plain Claude tab from the project menu — permissions prompt intact.
     env['CLAUDECODE'] = '';
@@ -114,7 +122,7 @@ export async function createSession(
   } else if (AGENT_SESSION_TYPES.has(type)) {
     agent = resolveAgent(agentId);
     if (agent.id === DEFAULT_AGENT_ID) env['CLAUDECODE'] = '';
-    const launch = await buildAgentLaunch(agent, { cwd: projectPath, prompt });
+    const launch = await buildAgentLaunch(agent, { cwd: workdir, prompt });
     initialCommand = launch.command;
     injectPrompt = launch.injectsPrompt;
   }
@@ -135,7 +143,7 @@ export async function createSession(
     name: 'xterm-256color',
     cols,
     rows,
-    cwd: projectPath,
+    cwd: workdir,
     env,
     handleFlowControl: true,
   };
@@ -153,6 +161,7 @@ export async function createSession(
     type,
     title,
     pty,
+    cwd: workdir,
     createdAt: new Date().toISOString(),
     ...(taskId ? { taskId } : {}),
     ...(agent ? { agent: agent.id } : {}),

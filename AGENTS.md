@@ -62,6 +62,8 @@ interface Task {
   description: string;      // O QUE fazer (visao usuario/produto)
   prompt?: string;          // HOW/WHY tecnico (causas, arquivos, solucoes)
   agent?: string;           // qual CLI roda a task (id do agentRegistry; vazio = default)
+  worktreePath?: string;    // worktree isolada onde o agente roda (worktree-per-task)
+  worktreeBranch?: string;  // branch checada nessa worktree
   priority: 'urgent' | 'high' | 'medium' | 'low';
   effort?: 1 | 2 | 3 | 5 | 8;      // tamanho de implementacao (opcional, por compatibilidade)
   effortSource?: 'claude' | 'manual' | 'backfill';
@@ -125,6 +127,8 @@ interface Project {
      apontando direto para ela recebe 401)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
+**Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
+  POST /api/worktrees/clean (`{ all? }`), DELETE /api/projects/:id/tasks/:tid/worktree
 **Sistema**: GET /api/settings, POST /api/browse
 
 ## Portas
@@ -394,6 +398,33 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   `shipyard:open-terminal` → `POST /api/terminal/sessions` → `createSession`
 - A aba do terminal leva o nome do agente quando nao e o default
 - Nao criar um segundo lugar que decida comando de agente: passe pelo registry
+
+### Worktree por tarefa (agentes em paralelo)
+- Desligado por padrao. Settings > AI & Integrations > Task worktrees liga
+  (`worktreePerTask`) e escolhe a pasta base (`worktreeBasePath`, default
+  `data/worktrees`); ambos vivem no `settings.json`
+- `worktreeService.ts` e o unico dono do assunto: `ensureTaskWorktree` (cria ou
+  reusa), `removeTaskWorktree`, `listWorktrees`, `cleanupWorktrees`. Ele grava
+  `task.worktreePath` / `task.worktreeBranch`; `replaceTasks` copia os dois do
+  `existing`, senao todo pull de sync os apaga
+- Branch e pasta: `shipyard/task-{numero}-{slug}` e
+  `{projectId}-task-{numero}-{slug}`. **A unicidade vem do numero da task** — o
+  git recusa checar a mesma branch em duas worktrees, entao o slug e so leitura
+- Tres portas de entrada, todas passando por `ensureTaskWorktree` (idempotente):
+  `start_task` do MCP (devolve `cwd` na resposta), `POST /:id/tasks/:tid/ai-resolve`
+  (o prompt ja cita a worktree) e `POST /api/terminal/sessions` com `taskId`
+  (a sessao roda la dentro, via o parametro `cwd` do `createSession`)
+- Falhar criando a worktree **nunca** bloqueia o lancamento: `ensureTaskWorktree`
+  loga e devolve `project.path` com o motivo
+- Limpeza: worktree de task `done` ha mais de 7 dias sai sozinha (varredura no
+  boot e a cada 6h). **A varredura automatica pula worktree com mudanca nao
+  commitada**; so o botao "Clean worktrees" (`all: true`) e o delete da task
+  removem a forca
+- O sweep de pastas orfas so apaga diretorio cujo nome casa com `-task-` **e**
+  que tem `.git` dentro — a pasta base e escolha do usuario e pode ter outras
+  coisas
+- Deletar task (HTTP e MCP, individual e bulk) le a task antes de apagar: sem
+  isso ninguem mais aponta para a worktree
 
 ### Stores JSON (concorrencia)
 - `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)

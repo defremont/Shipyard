@@ -7,7 +7,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Copy, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2, GitCommit } from 'lucide-react'
+import { Pencil, Copy, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2, GitCommit, GitBranch } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
 import { buildTaskPrompt } from '@/lib/promptBuilder'
@@ -220,6 +220,14 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
         <AgentSelect value={task.agent} onChange={handleAgentChange} />
         <span className="text-[11px] text-muted-foreground/70">Runs this task when you pick Run with AI.</span>
       </div>
+
+      {task.worktreeBranch && (
+        <div className="flex items-center gap-2 text-[11px] text-muted-foreground pt-2 border-t">
+          <GitBranch className="h-3.5 w-3.5 shrink-0" />
+          <span className="font-mono truncate" title={task.worktreePath}>{task.worktreeBranch}</span>
+          <span className="text-muted-foreground/70 shrink-0">worktree</span>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground pt-2 border-t">
         {task.createdAt && <span>Created {formatDate(task.createdAt)}</span>}

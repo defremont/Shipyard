@@ -6,6 +6,7 @@ import { buildAiManagePrompt } from '../services/aiManagePrompt.js';
 import * as log from '../services/logService.js';
 import { triggerAutoSync } from '../services/sync/syncEngine.js';
 import { buildTaskForecast } from '../services/taskForecast.js';
+import * as worktreeService from '../services/worktreeService.js';
 
 let forecastHistoryCache: { tasks: Awaited<ReturnType<typeof taskStore.getAllTasks>>; expiresAt: number } | null = null;
 
@@ -216,8 +217,14 @@ export async function taskRoutes(app: FastifyInstance) {
   app.delete<{ Params: { projectId: string; taskId: string } }>(
     '/api/projects/:projectId/tasks/:taskId',
     async (request, reply) => {
+      // Read before deleting: afterwards nothing points at the worktree and
+      // the folder would linger until the orphan sweep.
+      const existing = await taskStore.getTask(request.params.projectId, request.params.taskId);
       const deleted = await taskStore.deleteTask(request.params.projectId, request.params.taskId);
       if (!deleted) return reply.status(404).send({ error: 'Task not found' });
+      if (existing?.worktreePath) {
+        await worktreeService.removeTaskWorktree(existing, { clearTask: false });
+      }
       log.info('tasks', `Task deleted: ${request.params.taskId}`, undefined, request.params.projectId);
       afterTaskMutation(request.params.projectId);
       return { success: true };
@@ -244,7 +251,11 @@ export async function taskRoutes(app: FastifyInstance) {
     '/api/projects/:projectId/tasks/bulk-delete',
     async (request) => {
       const taskIds = request.body?.taskIds || [];
+      const wanted = new Set(taskIds);
+      const doomed = (await taskStore.getTasks(request.params.projectId))
+        .filter(t => wanted.has(t.id) && t.worktreePath);
       const result = await taskStore.bulkDeleteTasks(request.params.projectId, taskIds);
+      for (const task of doomed) await worktreeService.removeTaskWorktree(task, { clearTask: false });
       log.info('tasks', `Bulk deleted ${result.deleted} tasks`, undefined, request.params.projectId);
       afterTaskMutation(request.params.projectId);
       return result;
@@ -334,9 +345,20 @@ export async function taskRoutes(app: FastifyInstance) {
       const rawFeedback = typeof request.body?.feedback === 'string' ? request.body.feedback.trim() : '';
       const feedback = rawFeedback ? rawFeedback.slice(0, 4000) : undefined;
 
+      // Create the worktree here so the prompt can name the directory the
+      // agent will land in. Creating it again when the terminal opens is a
+      // no-op, so the two paths agree.
+      const worktree = await worktreeService.ensureTaskWorktree(project, task);
+
       const port = (request.server.addresses()?.[0] as any)?.port || 5420;
-      const prompt = buildAiResolvePrompt(task, project, port, feedback);
-      return { prompt };
+      const prompt = buildAiResolvePrompt(
+        { ...task, worktreeBranch: worktree.branch ?? task.worktreeBranch },
+        project,
+        port,
+        feedback,
+        worktree.path,
+      );
+      return { prompt, cwd: worktree.path };
     }
   );
 
