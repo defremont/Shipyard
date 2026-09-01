@@ -1,8 +1,9 @@
-import { useState, useMemo } from 'react'
-import { Loader, ArrowRight, FolderSearch, FolderPlus, Rocket, Inbox, CheckCircle2 } from 'lucide-react'
+import { useState, useMemo, useCallback, lazy, Suspense } from 'react'
+import { Loader, ArrowRight, FolderSearch, FolderPlus, Rocket } from 'lucide-react'
 import { ProjectList } from '@/components/projects/ProjectList'
+import { ActivityFeed } from '@/components/tasks/ActivityFeed'
 import { useProjects, type Project } from '@/hooks/useProjects'
-import { useAllTasks } from '@/hooks/useTasks'
+import { useAllTasks, type Task } from '@/hooks/useTasks'
 import { useTabs } from '@/hooks/useTabs'
 import { WelcomeWizard, useOnboarding } from '@/components/onboarding/WelcomeWizard'
 import { FolderBrowser } from '@/components/ui/folder-browser'
@@ -11,6 +12,12 @@ import { api } from '@/lib/api'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import type { TaskCounts } from '@/components/projects/ProjectCard'
+
+// Dashboard is the landing route and stays eager, so the task dialogs — which
+// drag in the review panel and the diff renderer — load only once a feed row
+// is clicked.
+const TaskViewer = lazy(() => import('@/components/tasks/TaskViewer').then(m => ({ default: m.TaskViewer })))
+const TaskEditor = lazy(() => import('@/components/tasks/TaskEditor').then(m => ({ default: m.TaskEditor })))
 
 export function Dashboard() {
   const { data: projects } = useProjects()
@@ -23,6 +30,29 @@ export function Dashboard() {
     for (const p of projects || []) m.set(p.id, p)
     return m
   }, [projects])
+
+  const projectNames = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const p of projects || []) m.set(p.id, p.name)
+    return m
+  }, [projects])
+
+  // Feed rows open the task in place. The dialogs keep their task after
+  // closing so the exit animation has something to render.
+  const [viewingTask, setViewingTask] = useState<Task | null>(null)
+  const [viewerOpen, setViewerOpen] = useState(false)
+  const [editingTask, setEditingTask] = useState<Task | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
+
+  const handleViewTask = useCallback((task: Task) => {
+    setViewingTask(task)
+    setViewerOpen(true)
+  }, [])
+
+  const handleEditTask = useCallback((task: Task) => {
+    setEditingTask(task)
+    setEditorOpen(true)
+  }, [])
 
   // Compute task counts per project
   const taskCountsByProject = useMemo(() => {
@@ -168,6 +198,15 @@ export function Dashboard() {
             </div>
           )}
 
+          {/* Agent activity — hides itself when the last day was quiet */}
+          {!hasNoProjects && (
+            <ActivityFeed
+              tasks={tasks}
+              projectNames={projectNames}
+              onSelect={handleViewTask}
+            />
+          )}
+
           {/* Empty state when no projects */}
           {hasNoProjects ? (
           <div className="flex items-center justify-center min-h-[50vh]">
@@ -237,6 +276,29 @@ export function Dashboard() {
           )}
         </div>
       </div>
+
+      {(viewingTask || editingTask) && (
+        <Suspense fallback={null}>
+          {viewingTask && (
+            <TaskViewer
+              task={viewingTask}
+              projectName={projectMap.get(viewingTask.projectId)?.name}
+              projectPath={projectMap.get(viewingTask.projectId)?.path}
+              open={viewerOpen}
+              onOpenChange={setViewerOpen}
+              onEdit={handleEditTask}
+            />
+          )}
+          {editingTask && (
+            <TaskEditor
+              projectId={editingTask.projectId}
+              task={editingTask}
+              open={editorOpen}
+              onOpenChange={setEditorOpen}
+            />
+          )}
+        </Suspense>
+      )}
 
       <FolderBrowser
         open={scanBrowserOpen}

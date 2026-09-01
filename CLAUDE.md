@@ -225,6 +225,28 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   prompt (mesmo formato do `log_task_progress` do MCP, via
   `taskStore.appendPromptSection`) e move a task de volta para in_progress
 
+### Feed de atividade no Dashboard (o que os agentes fizeram)
+- `lib/activityFeed.ts` deriva a linha do tempo das ultimas 24h a partir da
+  lista de tasks que o Dashboard ja busca: `inProgressAt` vira **started**,
+  `doneAt` vira **completed**, e cada secao `— Note` do prompt vira uma
+  entrada propria. Nao ha rota nova nem segunda cadencia sobre
+  `['tasks','all']` — a query mais cara do app continua com o poll de 30s
+- As notas so existem porque `appendPromptSection` grava
+  `— Note YYYY-MM-DD HH:MM` (UTC) e `— Summary`. **Mudar esse formato no
+  server quebra o feed** — os dois lados tem que andar juntos. A task guarda
+  um unico `updatedAt`, entao ler o prompt e a unica forma de ver uma nota
+  como evento
+- Task nao tocada desde o inicio da janela pula a varredura do prompt
+  (`updatedAt < since`) — sem isso o build percorre o arquivo inteiro
+- Ids de evento sao deduplicados: um arquivo de tasks ja veio com o mesmo id
+  duas vezes e chave repetida quebra a lista do React
+- `ActivityFeed.tsx` some sozinho quando o dia foi silencioso, mostra 6 linhas
+  com "Show N more", e nomeia o agente **so quando nao e o default** (mesma
+  regra das abas de terminal)
+- Clicar numa linha abre o `TaskViewer` no proprio Dashboard. Ele e o
+  `TaskEditor` entram por `lazy()`: o Dashboard e a rota inicial e nao pode
+  carregar o painel de review e o diff no chunk de entrada
+
 ### Multi-repo Git (sub-repositorios)
 - Projeto pode conter sub-pastas com `.git` proprio (ex: `client/` e `server/` dentro de `Sistema01/`)
 - `detectSubRepos()` em projectDiscovery.ts escaneia 1 nivel de profundidade
