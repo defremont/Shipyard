@@ -557,3 +557,13 @@ export async function deleteMilestone(projectId: string, milestoneId: string): P
   await writeFile_(projectId, file);
   return true;
 }
+
+/**
+ * Append a titled section to a task prompt. Shared by the MCP progress tools
+ * and the HTTP note route so both write the same shape.
+ */
+export function appendPromptSection(existing: string | undefined, header: string, body: string): string {
+  const base = (existing || '').trimEnd();
+  const section = `${header}\n${body.trim()}`;
+  return base ? `${base}\n\n${section}` : section;
+}

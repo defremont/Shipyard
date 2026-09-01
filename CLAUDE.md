@@ -103,8 +103,8 @@ interface Project {
 
 **Projetos**: GET /api/projects, PATCH /:id, POST scan/add/remove/refresh
 **Milestones**: GET/POST /:id/milestones, PUT/DELETE /:id/milestones/:mid
-**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
-**Git**: GET /:id/git/status|diff|log|branches, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
+**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
+**Git**: GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
 **Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
@@ -183,6 +183,24 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - A resposta do forecast inclui `breakdown` para `inbox` (`todo`), `backlog`,
   `inboxAndBacklog` e `inProgress`; cada recorte soma estimativa restante e faixa
   P25-P75. O kanban exibe esses totais nos cabecalhos e no popover geral.
+
+### Aba Review da tarefa (o que a IA fez)
+- `GET /:id/git/task-review?since=&until=` responde numa chamada tudo que a
+  revisao precisa: branch atual, commits da janela (cada um com os arquivos que
+  tocou, via um unico `git log --numstat`), o agregado por arquivo e a contagem
+  do que ficou sem commit na working tree
+- A janela vai de `inProgressAt` ate `doneAt` + 15min (a folga cobre o agente que
+  faz commit logo depois de marcar done). Tarefa sem `inProgressAt` nao mostra a
+  aba — nao ha janela para revisar
+- O diff de um commit so e buscado quando o usuario expande (`useCommitDiff`, que
+  ja cacheia por hash). Nunca carregar todos os diffs de uma vez
+- Se o repo nao existir ou o git falhar, a rota devolve `available: false` e a aba
+  mostra um aviso — nunca 500
+- `DiffView.tsx` (`DiffBlock`, `parseDiffByFile`, `DiffFileEntry`) e a fonte unica
+  de renderizacao de diff, compartilhada com o `CommitDetailDialog`
+- "Needs changes" chama `POST /:id/tasks/:tid/note` — anexa uma secao datada ao
+  prompt (mesmo formato do `log_task_progress` do MCP, via
+  `taskStore.appendPromptSection`) e move a task de volta para in_progress
 
 ### Multi-repo Git (sub-repositorios)
 - Projeto pode conter sub-pastas com `.git` proprio (ex: `client/` e `server/` dentro de `Sistema01/`)

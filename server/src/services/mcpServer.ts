@@ -511,19 +511,13 @@ export async function startTask(projectId: string, taskId: string): Promise<McpT
   };
 }
 
-function appendPromptSection(existing: string | undefined, header: string, body: string): string {
-  const base = (existing || '').trimEnd();
-  const section = `${header}\n${body.trim()}`;
-  return base ? `${base}\n\n${section}` : section;
-}
-
 export async function logTaskProgress(projectId: string, taskId: string, note: string): Promise<McpToolResult> {
   const existing = await taskStore.getTask(projectId, taskId);
   if (!existing) {
     return { content: [{ type: 'text', text: `Task "${taskId}" not found` }], isError: true };
   }
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 16);
-  const nextPrompt = appendPromptSection(existing.prompt, `— Note ${ts}`, note);
+  const nextPrompt = taskStore.appendPromptSection(existing.prompt, `— Note ${ts}`, note);
   const updated = await taskStore.updateTask(projectId, taskId, { prompt: nextPrompt });
   if (!updated) {
     return { content: [{ type: 'text', text: `Failed to log progress for "${taskId}"` }], isError: true };
@@ -538,7 +532,7 @@ export async function completeTask(projectId: string, taskId: string, summary?: 
     return { content: [{ type: 'text', text: `Task "${taskId}" not found` }], isError: true };
   }
   const nextPrompt = summary
-    ? appendPromptSection(existing.prompt, '— Summary', summary)
+    ? taskStore.appendPromptSection(existing.prompt, '— Summary', summary)
     : existing.prompt;
   const updated = await taskStore.updateTask(projectId, taskId, {
     status: 'done',

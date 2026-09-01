@@ -173,6 +173,32 @@ export async function taskRoutes(app: FastifyInstance) {
     }
   );
 
+  // Append a dated note to the prompt, optionally moving the task at the same
+  // time. Backs the Review tab's "Needs changes" action; same shape the MCP
+  // log_task_progress tool writes.
+  app.post<{ Params: { projectId: string; taskId: string }; Body: { note: string; status?: string } }>(
+    '/api/projects/:projectId/tasks/:taskId/note',
+    async (request, reply) => {
+      const note = (request.body?.note || '').trim();
+      if (!note) return reply.status(400).send({ error: 'note is required' });
+
+      const existing = await taskStore.getTask(request.params.projectId, request.params.taskId);
+      if (!existing) return reply.status(404).send({ error: 'Task not found' });
+
+      const ts = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      const updates: Record<string, any> = {
+        prompt: taskStore.appendPromptSection(existing.prompt, `— Note ${ts}`, note),
+      };
+      if (request.body.status) updates.status = request.body.status;
+
+      const task = await taskStore.updateTask(request.params.projectId, request.params.taskId, updates);
+      if (!task) return reply.status(404).send({ error: 'Task not found' });
+      log.info('tasks', `Note added to "${task.title}"`, undefined, request.params.projectId);
+      afterTaskMutation(request.params.projectId);
+      return task;
+    }
+  );
+
   app.delete<{ Params: { projectId: string; taskId: string } }>(
     '/api/projects/:projectId/tasks/:taskId',
     async (request, reply) => {

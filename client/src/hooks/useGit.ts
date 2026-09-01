@@ -52,6 +52,25 @@ export function useCommitDiff(projectId: string | undefined, hash: string | unde
   })
 }
 
+/**
+ * Commits and working-tree state inside a task's window. `since` is the task's
+ * inProgressAt; `until` bounds a finished task so later work does not leak in.
+ */
+export function useTaskGitReview(
+  projectId: string | undefined,
+  since: string | undefined,
+  until?: string,
+  subrepo?: string,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: ['task-git-review', projectId, since, until, subrepo],
+    queryFn: () => api.getTaskGitReview(projectId!, since!, until, subrepo),
+    enabled: enabled && !!projectId && !!since,
+    refetchInterval: 15_000,
+  })
+}
+
 export function useGitMainCommit(projectId: string | undefined, currentBranch?: string, subrepo?: string) {
   const isNotMain = !!currentBranch && currentBranch !== 'main' && currentBranch !== 'master'
   return useQuery({

@@ -392,6 +392,63 @@ export async function gitRoutes(app: FastifyInstance) {
     }
   );
 
+  // Everything the task Review tab needs in one call: the branch the work
+  // happened on, the commits inside the task's window, and what is still
+  // uncommitted in the working tree.
+  app.get<{ Params: { projectId: string }; Querystring: { since: string; until?: string; subrepo?: string } }>(
+    '/api/projects/:projectId/git/task-review',
+    async (request, reply) => {
+      const path = await getProjectPath(request.params.projectId, request.query.subrepo);
+      if (!path) return reply.status(404).send({ error: 'Project not found' });
+
+      const { since, until } = request.query;
+      if (!since || isNaN(Date.parse(since))) {
+        return reply.status(400).send({ error: 'since must be an ISO date' });
+      }
+      if (until && isNaN(Date.parse(until))) {
+        return reply.status(400).send({ error: 'until must be an ISO date' });
+      }
+
+      try {
+        const [status, commits] = await Promise.all([
+          gitService.getStatus(path),
+          gitService.getCommitsSince(path, since, until),
+        ]);
+
+        // One row per file across the whole window, so the reviewer sees the
+        // surface area without expanding every commit.
+        const byFile = new Map<string, { file: string; additions: number; deletions: number; commits: number }>();
+        for (const commit of commits) {
+          for (const file of commit.files) {
+            const entry = byFile.get(file.file) || { file: file.file, additions: 0, deletions: 0, commits: 0 };
+            entry.additions += file.additions;
+            entry.deletions += file.deletions;
+            entry.commits += 1;
+            byFile.set(file.file, entry);
+          }
+        }
+        const files = [...byFile.values()].sort((a, b) => (b.additions + b.deletions) - (a.additions + a.deletions));
+
+        return {
+          available: true,
+          branch: status.current || null,
+          commits,
+          files,
+          additions: commits.reduce((sum, c) => sum + c.additions, 0),
+          deletions: commits.reduce((sum, c) => sum + c.deletions, 0),
+          working: {
+            staged: status.staged.length,
+            unstaged: status.modified.length + status.deleted.length,
+            untracked: status.not_added.length,
+          },
+        };
+      } catch {
+        // Not a git repo (or git is unhappy) — the tab degrades to a notice
+        return { available: false, branch: null, commits: [], files: [], additions: 0, deletions: 0, working: null };
+      }
+    }
+  );
+
   app.get<{ Params: { projectId: string }; Querystring: { subrepo?: string } }>(
     '/api/projects/:projectId/git/main-commit',
     async (request, reply) => {

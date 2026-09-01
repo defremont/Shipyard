@@ -11,6 +11,33 @@ export interface SyncProviderStatus {
   updatedAt: string | null;
 }
 
+export interface TaskCommitFile {
+  file: string;
+  additions: number;
+  deletions: number;
+  binary?: boolean;
+}
+
+export interface TaskCommit {
+  hash: string;
+  message: string;
+  date: string;
+  author_name: string;
+  files: TaskCommitFile[];
+  additions: number;
+  deletions: number;
+}
+
+export interface TaskGitReview {
+  available: boolean;
+  branch: string | null;
+  commits: TaskCommit[];
+  files: { file: string; additions: number; deletions: number; commits: number }[];
+  additions: number;
+  deletions: number;
+  working: { staged: number; unstaged: number; untracked: number } | null;
+}
+
 export type UsageSeverity = 'normal' | 'warning' | 'critical';
 
 export interface UsageWindow {
@@ -119,6 +146,8 @@ export const api = {
     request<any>(`/projects/${projectId}/tasks/forecast${milestoneId ? `?milestone=${encodeURIComponent(milestoneId)}` : ''}`),
   createTask: (projectId: string, data: any) => request(`/projects/${projectId}/tasks`, { method: 'POST', body: JSON.stringify(data) }),
   updateTask: (projectId: string, taskId: string, data: any) => request(`/projects/${projectId}/tasks/${taskId}`, { method: 'PUT', body: JSON.stringify(data) }),
+  addTaskNote: (projectId: string, taskId: string, note: string, status?: string) =>
+    request(`/projects/${projectId}/tasks/${taskId}/note`, { method: 'POST', body: JSON.stringify({ note, status }) }),
   deleteTask: (projectId: string, taskId: string) => request(`/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' }),
   reorderTasks: (projectId: string, taskIds: string[]) => request(`/projects/${projectId}/tasks/reorder`, { method: 'POST', body: JSON.stringify({ taskIds }) }),
   importTasks: (projectId: string, tasks: any[]) => request<{ imported: number }>(`/projects/${projectId}/tasks/import`, { method: 'POST', body: JSON.stringify({ tasks }) }),
@@ -250,6 +279,10 @@ export const api = {
   getCommitDiff: (projectId: string, hash: string, subrepo?: string) =>
     request<{ files: { file: string; status: string; additions: number; deletions: number }[]; diff: string }>(
       `/projects/${projectId}/git/commit-diff?hash=${encodeURIComponent(hash)}${subrepo ? `&subrepo=${encodeURIComponent(subrepo)}` : ''}`
+    ),
+  getTaskGitReview: (projectId: string, since: string, until?: string, subrepo?: string) =>
+    request<TaskGitReview>(
+      `/projects/${projectId}/git/task-review?since=${encodeURIComponent(since)}${until ? `&until=${encodeURIComponent(until)}` : ''}${subrepo ? `&subrepo=${encodeURIComponent(subrepo)}` : ''}`
     ),
   discardFile: (projectId: string, file: string, type: 'staged' | 'unstaged' | 'untracked', subrepo?: string) =>
     request(`/projects/${projectId}/git/discard`, { method: 'POST', body: JSON.stringify({ file, type, subrepo }) }),

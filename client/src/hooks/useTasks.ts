@@ -201,6 +201,24 @@ export function useUpdateTask() {
   })
 }
 
+/**
+ * Append a dated note to a task's prompt, optionally moving it at the same
+ * time — the Review tab's "Needs changes" action.
+ */
+export function useAddTaskNote() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ projectId, taskId, note, status }: { projectId: string; taskId: string; note: string; status?: Task['status'] }) =>
+      api.addTaskNote(projectId, taskId, note, status),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['tasks', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['task-forecast', variables.projectId] })
+      queryClient.invalidateQueries({ queryKey: ['tasks', 'all'] })
+      scheduleAutoSyncPush(variables.projectId)
+    },
+  })
+}
+
 export function useDeleteTask() {
   const queryClient = useQueryClient()
   return useMutation({

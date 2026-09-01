@@ -222,3 +222,77 @@ export async function getMainBranchLastCommit(projectPath: string): Promise<{ ha
   }
 }
 
+
+export interface TaskCommitFile {
+  file: string;
+  additions: number;
+  deletions: number;
+  binary?: boolean;
+}
+
+export interface TaskCommit {
+  hash: string;
+  message: string;
+  date: string;
+  author_name: string;
+  files: TaskCommitFile[];
+  additions: number;
+  deletions: number;
+}
+
+const REC = '\x1e'; // record separator — one per commit
+const UNIT = '\x1f'; // unit separator — between header fields
+
+/**
+ * Commits whose date falls inside a window, each with the files it touched.
+ * One `git log --numstat` call covers the whole range; the per-commit diff is
+ * fetched on demand by getCommitDiff when the user expands a commit.
+ */
+export async function getCommitsSince(projectPath: string, since: string, until?: string): Promise<TaskCommit[]> {
+  const git = getGit(projectPath);
+  const args = [
+    'log',
+    `--since=${since}`,
+    '--numstat',
+    `--format=${REC}%H${UNIT}%s${UNIT}%aI${UNIT}%an`,
+  ];
+  if (until) args.push(`--until=${until}`);
+
+  let raw: string;
+  try {
+    raw = await git.raw(args);
+  } catch {
+    // No commits yet, or not a repo — nothing to review
+    return [];
+  }
+
+  const commits: TaskCommit[] = [];
+  for (const record of raw.split(REC)) {
+    if (!record.trim()) continue;
+    const [header, ...rest] = record.split('\n');
+    const [hash, message, date, author_name] = header.split(UNIT);
+    if (!hash) continue;
+
+    const files: TaskCommitFile[] = [];
+    let additions = 0;
+    let deletions = 0;
+    for (const line of rest) {
+      if (!line.trim()) continue;
+      const parts = line.split('\t');
+      if (parts.length < 3) continue;
+      const [addRaw, delRaw, ...fileParts] = parts;
+      const file = fileParts.join('\t');
+      // Binary files report "-" instead of a line count
+      const binary = addRaw === '-' || delRaw === '-';
+      const a = binary ? 0 : parseInt(addRaw, 10) || 0;
+      const d = binary ? 0 : parseInt(delRaw, 10) || 0;
+      additions += a;
+      deletions += d;
+      files.push({ file, additions: a, deletions: d, ...(binary ? { binary: true } : {}) });
+    }
+
+    commits.push({ hash, message: message || '', date: date || '', author_name: author_name || '', files, additions, deletions });
+  }
+
+  return commits;
+}

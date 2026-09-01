@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Copy, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2 } from 'lucide-react'
+import { Pencil, Copy, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2, GitCommit } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
 import { buildTaskPrompt } from '@/lib/promptBuilder'
@@ -15,6 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { TaskAttachments } from '@/components/tasks/TaskAttachments'
 import { TaskComments } from '@/components/tasks/TaskComments'
+import { TaskReviewPanel } from '@/components/tasks/TaskReviewPanel'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { playAiCompleteSound } from '@/lib/sounds'
@@ -42,6 +44,7 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
   const { data: claudeStatus } = useClaudeStatus()
   const analyzeTask = useAnalyzeTask()
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [tab, setTab] = useState<'details' | 'review'>('details')
   const canAiImprove = !!(claudeStatus?.configured || claudeStatus?.cliAvailable)
 
   // The caller passes a snapshot captured when the dialog opened, so a comment
@@ -78,6 +81,10 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
     task = projectTasks.find(t => t.id === taskProp!.id) ?? task
   }
 
+  useEffect(() => {
+    if (open) setTab('details')
+  }, [open, taskProp?.id])
+
   // Clear "needs review" indicator when the user opens/views the task
   useEffect(() => {
     if (open && task?.needsReview) {
@@ -86,6 +93,9 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
   }, [open, task?.id, task?.needsReview])
 
   if (!task) return null
+
+  // A task that never reached In Progress has no window of commits to show.
+  const showReview = !!task.inProgressAt
 
   const pri = priorityVisual(task.priority)
   const sts = statusVisual(task.status)
@@ -139,9 +149,83 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
     { status: 'done' as const, label: 'Done', icon: CheckCircle2, color: 'text-success' },
   ]
 
+  const detailsBody = (
+    <>
+      {task.description && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
+          <p className="mt-1.5 text-sm whitespace-pre-wrap leading-relaxed">{task.description}</p>
+        </div>
+      )}
+
+      {task.prompt && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Details</label>
+          <pre className="mt-1.5 text-xs font-mono bg-muted/50 rounded-md p-3 whitespace-pre-wrap max-h-40 overflow-y-auto">{task.prompt}</pre>
+        </div>
+      )}
+
+      {task.attachments && task.attachments.length > 0 && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Attachments</label>
+          <div className="mt-1.5">
+            <TaskAttachments
+              projectId={task.projectId}
+              taskId={task.id}
+              milestoneId={task.milestoneId}
+              attachments={task.attachments}
+            />
+          </div>
+        </div>
+      )}
+
+      {task.subtasks && task.subtasks.length > 0 && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Subtasks ({task.subtasks.filter(s => s.done).length}/{task.subtasks.length})
+          </label>
+          <div className="mt-1.5 space-y-1">
+            {task.subtasks.map((st) => (
+              <div key={st.id} className="flex items-center gap-2">
+                {st.done ? (
+                  <Check className="h-3.5 w-3.5 text-success shrink-0" />
+                ) : (
+                  <div className="h-3.5 w-3.5 rounded-sm border border-muted-foreground/40 shrink-0" />
+                )}
+                <span className={cn('text-sm', st.done && 'text-muted-foreground')}>{st.title}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {task.comments && task.comments.length > 0 && (
+        <div>
+          <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Comments ({task.comments.length})
+          </label>
+          <div className="mt-1.5">
+            <TaskComments comments={task.comments} />
+          </div>
+        </div>
+      )}
+
+      <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground pt-2 border-t">
+        {task.createdAt && <span>Created {formatDate(task.createdAt)}</span>}
+        {task.inProgressAt && <span>Started {formatDate(task.inProgressAt)}</span>}
+        {task.doneAt && <span>Done {formatDate(task.doneAt)}</span>}
+      </div>
+    </>
+  )
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[550px] max-h-[85vh] flex flex-col">
+      <DialogContent
+        className={cn(
+          'max-h-[85vh] flex flex-col transition-[max-width] duration-200',
+          showReview && tab === 'review' ? 'sm:max-w-[860px]' : 'sm:max-w-[550px]'
+        )}
+      >
         <DialogHeader className="shrink-0">
           <div className="flex items-start gap-3">
             <PriIcon className={cn('h-5 w-5 mt-0.5 shrink-0', pri.color)} />
@@ -161,72 +245,25 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
           </div>
         </DialogHeader>
 
-        <div className="space-y-4 py-2 overflow-y-auto min-h-0">
-          {task.description && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
-              <p className="mt-1.5 text-sm whitespace-pre-wrap leading-relaxed">{task.description}</p>
-            </div>
-          )}
-
-          {task.prompt && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Details</label>
-              <pre className="mt-1.5 text-xs font-mono bg-muted/50 rounded-md p-3 whitespace-pre-wrap max-h-40 overflow-y-auto">{task.prompt}</pre>
-            </div>
-          )}
-
-          {task.attachments && task.attachments.length > 0 && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Attachments</label>
-              <div className="mt-1.5">
-                <TaskAttachments
-                  projectId={task.projectId}
-                  taskId={task.id}
-                  milestoneId={task.milestoneId}
-                  attachments={task.attachments}
-                />
-              </div>
-            </div>
-          )}
-
-          {task.subtasks && task.subtasks.length > 0 && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Subtasks ({task.subtasks.filter(s => s.done).length}/{task.subtasks.length})
-              </label>
-              <div className="mt-1.5 space-y-1">
-                {task.subtasks.map((st) => (
-                  <div key={st.id} className="flex items-center gap-2">
-                    {st.done ? (
-                      <Check className="h-3.5 w-3.5 text-success shrink-0" />
-                    ) : (
-                      <div className="h-3.5 w-3.5 rounded-sm border border-muted-foreground/40 shrink-0" />
-                    )}
-                    <span className={cn('text-sm', st.done && 'text-muted-foreground')}>{st.title}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {task.comments && task.comments.length > 0 && (
-            <div>
-              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                Comments ({task.comments.length})
-              </label>
-              <div className="mt-1.5">
-                <TaskComments comments={task.comments} />
-              </div>
-            </div>
-          )}
-
-          <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground pt-2 border-t">
-            {task.createdAt && <span>Created {formatDate(task.createdAt)}</span>}
-            {task.inProgressAt && <span>Started {formatDate(task.inProgressAt)}</span>}
-            {task.doneAt && <span>Done {formatDate(task.doneAt)}</span>}
-          </div>
-        </div>
+        {showReview ? (
+          <Tabs value={tab} onValueChange={v => setTab(v as 'details' | 'review')} className="flex flex-col min-h-0 flex-1">
+            <TabsList className="h-8 p-0.5 self-start shrink-0">
+              <TabsTrigger value="details" className="h-7 text-xs px-2.5">Details</TabsTrigger>
+              <TabsTrigger value="review" className="h-7 text-xs px-2.5 gap-1.5">
+                <GitCommit className="h-3 w-3" />
+                Review
+              </TabsTrigger>
+            </TabsList>
+            <TabsContent value="details" className="space-y-4 py-2 overflow-y-auto min-h-0 flex-1">
+              {detailsBody}
+            </TabsContent>
+            <TabsContent value="review" className="py-2 overflow-y-auto min-h-0 flex-1">
+              <TaskReviewPanel task={task} onDone={() => onOpenChange(false)} />
+            </TabsContent>
+          </Tabs>
+        ) : (
+          <div className="space-y-4 py-2 overflow-y-auto min-h-0">{detailsBody}</div>
+        )}
 
         {/* Status actions */}
         <div className="flex items-center gap-2 pt-2 border-t shrink-0">
