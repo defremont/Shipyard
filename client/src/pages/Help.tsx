@@ -20,7 +20,7 @@ const sections: { id: SectionId; label: string; icon: React.ReactNode }[] = [
   { id: 'terminal', label: 'Terminal', icon: <Terminal className="h-4 w-4" /> },
   { id: 'git', label: 'Git', icon: <GitBranch className="h-4 w-4" /> },
   { id: 'sync', label: 'Sync & Export', icon: <Cloud className="h-4 w-4" /> },
-  { id: 'claude', label: 'Claude AI', icon: <Sparkles className="h-4 w-4" /> },
+  { id: 'claude', label: 'AI Providers', icon: <Sparkles className="h-4 w-4" /> },
   { id: 'mcp', label: 'MCP Server', icon: <Server className="h-4 w-4" /> },
   { id: 'settings', label: 'Settings', icon: <Settings className="h-4 w-4" /> },
   { id: 'shortcuts', label: 'Shortcuts', icon: <Keyboard className="h-4 w-4" /> },
@@ -440,7 +440,7 @@ function SectionTasks() {
         Click the "Import" button in the task toolbar to open the bulk import dialog. Paste
         unstructured text or a list, then choose how to process it:
       </P>
-      <Bullet title="AI Analyze">Claude organizes the text into properly structured tasks with titles, descriptions, priorities, and Fibonacci effort. Requires Claude API key or CLI installed.</Bullet>
+      <Bullet title="AI Analyze">Claude organizes the text into properly structured tasks with titles, descriptions, priorities, and Fibonacci effort. Requires a connected AI provider — a CLI or an API key.</Bullet>
       <Bullet title="Basic Parse">A simple fallback that splits bullet points or numbered lists into individual tasks without AI.</Bullet>
       <P>
         Review the parsed tasks before importing — you can select/deselect individual tasks.
@@ -713,10 +713,11 @@ function SectionSettings() {
         Currently available: Google Sheets, JSON Export, Markdown Export.
       </P>
 
-      <H3>Claude AI</H3>
+      <H3>AI</H3>
       <P>
-        Configure your Anthropic API key, choose a model, and set max tokens. The API key
-        is encrypted and stored server-side only. See the Claude AI section for details.
+        Pick the preferred provider (Claude, OpenAI or Gemini), see which CLIs were found, and
+        add an API key per provider with its model and max tokens. Keys are encrypted and stored
+        server-side only. See the AI Providers section for details.
       </P>
 
       <H3>MCP Server</H3>
@@ -838,7 +839,7 @@ function SectionData() {
       <P>
         Shipyard never sends data to external servers. The only network calls are:
       </P>
-      <Bullet title="Claude AI">Only if you configure an API key. Calls go to Anthropic's API.</Bullet>
+      <Bullet title="AI providers">Only when a provider is connected. Calls go to Anthropic, OpenAI or Google — whichever answers.</Bullet>
       <Bullet title="Google Sheets sync">Only if you configure it. Goes through your own Apps Script URL.</Bullet>
       <Bullet title="Git operations">Push/pull go to your configured git remotes.</Bullet>
       <P>
@@ -851,51 +852,72 @@ function SectionData() {
 function SectionClaude() {
   return (
     <>
-      <H2>Claude AI Integration</H2>
+      <H2>AI Providers</H2>
       <P>
-        Shipyard provides AI-powered features (chat, commit messages, task analysis, bulk
-        organize, AI task resolution) through a single standardized backend. There are two
-        ways to connect — pick whichever you prefer; if both are configured, the CLI always
-        takes priority:
+        Every AI feature — chat, commit messages, task analysis, bulk import, AI task
+        resolution — runs through one backend. Three providers are supported: Claude,
+        OpenAI and Gemini. Pick a preferred one in Settings &gt; AI; the others stay as
+        backup and are tried in turn when the preferred one has nothing available.
       </P>
-      <Bullet title="1. Claude CLI (recommended, no extra cost)">
-        Uses your existing Claude subscription (Pro/Max). All AI features run through it at
-        no per-token cost.
+      <P>
+        Inside each provider the order is the same — CLI first, API key second:
+      </P>
+      <Bullet title="1. The provider's CLI (recommended, no extra cost)">
+        Uses the subscription you already pay for. Nothing to configure beyond logging in once.
       </Bullet>
-      <Bullet title="2. Anthropic API key (optional fallback)">
-        Pay-per-use billing. Only used when the CLI is not available.
-      </Bullet>
-
-      <H3>Option 1 — Connect via Claude CLI (recommended)</H3>
-      <Bullet title="Install">
-        Run <code className="bg-muted px-1 rounded">npm install -g @anthropic-ai/claude-code</code> (requires Node.js 18+).
-      </Bullet>
-      <Bullet title="Log in">
-        Run <code className="bg-muted px-1 rounded">claude</code> once in any terminal and follow the login flow with your Claude account.
-      </Bullet>
-      <Bullet title="Done">
-        Shipyard detects the CLI automatically — check Settings &gt; Claude AI for the green "CLI" badge
-        and the active backend indicator. No key, no configuration.
+      <Bullet title="2. An API key (optional fallback)">
+        Pay-per-use billing. Only used when that provider's CLI is not available.
       </Bullet>
 
-      <H3>Option 2 — Connect via API key</H3>
-      <Bullet title="Get an API Key">
-        Sign up at <a href="https://console.anthropic.com" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">console.anthropic.com</a> and create an API key in Settings &gt; API Keys.
+      <H3>Connect Claude</H3>
+      <Bullet title="CLI">
+        Install with <code className="bg-muted px-1 rounded">npm i -g @anthropic-ai/claude-code</code> (Node 18+),
+        then run <code className="bg-muted px-1 rounded">claude</code> once and log in with your Claude account.
+        Shipyard also reads the CLI's session token directly, so calls run on your Pro/Max plan.
       </Bullet>
-      <Bullet title="Configure in Shipyard">
-        Go to Settings &gt; Claude AI and enter your key. Click "Test" to verify, then "Save".
+      <Bullet title="API key">
+        Create one at <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">console.anthropic.com</a>,
+        then Settings &gt; AI &gt; Claude &gt; Add key.
       </Bullet>
-      <Bullet title="Security">
-        Your API key is encrypted with AES-256-GCM and stored server-side only. It never reaches the browser.
-        Shipyard never reads the <code className="bg-muted px-1 rounded">ANTHROPIC_API_KEY</code> environment
-        variable — that belongs to other tools.
+
+      <H3>Connect OpenAI</H3>
+      <Bullet title="CLI">
+        Install with <code className="bg-muted px-1 rounded">npm i -g @openai/codex</code>, then run{' '}
+        <code className="bg-muted px-1 rounded">codex</code> once and sign in with your ChatGPT account.
+        Shipyard calls it as <code className="bg-muted px-1 rounded">codex exec</code>, which answers in one
+        piece rather than streaming word by word.
       </Bullet>
+      <Bullet title="API key">
+        Create one at <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">platform.openai.com</a>,
+        then Settings &gt; AI &gt; OpenAI &gt; Add key.
+      </Bullet>
+
+      <H3>Connect Gemini</H3>
+      <Bullet title="CLI">
+        Install with <code className="bg-muted px-1 rounded">npm i -g @google/gemini-cli</code>, then run{' '}
+        <code className="bg-muted px-1 rounded">gemini</code> once and sign in with your Google account.
+      </Bullet>
+      <Bullet title="API key">
+        Create one at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">aistudio.google.com</a>,
+        then Settings &gt; AI &gt; Gemini &gt; Add key.
+      </Bullet>
+
+      <H3>Security</H3>
+      <P>
+        Keys are encrypted with AES-256-GCM and stored server-side only — they never reach the
+        browser. Shipyard never reads API keys from environment variables
+        (<code className="bg-muted px-1 rounded">ANTHROPIC_API_KEY</code>,{' '}
+        <code className="bg-muted px-1 rounded">OPENAI_API_KEY</code>,{' '}
+        <code className="bg-muted px-1 rounded">GEMINI_API_KEY</code>): those belong to other tools.
+      </P>
 
       <H3>How the backend is chosen</H3>
       <P>
-        Every AI feature uses the same priority order: Claude CLI session (subscription) →
-        Claude CLI subprocess → configured API key. The currently active backend is shown in
-        Settings &gt; Claude AI.
+        Preferred provider first, then the remaining ones in order. Within a provider: Claude CLI
+        session → <code className="bg-muted px-1 rounded">claude -p</code> →
+        Anthropic key; <code className="bg-muted px-1 rounded">codex exec</code> → OpenAI key;{' '}
+        <code className="bg-muted px-1 rounded">gemini -p</code> → Google key. Settings &gt; AI shows
+        which provider and which backend is answering right now, and flags it when a fallback took over.
       </P>
 
       <H3>Chat Panel</H3>
@@ -949,14 +971,19 @@ function SectionClaude() {
       <P>
         Choose your preferred model in Settings. Available options:
       </P>
-      <Bullet title="Claude Sonnet 4.5">Best balance of speed and quality (recommended)</Bullet>
-      <Bullet title="Claude Opus 4.5">Most capable, best for complex analysis</Bullet>
-      <Bullet title="Claude Haiku 4.5">Fastest, most affordable</Bullet>
+      <Bullet title="Claude">Sonnet 4.5 (balanced), Opus 4.5 (most capable), Haiku 4.5 (fastest)</Bullet>
+      <Bullet title="OpenAI">GPT-4.1, GPT-4.1 mini, GPT-4o, o4-mini</Bullet>
+      <Bullet title="Gemini">Gemini 2.5 Pro, 2.5 Flash, 2.0 Flash</Bullet>
+      <P>
+        The model only applies to the API-key path. A CLI picks its own model from your account
+        settings, and one-shot work (commit messages, effort classification) always uses the
+        provider's fast model.
+      </P>
 
       <H3>Configuration</H3>
       <InfoBox>
-        <p>Settings &gt; Claude AI — configure API key, model, max tokens</p>
-        <p>Data file: <code className="bg-muted px-1 rounded">data/claude.json</code> (encrypted key)</p>
+        <p>Settings &gt; AI — preferred provider, API key, model, max tokens</p>
+        <p>Data file: <code className="bg-muted px-1 rounded">data/ai-config.json</code> (encrypted keys)</p>
         <p>Encryption key: <code className="bg-muted px-1 rounded">data/.claude-key</code></p>
       </InfoBox>
     </>

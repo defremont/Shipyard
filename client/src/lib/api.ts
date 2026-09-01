@@ -135,6 +135,29 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   return res.json();
 }
 
+export type AiProvider = 'claude' | 'openai' | 'gemini'
+
+export interface AiProviderStatus {
+  provider: AiProvider
+  label: string
+  /** Command the provider's CLI is detected under (claude / codex / gemini). */
+  cliCommand: string
+  cliAvailable: boolean
+  /** Claude only: a live OAuth token means calls run on the subscription. */
+  oauthAvailable: boolean
+  apiConfigured: boolean
+  model: string | null
+  maxTokens: number | null
+  activeBackend: 'cli-oauth' | 'cli' | 'api' | null
+}
+
+export interface AiBackendStatus {
+  preferredProvider: AiProvider
+  activeProvider: AiProvider | null
+  activeBackend: 'cli-oauth' | 'cli' | 'api' | null
+  providers: AiProviderStatus[]
+}
+
 export const api = {
   // Projects
   getProjects: () => request<{ projects: any[] }>('/projects'),
@@ -359,7 +382,22 @@ export const api = {
   browse: (path: string) => request<{ directories: { name: string; path: string }[] }>('/browse', { method: 'POST', body: JSON.stringify({ path }) }),
 
   // Claude AI
-  getClaudeStatus: () => request<{ configured: boolean; cliAvailable: boolean; oauthAvailable: boolean; activeBackend: 'cli-oauth' | 'cli' | 'api' | null; model: string | null; maxTokens: number | null }>('/claude/status'),
+  // AI providers — Claude, OpenAI (codex) and Gemini share one backend chain
+  getAiStatus: () => request<AiBackendStatus>('/ai/status'),
+  setPreferredAiProvider: (provider: AiProvider) =>
+    request<{ ok: boolean }>('/ai/preferred', { method: 'POST', body: JSON.stringify({ provider }) }),
+  saveAiConfig: (provider: AiProvider, data: { apiKey: string; model?: string; maxTokens?: number }) =>
+    request<{ ok: boolean }>(`/ai/config/${provider}`, { method: 'POST', body: JSON.stringify(data) }),
+  deleteAiConfig: (provider: AiProvider) =>
+    request<{ ok: boolean }>(`/ai/config/${provider}`, { method: 'DELETE' }),
+  testAiKey: (provider: AiProvider, apiKey: string) =>
+    request<{ ok: boolean; error?: string }>(`/ai/config/${provider}/test`, {
+      method: 'POST',
+      body: JSON.stringify({ apiKey }),
+      timeout: 30_000,
+    }),
+
+  getClaudeStatus: () => request<{ configured: boolean; cliAvailable: boolean; oauthAvailable: boolean; activeBackend: 'cli-oauth' | 'cli' | 'api' | null; activeProvider: AiProvider | null; preferredProvider: AiProvider; model: string | null; maxTokens: number | null }>('/claude/status'),
   getClaudeUsage: () => request<ClaudeUsage>('/claude/usage'),
   saveClaudeConfig: (data: { apiKey: string; model?: string; maxTokens?: number }) =>
     request<{ ok: boolean }>('/claude/config', { method: 'POST', body: JSON.stringify(data) }),

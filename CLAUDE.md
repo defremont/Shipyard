@@ -24,23 +24,25 @@ shipyard.cmd      # Windows: batch file na raiz
 
 ```
 client/src/
-  components/   # ui/ (shadcn), layout/, projects/, tasks/, git/, claude/,
+  components/   # ui/ (shadcn), layout/, projects/, tasks/, git/, claude/, ai/,
                 # terminals/, editor/, files/, sync/, mcp/, onboarding/
-  hooks/        # useProjects, useTasks, useGit, useClaude, useTerminal,
+  hooks/        # useProjects, useTasks, useGit, useClaude, useAi, useTerminal,
                 # useMilestones, useSheetSync, useFiles, useEditorTabs, useLogs, useMcp
   pages/        # Dashboard, Workspace, TasksPage, Settings, Help, LogsPage
   lib/          # api.ts (fetch wrapper), sync/ (provider pattern)
 
 server/src/
-  routes/       # projects, tasks, git, terminals, terminalWs, claude, mcp,
+  routes/       # projects, tasks, git, terminals, terminalWs, claude, ai, mcp,
                 # files, logs, sync, settings
   services/     # projectDiscovery, gitService, taskStore, terminalLauncher,
-                # terminalService, aiBackend, claudeService, claudeContextBuilder,
-                # claudeCliService, aiResolvePrompt, aiManagePrompt,
+                # terminalService, aiBackend, aiConfigStore, aiJson,
+                # claudeService, claudeCliService, openaiService, geminiService,
+                # cliDetect, cliRunner, sseStream, claudeContextBuilder,
+                # aiResolvePrompt, aiManagePrompt,
                 # mcpServer, mcpAuth, logService, settingsStore, dataDir
 
 data/           # Persistencia (auto-criado)
-  projects.json, settings.json, claude.json, .claude-key,
+  projects.json, settings.json, ai-config.json, .claude-key,   # claude.json = legado, migrado
   mcp-config.json, mcp-auth.json, server.log,
   sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
@@ -109,6 +111,7 @@ interface Project {
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
 **Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
+**AI (multi-provedor)**: GET /api/ai/status, POST /api/ai/preferred, POST/DELETE /api/ai/config/:provider, POST /api/ai/config/:provider/test
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
 **Sync**:
   POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
@@ -166,6 +169,24 @@ interface Project {
 - **description**: O QUE fazer, visao usuario/produto, sem referencias a codigo
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao
 - Para tarefas done: prompt contem resumo da implementacao
+
+### Dialogo de tarefa (TaskEditor)
+- Um unico componente serve New Task e Edit Task. O caminho comum e so titulo:
+  titulo + descricao + a linha `Priority/Effort/Status` ficam sempre visiveis;
+  **Details (prompt) e subtasks vivem atras do disclosure** "Technical details and
+  subtasks" — colapsado em tarefa nova, aberto sozinho quando a tarefa ja tem
+  prompt ou subtasks (contador no rotulo quando fechado)
+- Prioridade e status usam os icones/cores de `taskVisuals.ts`. Nao redefinir
+  labels ou cores aqui
+- **Ctrl/Cmd+Enter salva de qualquer campo** (Enter sozinho salva no titulo).
+  Registrado em `lib/shortcuts.ts`
+- A subtask ainda digitada no input entra no save — nao dependa do Enter.
+  `POST /api/projects/:id/tasks` aceita `subtasks` e descarta entradas sem titulo
+  (`sanitizeSubtasks` em routes/tasks.ts)
+- "Keep open for the next task" (`shipyard:quick-create` no localStorage) mantem
+  o dialogo aberto apos criar e **preserva priority/status** — so os campos de
+  texto, effort e subtasks sao limpos
+- O milestone alvo aparece como badge no titulo quando nao e o General
 
 ### Timestamps de Status (cascading)
 Os timestamps sao cascading — etapas posteriores preenchem as anteriores automaticamente:
@@ -324,16 +345,61 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   `shipyard:skipPermissions` entre todos os pontos e padroniza os toasts.
   Nao duplicar essa logica por componente
 
-### AI Backend (CLI-first, padronizado)
+### AI Backend (multi-provider, CLI-first)
 - `aiBackend.ts` e o UNICO ponto de entrada para features de IA server-side
   (chat, commit message, analyze-task, bulk-organize, manage-tasks)
-- Prioridade fixa: **1)** token OAuth do Claude CLI (`~/.claude/.credentials.json`,
-  usa assinatura — chamada direta a API com `Authorization: Bearer` +
-  `anthropic-beta: oauth-2025-04-20`, NUNCA `x-api-key`) → **2)** subprocess
-  `claude -p` → **3)** API key configurada no Shipyard
-- NUNCA ler `process.env.ANTHROPIC_API_KEY` — pertence a outras ferramentas
-- `generateText()` para one-shot, `streamText()` para chat SSE
-- Novas features de IA DEVEM usar aiBackend, nao chamar Anthropic direto
+- Tres provedores: **claude**, **openai**, **gemini**. O usuario escolhe o
+  preferido em Settings > AI (`preferredProvider`); a cadeia e
+  `[preferido, ...demais na ordem de AI_PROVIDERS]`. Se o preferido nao tem
+  backend usavel (ou falha), o proximo assume — features nunca dependem de um so
+- Dentro de cada provedor a ordem e sempre **CLI primeiro** (roda na assinatura,
+  custo zero por token), API key como fallback pago:
+  - claude: token OAuth (`~/.claude/.credentials.json`, `Authorization: Bearer` +
+    `anthropic-beta: oauth-2025-04-20`, NUNCA `x-api-key`) → `claude -p` → key
+  - openai: `codex exec --json` → key (`api.openai.com/v1/chat/completions`)
+  - gemini: `gemini -p` → key (`generativelanguage.googleapis.com`, header
+    `x-goog-api-key` — nunca a key na URL)
+- 429 nao aborta a cadeia: fica guardado e so e relancado se **nenhum** provedor
+  responder. `options.provider` forca um provedor e desliga o fallback
+- NUNCA ler API key de env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GEMINI_API_KEY`) — pertencem a outras ferramentas
+- `generateText()` para one-shot, `streamText()` para chat SSE. Novas features de
+  IA DEVEM usar aiBackend, nunca chamar um provedor direto
+- Modelos: `FAST_MODELS` (one-shot) e `CHAT_MODELS` (chat / default ao salvar
+  key) em `aiConfigStore.ts`. O modelo salvo so vale para o caminho da API key —
+  CLI usa o modelo da conta
+- OpenAI: modelos `gpt-5*`/`o*` exigem `max_completion_tokens`; os demais,
+  `max_tokens`. `isReasoningModel()` decide
+
+### Credenciais de IA (`ai-config.json`)
+- `aiConfigStore.ts` guarda `{ preferredProvider, providers[p] = { apiKey, model,
+  maxTokens } }` cifrado com AES-256-GCM (`data/.claude-key`), cache em memoria +
+  escrita serializada e atomica (tmp + rename), como os outros stores JSON
+- Migracao automatica do `claude.json` antigo na primeira leitura (mesma chave de
+  cifra, entao o ciphertext e reaproveitado). O arquivo legado so e apagado
+  quando o usuario remove a key do Claude — senao ela ressuscitaria no proximo
+  boot frio
+- `claudeService.ts` virou so o cliente Anthropic; as credenciais vivem no store
+
+### Deteccao de CLIs (`cliDetect.ts` / `cliRunner.ts`)
+- `detectCli(bin)` resolve **como** lancar o CLI e cacheia por 60s, devolvendo
+  `{ command, prefixArgs }`
+- **Windows**: npm instala CLI como shim `.cmd` e o Node se recusa a spawnar
+  `.cmd` sem shell; passar pelo shell estragaria prompt multilinha. Entao o shim
+  e lido e o entry JS que ele aponta e chamado direto (`node <entry>`), o que
+  mantem os argumentos verbatim. Sem isso, `codex` e `gemini` ficam invisiveis
+- `runCli`/`streamCli` centralizam spawn, timeout por inatividade, hard timeout,
+  stdin e cwd. `claudeCliService` tambem passa por eles
+- Prompt do codex vai por **stdin** (`codex exec ... -`); `--skip-git-repo-check`
+  cai fora automaticamente se a versao instalada nao conhecer a flag
+
+### Parsing de resposta estruturada (`aiJson.ts`)
+- `parseJsonResponse()` e compartilhado por todas as rotas de IA. Cada provedor
+  erra diferente: Claude poe prosa antes, OpenAI cerca em ```json, Gemini as
+  vezes abre com `<thinking>`. A funcao vai do estrito ao tolerante (parse direto
+  → tira fences → tira bloco de raciocinio → extracao por profundidade de chaves
+  → conserta virgula sobrando e chave sem aspas)
+- Rota de IA nova DEVE usar essa funcao, nao um `JSON.parse` proprio
 
 ### Medidor de uso da assinatura
 - `claudeUsage.ts` le `GET https://api.anthropic.com/api/oauth/usage` com o token

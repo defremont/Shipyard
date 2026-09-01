@@ -6,6 +6,8 @@ import { buildProjectContext, buildTaskContext } from '../services/claudeContext
 import * as taskStore from '../services/taskStore.js';
 import { getProjects } from '../services/projectDiscovery.js';
 import * as log from '../services/logService.js';
+import { parseJsonResponse } from '../services/aiJson.js';
+import { CHAT_MODELS } from '../services/aiConfigStore.js';
 
 const EFFORTS = new Set([1, 2, 3, 5, 8]);
 function parseEffort(value: unknown): 1 | 2 | 3 | 5 | 8 | undefined {
@@ -17,83 +19,6 @@ async function getProjectPath(projectId: string): Promise<string | undefined> {
   return projects.find(p => p.id === projectId)?.path;
 }
 
-function parseJsonResponse(text: string): any {
-  // 1. Try direct parse
-  const trimmed = text.trim();
-  try { return JSON.parse(trimmed); } catch {}
-
-  // 2. Strip markdown fences and try again
-  const fenceStripped = trimmed.replace(/^```(?:json)?\s*\n?/gim, '').replace(/\n?```\s*$/gim, '').trim();
-  try { return JSON.parse(fenceStripped); } catch {}
-
-  // 3. Extract JSON from between code fences
-  const fenceMatch = trimmed.match(/```(?:json)?\s*\n([\s\S]*?)\n\s*```/);
-  if (fenceMatch) {
-    try { return JSON.parse(fenceMatch[1].trim()); } catch {}
-  }
-
-  // 4. Find first { or [ and match to last } or ] (greedy extraction)
-  for (let i = 0; i < trimmed.length; i++) {
-    if (trimmed[i] === '{' || trimmed[i] === '[') {
-      const closingChar = trimmed[i] === '{' ? '}' : ']';
-      const lastClose = trimmed.lastIndexOf(closingChar);
-      if (lastClose > i) {
-        try { return JSON.parse(trimmed.substring(i, lastClose + 1)); } catch {}
-      }
-    }
-  }
-
-  // 5. Try fixing common JSON issues (trailing commas, single quotes)
-  const jsonCandidate = extractBracketedContent(trimmed);
-  if (jsonCandidate) {
-    const fixed = jsonCandidate
-      .replace(/,\s*([}\]])/g, '$1')       // trailing commas
-      .replace(/([{,]\s*)(\w+)\s*:/g, '$1"$2":'); // unquoted keys
-    try { return JSON.parse(fixed); } catch {}
-  }
-
-  const snippet = trimmed.length > 200 ? trimmed.substring(0, 200) + '...' : trimmed;
-  throw new Error(`Could not parse JSON from AI response. Response starts with: ${snippet}`);
-}
-
-/** Extract the outermost { ... } or [ ... ] from text using bracket depth counting */
-function extractBracketedContent(text: string): string | null {
-  let start = -1;
-  let openChar = '';
-  let closeChar = '';
-  let depth = 0;
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (start === -1) {
-      if (ch === '{' || ch === '[') {
-        start = i;
-        openChar = ch;
-        closeChar = ch === '{' ? '}' : ']';
-        depth = 1;
-      }
-      continue;
-    }
-    // Skip characters inside strings
-    if (ch === '"') {
-      i++;
-      while (i < text.length && text[i] !== '"') {
-        if (text[i] === '\\') i++; // skip escaped chars
-        i++;
-      }
-      continue;
-    }
-    if (ch === openChar) depth++;
-    else if (ch === closeChar) {
-      depth--;
-      if (depth === 0) {
-        return text.substring(start, i + 1);
-      }
-    }
-  }
-  return null;
-}
-
 export async function claudeRoutes(app: FastifyInstance) {
   // Get Claude status (never exposes the API key)
   app.get('/api/claude/status', async () => {
@@ -103,6 +28,8 @@ export async function claudeRoutes(app: FastifyInstance) {
       cliAvailable: status.cliAvailable || status.oauthAvailable,
       oauthAvailable: status.oauthAvailable,
       activeBackend: status.activeBackend,
+      activeProvider: status.activeProvider,
+      preferredProvider: status.preferredProvider,
       model: status.model,
       maxTokens: status.maxTokens,
     };
@@ -134,7 +61,7 @@ export async function claudeRoutes(app: FastifyInstance) {
     } else {
       await claudeService.saveClaudeConfig({
         apiKey,
-        model: model || 'claude-sonnet-4-5-20250929',
+        model: model || CHAT_MODELS.claude,
         maxTokens: maxTokens || 4096,
       });
     }
@@ -193,7 +120,7 @@ export async function claudeRoutes(app: FastifyInstance) {
       for await (const chunk of handle.stream) {
         reply.raw.write(`data: ${JSON.stringify({ type: 'text', text: chunk })}\n\n`);
       }
-      reply.raw.write(`data: ${JSON.stringify({ type: 'done', source: handle.source })}\n\n`);
+      reply.raw.write(`data: ${JSON.stringify({ type: 'done', source: handle.source, provider: handle.provider })}\n\n`);
     } catch (err: any) {
       log.error('claude', `Chat stream failed (${handle.source})`, err.message, projectId);
       reply.raw.write(`data: ${JSON.stringify({ type: 'error', error: err.message || 'Stream failed' })}\n\n`);

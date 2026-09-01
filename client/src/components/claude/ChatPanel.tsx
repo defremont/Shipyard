@@ -85,7 +85,8 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
     setMessages([])
   }
 
-  const aiAvailable = status?.configured || status?.cliAvailable
+  // Any provider with a usable backend counts — not just Claude.
+  const aiAvailable = !!status?.activeBackend
 
   if (!aiAvailable) {
     return (

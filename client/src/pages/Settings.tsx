@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge'
 import { FolderBrowser } from '@/components/ui/folder-browser'
 import { SyncSettingsCard } from '@/components/sync/SyncSettingsCard'
-import { ClaudeSettingsCard } from '@/components/claude/ClaudeSettingsCard'
+import { AiSettingsCard } from '@/components/ai/AiSettingsCard'
 import { AgentSettingsCard } from '@/components/ai/AgentSettingsCard'
 import { McpSettingsCard } from '@/components/mcp/McpSettingsCard'
 import { FolderPlus, Plus, FolderOpen, Check, Loader2, GitBranch, X, FolderSearch, Download, Upload, Volume2, VolumeX, Sparkles, Server, Cloud, Database } from 'lucide-react'
@@ -412,10 +412,10 @@ export function Settings() {
             <>
               <div>
                 <h2 className="text-sm font-semibold">AI & Integrations</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Configure Claude AI, coding agents, MCP server, and sync providers.</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Configure AI providers, coding agents, MCP server, and sync providers.</p>
               </div>
 
-              <ClaudeSettingsCard />
+              <AiSettingsCard />
               <AgentSettingsCard />
               <McpSettingsCard />
               <SyncSettingsCard projects={projects || []} />

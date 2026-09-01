@@ -27,6 +27,7 @@ export function useSaveClaudeConfig() {
       api.saveClaudeConfig(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['claude', 'status'] })
+      queryClient.invalidateQueries({ queryKey: ['ai', 'status'] })
     },
   })
 }
@@ -37,6 +38,7 @@ export function useDeleteClaudeConfig() {
     mutationFn: () => api.deleteClaudeConfig(),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['claude', 'status'] })
+      queryClient.invalidateQueries({ queryKey: ['ai', 'status'] })
     },
   })
 }
