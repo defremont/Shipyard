@@ -1,9 +1,19 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react-swc'
 import path from 'path'
+import { readFileSync } from 'fs'
+
+// The app version lives in the root package.json — the same field electron-builder
+// stamps on the installer — so the UI can't drift from the release.
+const version = JSON.parse(
+  readFileSync(path.resolve(__dirname, '../package.json'), 'utf-8')
+).version as string
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(version),
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

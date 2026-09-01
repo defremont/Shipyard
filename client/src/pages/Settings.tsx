@@ -217,7 +217,8 @@ export function Settings() {
     <>
       <div className="flex-1 overflow-hidden flex">
         {/* Left nav */}
-        <nav className="w-48 shrink-0 border-r overflow-y-auto p-3 space-y-0.5 scrollbar-dark">
+        <nav className="w-48 shrink-0 border-r overflow-y-auto p-3 flex flex-col scrollbar-dark">
+          <div className="space-y-0.5">
           {sections.map(s => (
             <button
               key={s.id}
@@ -233,6 +234,12 @@ export function Settings() {
               {s.label}
             </button>
           ))}
+          </div>
+          {/* The Electron Help menu is hidden on a frameless window, so this is
+              the only place the running version shows up. */}
+          <p className="mt-auto pt-4 px-3 text-[10px] text-muted-foreground">
+            Shipyard v{__APP_VERSION__}
+          </p>
         </nav>
 
         {/* Content */}
