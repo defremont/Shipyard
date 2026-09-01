@@ -3,6 +3,7 @@ import { ActivityBar } from './ActivityBar'
 import { SidePanel } from './SidePanel'
 import { TabBar } from './TabBar'
 import { GlobalSearch } from './GlobalSearch'
+import { AiResolveHost } from '@/components/tasks/AiResolveHost'
 import { FileContentSearch } from './FileContentSearch'
 import { TabsProvider } from '@/hooks/useTabs'
 import { ActivityProvider } from '@/hooks/useActivity'
@@ -33,6 +34,7 @@ function LayoutInner() {
         </main>
       </div>
       <GlobalSearch />
+      <AiResolveHost />
       <FileContentSearch />
       <ShortcutsOverlay />
     </div>

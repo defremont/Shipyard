@@ -439,6 +439,7 @@ export function replaceTasks(projectId: string, incoming: Partial<Task>[], miles
         // them.
         subtasks: t.subtasks ?? existing?.subtasks,
         needsReview: t.needsReview ?? existing?.needsReview,
+        agent: t.agent ?? existing?.agent,
         attachments: t.attachments ?? existing?.attachments,
         comments: t.comments ?? existing?.comments,
         ...buildCascadingTimestamps(status, now, {

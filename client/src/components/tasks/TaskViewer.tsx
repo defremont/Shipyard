@@ -16,6 +16,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { TaskAttachments } from '@/components/tasks/TaskAttachments'
 import { TaskComments } from '@/components/tasks/TaskComments'
+import { AgentSelect } from '@/components/tasks/AgentSelect'
 import { TaskReviewPanel } from '@/components/tasks/TaskReviewPanel'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
@@ -132,6 +133,10 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
     }
   }
 
+  const handleAgentChange = (agentId: string) => {
+    updateTask.mutate({ projectId: task.projectId, taskId: task.id, agent: agentId })
+  }
+
   const handleStatusChange = (status: Task['status']) => {
     updateTask.mutate({ projectId: task.projectId, taskId: task.id, status })
     onOpenChange(false)
@@ -209,6 +214,12 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
           </div>
         </div>
       )}
+
+      <div className="flex items-center gap-3 pt-2 border-t">
+        <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Agent</label>
+        <AgentSelect value={task.agent} onChange={handleAgentChange} />
+        <span className="text-[11px] text-muted-foreground/70">Runs this task when you pick Run with AI.</span>
+      </div>
 
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-[11px] text-muted-foreground pt-2 border-t">
         {task.createdAt && <span>Created {formatDate(task.createdAt)}</span>}

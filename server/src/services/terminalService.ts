@@ -2,6 +2,8 @@ import { platform } from 'os';
 import { nanoid } from 'nanoid';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
+import { resolveAgent, buildAgentLaunch, DEFAULT_AGENT_ID } from './agentRegistry.js';
+import type { AgentDefinition } from '../types/index.js';
 
 const os = platform();
 
@@ -24,6 +26,8 @@ export interface TerminalSession {
   pty: import('node-pty').IPty;
   createdAt: string;
   taskId?: string;
+  /** Which agent CLI this session is running (AgentDefinition.id) */
+  agent?: string;
   /** True while prompt injection is in progress — resize is deferred */
   injecting?: boolean;
   /** Claude-type sessions only: what the CLI is doing right now */
@@ -35,6 +39,11 @@ export interface TerminalSession {
 }
 
 const sessions = new Map<string, TerminalSession>();
+
+// Session types that run a coding agent, so the picked agent decides the
+// command line. 'claude' is here too, but only when a session explicitly names
+// an agent — the bare Claude tab keeps its own launch.
+const AGENT_SESSION_TYPES = new Set(['claude', 'claude-yolo', 'ai-resolve', 'ai-manage']);
 
 export function isAvailable(): boolean {
   return nodePty !== null;
@@ -69,6 +78,7 @@ export async function createSession(
   projectName?: string,
   taskId?: string,
   prompt?: string,
+  agentId?: string,
 ): Promise<string | null> {
   if (!nodePty) return null;
 
@@ -84,34 +94,29 @@ export async function createSession(
     HISTCONTROL: 'ignoredups:erasedups',
   };
 
-  // Build initial command based on type
-  let shellArgs: string[] = [];
-  let initialCommand: string | null = null;
+  // Windows: PowerShell with -NoLogo for cleaner startup.
+  // Linux/macOS: interactive login shell (enables readline + history).
+  const shellArgs: string[] = os === 'win32' ? ['-NoLogo'] : ['-il'];
 
-  if (os === 'win32') {
-    // Windows: PowerShell with -NoLogo for cleaner startup
-    shellArgs = ['-NoLogo'];
-    if (type === 'claude') {
-      env['CLAUDECODE'] = '';
-      initialCommand = 'claude';
-    } else if (type === 'claude-yolo' || type === 'ai-resolve' || type === 'ai-manage') {
-      env['CLAUDECODE'] = '';
-      initialCommand = 'claude --dangerously-skip-permissions';
-    } else if (type === 'dev') {
-      initialCommand = await detectDevCommand(projectPath);
-    }
-  } else {
-    // Linux/macOS: interactive login shell (enables readline + history)
-    shellArgs = ['-il'];
-    if (type === 'claude') {
-      env['CLAUDECODE'] = '';
-      initialCommand = 'claude';
-    } else if (type === 'claude-yolo' || type === 'ai-resolve' || type === 'ai-manage') {
-      env['CLAUDECODE'] = '';
-      initialCommand = 'claude --dangerously-skip-permissions';
-    } else if (type === 'dev') {
-      initialCommand = await detectDevCommand(projectPath);
-    }
+  // Build initial command based on type
+  let initialCommand: string | null = null;
+  let agent: AgentDefinition | null = null;
+  // A one-shot agent takes the prompt on its command line, so there is
+  // nothing left to type into it once it starts.
+  let injectPrompt = false;
+
+  if (type === 'dev') {
+    initialCommand = await detectDevCommand(projectPath);
+  } else if (type === 'claude' && !agentId) {
+    // Plain Claude tab from the project menu — permissions prompt intact.
+    env['CLAUDECODE'] = '';
+    initialCommand = 'claude';
+  } else if (AGENT_SESSION_TYPES.has(type)) {
+    agent = resolveAgent(agentId);
+    if (agent.id === DEFAULT_AGENT_ID) env['CLAUDECODE'] = '';
+    const launch = await buildAgentLaunch(agent, { cwd: projectPath, prompt });
+    initialCommand = launch.command;
+    injectPrompt = launch.injectsPrompt;
   }
 
   const maxLen = 18;
@@ -119,7 +124,12 @@ export async function createSession(
     ? projectName.slice(0, maxLen - 3) + '...'
     : projectName || projectId;
   const typeLabels: Record<string, string> = { claude: 'Claude', 'claude-yolo': 'Claude', dev: 'Dev', shell: 'Shell', 'ai-resolve': 'AI', 'ai-manage': 'AI Tasks' };
-  const title = `[${shortName}] ${typeLabels[type] || 'Shell'}`;
+  // Name the agent in the tab whenever it isn't the default one — with several
+  // CLIs in play, "AI" alone no longer says which is running.
+  const typeLabel = agent && agent.id !== DEFAULT_AGENT_ID
+    ? (type === 'ai-manage' ? `${agent.name} Tasks` : agent.name)
+    : (typeLabels[type] || 'Shell');
+  const title = `[${shortName}] ${typeLabel}`;
 
   const spawnOptions: Record<string, any> = {
     name: 'xterm-256color',
@@ -145,6 +155,7 @@ export async function createSession(
     pty,
     createdAt: new Date().toISOString(),
     ...(taskId ? { taskId } : {}),
+    ...(agent ? { agent: agent.id } : {}),
     ...(CLAUDE_SESSION_TYPES.has(type) ? { state: 'busy' as TerminalState } : {}),
   };
 
@@ -162,7 +173,7 @@ export async function createSession(
   // For AI resolve/manage sessions: inject prompt when Claude CLI is ready.
   // The output watcher only starts once injection is done — during the ready
   // wait the CLI shows an idle prompt that would read as a false 'idle'.
-  if (prompt && (type === 'ai-resolve' || type === 'ai-manage' || type === 'claude-yolo')) {
+  if (prompt && injectPrompt) {
     injectPromptWhenReady(id, prompt, () => startOutputWatcher(id));
   } else if (CLAUDE_SESSION_TYPES.has(type)) {
     startOutputWatcher(id);

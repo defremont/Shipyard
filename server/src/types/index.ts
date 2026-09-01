@@ -65,6 +65,7 @@ export interface Task {
   effortConfidence?: EffortConfidence;
   status: 'backlog' | 'todo' | 'in_progress' | 'done';
   prompt?: string;
+  agent?: string;         // AgentDefinition.id — which CLI runs this task ('claude' when unset)
   createdAt: string;
   updatedAt: string;
   order: number;
@@ -102,6 +103,30 @@ export interface TasksFile {
 export interface Settings {
   // Paths of projects the user has added to the dashboard
   selectedProjects: string[];
+  // Agent commands the user registered on top of the built-in ones
+  customAgents?: AgentDefinition[];
+  // Agent used when a task doesn't name one
+  defaultAgent?: string;
+}
+
+// ── Coding agents (CLIs that can run a task) ────────────
+
+export interface AgentDefinition {
+  id: string;
+  name: string;
+  /** Binary to launch, e.g. 'claude', 'codex'. */
+  command: string;
+  /**
+   * Argument template. Placeholders:
+   *   {cwd}      project path
+   *   {task}     the prompt as a single-line quoted argument
+   *   {taskFile} path to a file holding the full prompt
+   * With no prompt placeholder the prompt is typed into the running CLI
+   * instead — that keeps line breaks, so it is the better option.
+   */
+  args: string;
+  /** Built-ins ship with Shipyard: they can be used but not edited or removed. */
+  builtin?: boolean;
 }
 
 // ── Claude API Integration ──────────────────────────────

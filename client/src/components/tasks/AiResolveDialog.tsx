@@ -1,19 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Sparkles } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import type { Task } from '@/hooks/useTasks'
+import { AgentSelect } from '@/components/tasks/AgentSelect'
 
 interface AiResolveDialogProps {
   task: Task | null
   open: boolean
   onOpenChange: (open: boolean) => void
-  onRun: (feedback: string) => void
+  onRun: (feedback: string, agentId: string) => void
 }
 
 export function AiResolveDialog({ task, open, onOpenChange, onRun }: AiResolveDialogProps) {
   const [feedback, setFeedback] = useState('')
+  const [agent, setAgent] = useState<string | undefined>(task?.agent)
+
+  // Start from the task's own agent every time the dialog opens — a switch
+  // made for one run should not stick to the next task.
+  useEffect(() => {
+    if (open) setAgent(task?.agent)
+  }, [open, task?.id, task?.agent])
 
   const handleClose = (nextOpen: boolean) => {
     if (!nextOpen) setFeedback('')
@@ -23,7 +31,7 @@ export function AiResolveDialog({ task, open, onOpenChange, onRun }: AiResolveDi
   const handleRun = () => {
     const value = feedback.trim()
     setFeedback('')
-    onRun(value)
+    onRun(value, agent || '')
   }
 
   if (!task) return null
@@ -60,7 +68,9 @@ export function AiResolveDialog({ task, open, onOpenChange, onRun }: AiResolveDi
             Ctrl+Enter to run · Tip: Shift-click to run without this dialog
           </p>
         </div>
-        <DialogFooter>
+        <DialogFooter className="sm:justify-between items-center gap-2">
+          <AgentSelect value={agent} onChange={setAgent} />
+          <div className="flex items-center gap-2">
           <Button size="sm" variant="ghost" className="text-xs" onClick={() => handleClose(false)}>
             Cancel
           </Button>
@@ -68,6 +78,7 @@ export function AiResolveDialog({ task, open, onOpenChange, onRun }: AiResolveDi
             <Sparkles className="h-3.5 w-3.5" />
             Run
           </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

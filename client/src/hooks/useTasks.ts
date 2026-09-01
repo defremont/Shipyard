@@ -43,6 +43,8 @@ export interface Task {
   effortConfidence?: 'low' | 'medium' | 'high'
   status: 'backlog' | 'todo' | 'in_progress' | 'done'
   prompt?: string
+  /** Which CLI runs this task — see useAgents(). Unset means Claude Code. */
+  agent?: string
   createdAt: string
   updatedAt: string
   order: number

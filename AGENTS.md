@@ -61,6 +61,7 @@ interface Task {
   title: string;
   description: string;      // O QUE fazer (visao usuario/produto)
   prompt?: string;          // HOW/WHY tecnico (causas, arquivos, solucoes)
+  agent?: string;           // qual CLI roda a task (id do agentRegistry; vazio = default)
   priority: 'urgent' | 'high' | 'medium' | 'low';
   effort?: 1 | 2 | 3 | 5 | 8;      // tamanho de implementacao (opcional, por compatibilidade)
   effortSource?: 'claude' | 'manual' | 'backfill';
@@ -123,6 +124,7 @@ interface Project {
     (proxy autenticado — a URL do anexo no Trello exige header OAuth, um `<img>`
      apontando direto para ela recebe 401)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
+**Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Sistema**: GET /api/settings, POST /api/browse
 
 ## Portas
@@ -347,6 +349,29 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   `POST /:id/tasks/:tid/ai-resolve` e vira a secao `## User decision feedback`
   do prompt, declarada como instrucao que prevalece sobre a descricao.
   Shift+clique pula o dialogo. Sem feedback, o prompt sai identico ao anterior
+- O mesmo dialogo tem o seletor de agente. `useAiResolve` e o unico caminho que
+  monta o prompt e dispara `shipyard:open-terminal`; a paleta (Ctrl+K) usa
+  `AiResolveHost`, montado no Layout, porque ela desmonta ao fechar
+
+### Agentes de codigo (qual CLI roda a task)
+- `agentRegistry.ts` e a fonte unica: 6 builtins (Claude Code, Codex, Aider,
+  Gemini CLI, OpenCode, Cursor CLI) + os que o usuario cadastra em Settings
+  (guardados em `settings.json` como `customAgents`, com `defaultAgent`)
+- `task.agent` guarda o id escolhido; vazio = `defaultAgent` = `claude`.
+  `replaceTasks` copia o campo do `existing` — sem isso todo pull de sync apaga
+- `buildAgentLaunch()` monta a linha de comando. O template de args aceita
+  `{cwd}`, `{taskFile}` (arquivo com o prompt inteiro, em `data/agent-prompts/`,
+  limpo apos 24h) e `{task}` (prompt em uma linha, entre aspas do shell)
+- **Sem placeholder de prompt o CLI sobe vazio e o prompt e digitado nele**
+  (`injectPromptWhenReady`) — e o caminho dos builtins, e o unico que preserva
+  quebras de linha. Com `{task}`/`{taskFile}` a sessao e one-shot e nao ha injecao
+- Aspas por shell (PowerShell no Windows, sh no resto). Comando com espaco no
+  caminho vira `& 'caminho'` no PowerShell
+- Escolha do agente: `AgentSelect` no TaskViewer (grava na task) e no
+  `AiResolveDialog` (so aquela execucao). O id viaja no evento
+  `shipyard:open-terminal` → `POST /api/terminal/sessions` → `createSession`
+- A aba do terminal leva o nome do agente quando nao e o default
+- Nao criar um segundo lugar que decida comando de agente: passe pelo registry
 
 ### Stores JSON (concorrencia)
 - `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)

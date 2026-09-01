@@ -4,6 +4,18 @@ interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 
+export interface Agent {
+  id: string
+  name: string
+  /** Binary the terminal launches. */
+  command: string
+  /** Argument template — {cwd}, {task}, {taskFile}. */
+  args: string
+  builtin?: boolean
+  /** Whether the binary answered a --version probe on this machine. */
+  available?: boolean
+}
+
 export interface SyncProviderStatus {
   providerId: 'trello' | 'clickup';
   connected: boolean;
@@ -303,10 +315,10 @@ export const api = {
     request<{ sessions: { id: string; projectId: string; type: string; title: string; createdAt: string }[] }>(
       `/terminal/sessions${projectId ? `?projectId=${projectId}` : ''}`
     ),
-  createTerminalSession: (projectId: string, type = 'shell', cols = 80, rows = 24, taskId?: string, prompt?: string) =>
-    request<{ id: string; projectId: string; type: string; title: string; createdAt: string; taskId?: string }>(
+  createTerminalSession: (projectId: string, type = 'shell', cols = 80, rows = 24, taskId?: string, prompt?: string, agent?: string) =>
+    request<{ id: string; projectId: string; type: string; title: string; createdAt: string; taskId?: string; agent?: string }>(
       '/terminal/sessions',
-      { method: 'POST', body: JSON.stringify({ projectId, type, cols, rows, ...(taskId ? { taskId } : {}), ...(prompt ? { prompt } : {}) }) }
+      { method: 'POST', body: JSON.stringify({ projectId, type, cols, rows, ...(taskId ? { taskId } : {}), ...(prompt ? { prompt } : {}), ...(agent ? { agent } : {}) }) }
     ),
   killTerminalSession: (sessionId: string) =>
     request('/terminal/sessions/' + sessionId, { method: 'DELETE' }),
@@ -337,6 +349,11 @@ export const api = {
 
   // Settings
   getSettings: () => request<{ tasksDir: string }>('/settings'),
+
+  // Coding agents (which CLI runs a task)
+  getAgents: () => request<{ agents: Agent[]; defaultAgent: string }>('/agents'),
+  saveAgents: (body: { agents?: Agent[]; defaultAgent?: string }) =>
+    request<{ agents: Agent[]; defaultAgent: string }>('/agents', { method: 'PUT', body: JSON.stringify(body) }),
 
   // Browse filesystem
   browse: (path: string) => request<{ directories: { name: string; path: string }[] }>('/browse', { method: 'POST', body: JSON.stringify({ path }) }),

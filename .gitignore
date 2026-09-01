@@ -14,6 +14,7 @@ data/mcp-config.json
 data/mcp-auth.json
 data/sync-config.json
 data/server.log
+data/agent-prompts/
 
 # Build artifacts
 client/tsconfig.tsbuildinfo

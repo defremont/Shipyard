@@ -14,6 +14,7 @@ import {
   File,
   Folder,
   Loader2,
+  Sparkles,
 } from 'lucide-react'
 import { useProjects } from '@/hooks/useProjects'
 import { useAllTasks, type Task } from '@/hooks/useTasks'
@@ -218,6 +219,13 @@ export function GlobalSearch() {
     setOpen(false)
   }, [])
 
+  // Hand the task to AiResolveHost — the palette unmounts on close, so the
+  // agent dialog cannot live here.
+  const runWithAgent = useCallback((task: Task) => {
+    close()
+    window.dispatchEvent(new CustomEvent('shipyard:run-task-with-agent', { detail: task }))
+  }, [close])
+
   const runItem = useCallback((index: number) => {
     const item = allItems[index]
     if (item) {
@@ -405,12 +413,19 @@ export function GlobalSearch() {
                       key={task.id}
                       data-selected={selectedIndex === idx}
                       onClick={() => runItem(idx)}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
+                      className={`group/task flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
                         selectedIndex === idx ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
                       }`}
                     >
                       <PriorityIcon className={`h-4 w-4 shrink-0 ${pConfig?.color || 'text-muted-foreground'}`} />
                       <span className="text-sm truncate flex-1">{task.title}</span>
+                      <button
+                        title="Run with an agent"
+                        className="shrink-0 rounded p-1 text-primary opacity-0 group-hover/task:opacity-100 hover:bg-primary/10 transition-opacity"
+                        onClick={(e) => { e.stopPropagation(); runWithAgent(task) }}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                      </button>
                       <span className="text-[10px] text-muted-foreground shrink-0 truncate max-w-[100px]">
                         {projectName}
                       </span>

@@ -27,6 +27,7 @@ import { TaskViewer } from './TaskViewer'
 import { TaskListView } from './TaskListView'
 import { CsvReviewDialog } from './CsvReviewDialog'
 import { AiResolveDialog } from './AiResolveDialog'
+import { useAiResolve } from '@/hooks/useAiResolve'
 import { BulkImportDialog } from './BulkImportDialog'
 import { ColumnBulkMenu } from './ColumnBulkMenu'
 import { SyncMenu } from '@/components/sync/SyncMenu'
@@ -407,17 +408,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     return () => window.removeEventListener('click', track, true)
   }, [])
 
-  const runAiResolve = useCallback(async (task: Task, feedback?: string) => {
-    try {
-      const { prompt } = await api.getAiResolvePrompt(projectId, task.id, feedback)
-      window.dispatchEvent(new CustomEvent('shipyard:open-terminal', {
-        detail: { projectId, type: 'ai-resolve', taskId: task.id, taskNumber: task.number, prompt }
-      }))
-      toast.success('AI resolution started')
-    } catch (err: any) {
-      toast.error(err.message || 'Failed to start AI resolution')
-    }
-  }, [projectId])
+  const runAiResolve = useAiResolve()
 
   const handleAiResolve = useCallback((task: Task) => {
     if (!terminalStatus?.available) {
@@ -910,10 +901,10 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
         task={aiResolveTask}
         open={aiResolveTask !== null}
         onOpenChange={(open) => { if (!open) setAiResolveTask(null) }}
-        onRun={(feedback) => {
+        onRun={(feedback, agentId) => {
           const task = aiResolveTask
           setAiResolveTask(null)
-          if (task) runAiResolve(task, feedback || undefined)
+          if (task) runAiResolve(task, { feedback: feedback || undefined, agent: agentId || undefined })
         }}
       />
 
