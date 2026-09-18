@@ -303,6 +303,20 @@ export async function latestDeployment(input: {
 }
 
 /**
+ * A token scoped to one workspace answers neither `me` nor the project lists —
+ * Railway only takes it on `workspace(workspaceId:)`, and a workspace id is not
+ * something anyone has to hand. Rather than repeat Railway's bare
+ * "Not Authorized", say which token to make.
+ */
+function explainRefusal(message: string | undefined): string {
+  const raw = message || 'Railway refused the token';
+  if (/not authorized|unauthorized|rejected the token|no projects/i.test(raw)) {
+    return `${raw}. If this token was created for a single workspace, make one with Workspace set to "No workspace" instead — an account token covers every workspace.`;
+  }
+  return raw;
+}
+
+/**
  * Save a token once it has answered a real call.
  *
  * `me` is an account-token query: a workspace token has no personal account
@@ -329,7 +343,7 @@ export async function connect(token: string): Promise<{ name?: string; email?: s
       return {};
     } catch (second: any) {
       await deployStore.clearToken('railway');
-      throw new RailwayError(second?.message || err?.message || 'Railway refused the token');
+      throw new RailwayError(explainRefusal(second?.message || err?.message));
     }
   }
 }
