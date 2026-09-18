@@ -48,6 +48,28 @@ export function useRailwayProjects(enabled: boolean) {
   })
 }
 
+/** What links to what by GitHub repo — only asked for when the panel is open. */
+export function useDeployMatches(enabled: boolean) {
+  return useQuery({
+    queryKey: ['deploy-matches'],
+    queryFn: api.getDeployMatches,
+    enabled,
+    staleTime: 60_000,
+    retry: false,
+  })
+}
+
+export function useAutoLinkDeploys() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body?: { only?: string[]; relink?: boolean }) => api.autoLinkDeploys(body),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['deploy-status'] })
+      queryClient.invalidateQueries({ queryKey: ['deploy-matches'] })
+    },
+  })
+}
+
 export function useConnectRailway() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -56,6 +78,7 @@ export function useConnectRailway() {
       queryClient.invalidateQueries({ queryKey: ['deploy-providers'] })
       queryClient.invalidateQueries({ queryKey: ['railway-projects'] })
       queryClient.invalidateQueries({ queryKey: ['deploy-status'] })
+      queryClient.invalidateQueries({ queryKey: ['deploy-matches'] })
     },
   })
 }

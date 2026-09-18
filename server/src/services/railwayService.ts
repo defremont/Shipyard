@@ -30,11 +30,18 @@ export interface RailwayDeployment {
   repo?: string;
 }
 
+export interface RailwayService {
+  id: string;
+  name: string;
+  /** GitHub repo the service builds from, as `owner/name`, when it has one. */
+  repo?: string;
+}
+
 export interface RailwayProjectSummary {
   id: string;
   name: string;
   environments: { id: string; name: string }[];
-  services: { id: string; name: string }[];
+  services: RailwayService[];
 }
 
 export class RailwayError extends Error {}
@@ -91,7 +98,36 @@ export async function whoami(token: string): Promise<{ name?: string; email?: st
   return data.me || {};
 }
 
-const PROJECTS_QUERY = `
+// Two shapes of the same question. The rich one also asks which GitHub repo
+// each service builds from, which is what lets Shipyard link projects on its
+// own; if Railway ever renames those fields the whole query would fail, so a
+// failure falls back to the plain one and linking stays manual.
+const PROJECTS_QUERY_WITH_SOURCE = `
+  query {
+    me {
+      projects {
+        edges {
+          node {
+            id
+            name
+            environments { edges { node { id name } } }
+            services {
+              edges {
+                node {
+                  id
+                  name
+                  serviceInstances { edges { node { source { repo } } } }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const PROJECTS_QUERY_PLAIN = `
   query {
     me {
       projects {
@@ -116,23 +152,54 @@ type ProjectsResponse = {
           id: string;
           name: string;
           environments?: { edges: { node: { id: string; name: string } }[] };
-          services?: { edges: { node: { id: string; name: string } }[] };
+          services?: {
+            edges: {
+              node: {
+                id: string;
+                name: string;
+                serviceInstances?: { edges: { node: { source?: { repo?: string | null } | null } }[] };
+              };
+            }[];
+          };
         };
       }[];
     };
   };
 };
 
-/** Projects the token can see, with their environments and services. */
-export async function listProjects(): Promise<RailwayProjectSummary[]> {
-  const token = await requireToken();
-  const data = await graphql<ProjectsResponse>(PROJECTS_QUERY, {}, token);
+/** Remembered across calls: asking for the source field twice is wasted work. */
+let sourceFieldUsable = true;
+
+function toSummaries(data: ProjectsResponse): RailwayProjectSummary[] {
   return (data.me?.projects?.edges || []).map(({ node }) => ({
     id: node.id,
     name: node.name,
     environments: (node.environments?.edges || []).map(e => ({ id: e.node.id, name: e.node.name })),
-    services: (node.services?.edges || []).map(e => ({ id: e.node.id, name: e.node.name })),
+    services: (node.services?.edges || []).map(e => {
+      const repo = e.node.serviceInstances?.edges
+        ?.map(instance => instance.node.source?.repo)
+        .find(value => !!value);
+      return { id: e.node.id, name: e.node.name, ...(repo ? { repo } : {}) };
+    }),
   }));
+}
+
+/** Projects the token can see, with their environments and services. */
+export async function listProjects(): Promise<RailwayProjectSummary[]> {
+  const token = await requireToken();
+
+  if (sourceFieldUsable) {
+    try {
+      return toSummaries(await graphql<ProjectsResponse>(PROJECTS_QUERY_WITH_SOURCE, {}, token));
+    } catch (err: any) {
+      // A rejected token is not a schema problem — let it through untouched.
+      if (/token/i.test(err?.message || '')) throw err;
+      sourceFieldUsable = false;
+      log.warn('server', 'Railway service source unavailable, linking stays manual', err?.message);
+    }
+  }
+
+  return toSummaries(await graphql<ProjectsResponse>(PROJECTS_QUERY_PLAIN, {}, token));
 }
 
 // The input type is filled inline so this never has to name Railway's own input

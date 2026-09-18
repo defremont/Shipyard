@@ -127,8 +127,10 @@ interface Project {
     (proxy autenticado — a URL do anexo no Trello exige header OAuth, um `<img>`
      apontando direto para ela recebe 401)
 **Deploys (Railway)**:
-  GET /api/deploy/providers, POST/DELETE /api/deploy/providers/railway (token da conta)
+  GET /api/deploy/providers, POST/DELETE /api/deploy/providers/railway (token da conta;
+    o POST ja devolve o que foi vinculado sozinho)
   GET /api/deploy/railway/projects (projetos/ambientes/servicos da conta)
+  GET /api/deploy/railway/matches, POST /api/deploy/railway/autolink (`{ only?, relink? }`)
   GET /api/deploy/status (todos os projetos linkados, numa chamada)
   GET/PUT/DELETE /api/projects/:id/deploy
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
@@ -675,6 +677,19 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   links) e um icone no card do Dashboard. Configuracao do token em
   Settings > AI & Integrations; o projeto Railway se escolhe em
   Project settings > Launch
+- **Vinculo automatico pelo repositorio**: os dois lados ja sabem de qual repo
+  do GitHub constroem — o Shipyard pelo `git remote`, o Railway pelo
+  `source.repo` do servico. `deployService.findMatches/autoLink` cruzam os dois
+  e o `POST /deploy/providers/railway` ja vincula tudo no mesmo clique. So o
+  caso ambiguo (um repo, varios servicos) volta como pergunta
+- `repoKey()` normaliza `https://github.com/Owner/Repo.git` e
+  `git@github.com:Owner/Repo` para `owner/repo`. Remote que nao e GitHub nao casa
+- Projeto multi-repo entra tambem pelos **sub-repositorios**: `projectRepos` le o
+  remote de cada sub-repo (cacheado por sessao) — sao justamente os projetos que
+  nao tem remote proprio na raiz
+- A query com `serviceInstances { source { repo } }` tem fallback: se o Railway
+  renomear esses campos, `listProjects` cai na query simples, `sourceAvailable`
+  vem `false` e a UI avisa que o vinculo tera de ser manual — nunca quebra
 
 ### Milestones
 - "General" e virtual (nao armazenado) — tasks sem milestoneId pertencem a ele

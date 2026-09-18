@@ -94,7 +94,40 @@ export interface RailwayProjectSummary {
   id: string
   name: string
   environments: { id: string; name: string }[]
-  services: { id: string; name: string }[]
+  /** `repo` is the GitHub repo the service builds from, when Railway says so. */
+  services: { id: string; name: string; repo?: string }[]
+}
+
+export interface DeployCandidate {
+  railwayProjectId: string
+  railwayProjectName: string
+  serviceId: string
+  serviceName: string
+  environmentId?: string
+  environmentName?: string
+}
+
+export interface DeployMatch {
+  projectId: string
+  projectName: string
+  repo: string
+  /** Set when the repo came from a sub-repository rather than the project root. */
+  subrepo?: string
+  linked: boolean
+  candidates: DeployCandidate[]
+}
+
+/** What Shipyard can link on its own, and what it needs a decision on. */
+export interface MatchReport {
+  sourceAvailable: boolean
+  matched: DeployMatch[]
+  ambiguous: DeployMatch[]
+  unmatched: { projectId: string; projectName: string; repo: string | null }[]
+}
+
+export interface AutoLinkResult {
+  linked: { projectId: string; projectName: string; railwayProjectName: string; serviceName: string }[]
+  report: MatchReport
 }
 
 export interface DeployLinkInput {
@@ -469,10 +502,22 @@ export const api = {
   getDeployProviders: () =>
     request<{ providers: { railway: { connected: boolean } } }>('/deploy/providers'),
   connectRailway: (token: string) =>
-    request<{ connected: boolean; account: { name?: string; email?: string } }>('/deploy/providers/railway', {
+    request<{
+      connected: boolean
+      account: { name?: string; email?: string }
+      linked: AutoLinkResult['linked']
+      report: MatchReport | null
+    }>('/deploy/providers/railway', {
       method: 'POST',
       body: JSON.stringify({ token }),
-      timeout: 20_000,
+      timeout: 40_000,
+    }),
+  getDeployMatches: () => request<MatchReport>('/deploy/railway/matches', { timeout: 30_000 }),
+  autoLinkDeploys: (body?: { only?: string[]; relink?: boolean }) =>
+    request<AutoLinkResult>('/deploy/railway/autolink', {
+      method: 'POST',
+      body: JSON.stringify(body || {}),
+      timeout: 40_000,
     }),
   disconnectRailway: () => request<{ connected: boolean }>('/deploy/providers/railway', { method: 'DELETE' }),
   getRailwayProjects: () =>

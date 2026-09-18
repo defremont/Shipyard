@@ -19,7 +19,20 @@ export async function deployRoutes(app: FastifyInstance) {
       try {
         const account = await railway.connect(token);
         deployService.invalidate();
-        return { connected: true, account };
+        // Connecting is the only step the user has to take: linking each
+        // project by its GitHub repo happens right here, on the same click.
+        let autoLinked: Awaited<ReturnType<typeof deployService.autoLink>> | null = null;
+        try {
+          autoLinked = await deployService.autoLink();
+        } catch (err: any) {
+          log.warn('server', 'Railway auto-link failed', err.message);
+        }
+        return {
+          connected: true,
+          account,
+          linked: autoLinked?.linked || [],
+          report: autoLinked?.report || null,
+        };
       } catch (err: any) {
         log.warn('server', 'Railway token rejected', err.message);
         return reply.status(400).send({ error: err.message });
@@ -42,6 +55,30 @@ export async function deployRoutes(app: FastifyInstance) {
       return reply.status(400).send({ error: err.message });
     }
   });
+
+  // What would link to what, by GitHub repository. Read-only.
+  app.get('/api/deploy/railway/matches', async (_request, reply) => {
+    try {
+      return await deployService.findMatches();
+    } catch (err: any) {
+      return reply.status(400).send({ error: err.message });
+    }
+  });
+
+  // Link every project whose repo matches exactly one Railway service.
+  app.post<{ Body: { only?: string[]; relink?: boolean } }>(
+    '/api/deploy/railway/autolink',
+    async (request, reply) => {
+      try {
+        return await deployService.autoLink({
+          only: request.body?.only,
+          relink: request.body?.relink,
+        });
+      } catch (err: any) {
+        return reply.status(400).send({ error: err.message });
+      }
+    }
+  );
 
   // Every linked project in one call — the dashboard draws a dot per card and
   // must not open one request per card.
