@@ -131,9 +131,10 @@ interface Project {
     o POST ja devolve o que foi vinculado sozinho)
   GET /api/deploy/railway/projects (projetos/ambientes/servicos da conta)
   GET /api/deploy/railway/matches, POST /api/deploy/railway/autolink (`{ only?, relink? }`)
-  GET /api/deploy/status (todos os checkouts linkados, numa chamada)
-  GET/PUT/DELETE /api/projects/:id/deploy (`?subrepo=` escolhe o checkout;
-    sem ele o GET devolve todos e o DELETE remove o projeto inteiro)
+  GET /api/deploy/status (todos os deploys linkados, numa chamada)
+  GET/PUT/DELETE /api/projects/:id/deploy (`?subrepo=` filtra por checkout;
+    no DELETE, `?link=` remove um deploy, `?subrepo=` os daquele checkout e
+    nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
@@ -368,17 +369,30 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 ### Indicador de "esperando resposta" no terminal Claude
 - `startOutputWatcher` (terminalService.ts) observa a saida das sessoes Claude
   (`claude`, `claude-yolo`, `ai-resolve`, `ai-manage`) e classifica em
-  `busy` / `awaiting-input` / `idle`. So **observa**: nunca escreve no PTY, nunca
-  toca na fila de escrita nem no flag `injecting` — escrever ali corromperia um
-  paste em andamento
+  `busy` / `awaiting-input` / `idle` / `finished`. So **observa**: nunca escreve
+  no PTY, nunca toca na fila de escrita nem no flag `injecting` — escrever ali
+  corromperia um paste em andamento
+- `finished` e o `idle` que interessa: o CLI voltou ao prompt vazio **depois de
+  receber trabalho**. Quem separa os dois e `session.working`, ligado pela
+  injecao de prompt e por qualquer input do usuario que contenha Enter, e
+  desligado ao anunciar. Sem ele, o prompt ocioso que um CLI recem-aberto mostra
+  seria lido como "terminou" antes de qualquer pedido. O anuncio e unico: o
+  proximo so vem com trabalho novo atras
 - Reaproveita `PROMPT_RE` (prompt ocioso) do injetor e acrescenta um padrao de
   decisao (`Do you want`, opcoes numeradas, `(y/n)`), sempre depois de ~1.2s de
   silencio. Qualquer input do usuario volta o estado para `busy`
 - O watcher so comeca depois que a injecao de prompt termina (`onInjected`) —
   durante a espera o CLI mostra prompt ocioso e daria falso `idle`
 - Transicoes viram frame WS `{ type: 'state', state }`; o estado atual e
-  reenviado quando um socket conecta. No client vira `awaitingInput` no
-  `GlobalTab` (transitorio: resetado na validacao de sessoes no mount)
+  reenviado quando um socket conecta. No client viram `awaitingInput` e
+  `finished` no `GlobalTab` (transitorios: resetados na validacao de sessoes no
+  mount). A aba visivel nunca recebe flag — quem esta olhando ja viu — e voltar
+  a `busy` limpa os dois
+- Na aba: `MessageCircleQuestion` ambar para pergunta, `CheckCircle2` verde para
+  terminado (mesmo check da aba de task encerrada — para o usuario e a mesma
+  noticia). O ponto no icone do painel fechado fica ambar quando ha pergunta e
+  verde quando a unica novidade e um agente que terminou: pergunta bloqueia,
+  fim de execucao so informa
 
 ### Abas do terminal: nome, ordem e split
 - O nome de uma aba nao e uma string so: o server guarda `projectName`,
@@ -666,10 +680,14 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 - O input do GraphQL vai inline (`input: { projectId: $projectId, ... }`) para
   nao depender do nome do tipo de input do Railway: tipo renomeado do outro lado
   derruba a query inteira
-- **A unidade e o checkout, nao o projeto**: uma pasta de cliente guarda uma
-  duzia de repositorios e cada um sobe pro seu servico. `deploy-config.json` v2
-  guarda `projects[projectId][scope]`, onde scope e `__root__` ou o nome do
-  sub-repo; a migracao do v1 le o link antigo como `__root__` (ninguem reconecta)
+- **A unidade e o link, nao o projeto nem o checkout**: uma pasta de cliente
+  guarda uma duzia de repositorios, e um mesmo repositorio sobe varias vezes —
+  um servico por cidade num marketplace, por exemplo. `deploy-config.json` v3
+  guarda `projects[projectId]` como **lista** de links; cada um tem `id`
+  (`provider:railwayProjectId:serviceId:environmentId`, via `linkId()`) e
+  `subrepo?` como rotulo do checkout. Salvar o mesmo alvo duas vezes e upsert,
+  nao duplicata. As migracoes do v1 (link solto) e do v2 (mapa por scope)
+  entram na lista sozinhas — ninguem reconecta
 - Token da conta fica cifrado em `deploy-config.json` (mesma chave
   `.claude-key` do ai-config) e **nunca volta pro client**
 - Cache por projeto no server: 60s parado, 15s enquanto ha build rodando, 30s
@@ -679,16 +697,21 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   `GET /api/deploy/status` (uma chamada para todos) — um `useDeployStatus` por
   card abriria uma dezena de requests por minuto
 - Onde aparece: badge na toolbar do Workspace, que fala por **todos** os
-  checkouts do projeto (o pior estado vence — uma falha nao pode se esconder
+  deploys do projeto (o pior estado vence — uma falha nao pode se esconder
   atras de quatro verdes — e o popover lista um por um), badge do repo
-  selecionado no Source Control (`DeployScopeBadge`, ao lado do titulo GIT) e um
-  icone no card do Dashboard. Configuracao do token em
-  Settings > AI & Integrations; vinculo manual em Project settings > Launch
+  selecionado no Source Control (`DeployScopeBadge`, que tambem agrega quando o
+  checkout tem mais de um deploy) e um icone no card do Dashboard. Configuracao
+  do token em Settings > AI & Integrations; vinculo manual em
+  Project settings > Launch, onde a lista de servicos fica aberta para marcar
+  varios seguidos
 - **Vinculo automatico pelo repositorio**: os dois lados ja sabem de qual repo
   do GitHub constroem — o Shipyard pelo `git remote`, o Railway pelo
   `source.repo` do servico. `deployService.findMatches/autoLink` cruzam os dois
   e o `POST /deploy/providers/railway` ja vincula tudo no mesmo clique. So o
-  caso ambiguo (um repo, varios servicos) volta como pergunta
+  caso ambiguo (um repo, varios servicos) volta como pergunta — e la a escolha
+  nao e exclusiva: cada servico e um toggle, `linkedServiceIds` marca os ja
+  vigiados e "Watch all" pega a linha inteira. O autolink continua vinculando
+  so o caso 1:1, para nao arrastar staging junto sem ninguem pedir
 - `repoKey()` normaliza `https://github.com/Owner/Repo.git` e
   `git@github.com:Owner/Repo` para `owner/repo`. Remote que nao e GitHub nao casa
 - Projeto multi-repo entra tambem pelos **sub-repositorios**: `projectRepos` le o

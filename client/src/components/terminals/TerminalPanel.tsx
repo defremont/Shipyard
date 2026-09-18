@@ -20,6 +20,7 @@ import { api } from '@/lib/api'
 const IntegratedTerminal = lazy(() =>
   import('./IntegratedTerminal').then(m => ({ default: m.IntegratedTerminal }))
 )
+import type { TerminalState } from './IntegratedTerminal'
 import { cn } from '@/lib/utils'
 import { toast } from 'sonner'
 
@@ -33,6 +34,9 @@ interface GlobalTab {
   /** Claude CLI is blocked on a decision. Transient — never trusted from
    *  localStorage, the server replays the state when the socket reconnects. */
   awaitingInput?: boolean
+  /** Claude CLI came back to an empty prompt after working. Same transience:
+   *  it is a moment, not a property of the session. */
+  finished?: boolean
   taskId?: string
   taskNumber?: number
   /** Label parts the server keeps for this session — see describeTab(). */
@@ -81,6 +85,8 @@ function describeTab(tab: GlobalTab): { project: string; detail: string; tooltip
   if (taskLabel) tooltip.push(taskLabel)
   else if (tab.summary) tooltip.push(tab.summary)
   if (tab.exited) tooltip.push('Process exited')
+  else if (tab.finished) tooltip.push('Finished — waiting at the prompt')
+  else if (tab.awaitingInput) tooltip.push('Waiting for an answer')
   return { project, detail, tooltip }
 }
 
@@ -216,7 +222,12 @@ const TerminalTab = memo(function TerminalTab({
           {paneIndex + 1}
         </span>
       )}
-      {tab.taskId && !tab.exited && <Sparkles className="h-3 w-3 shrink-0 animate-pulse text-primary" />}
+      {/* The agent is done: same check as an exited task tab, because to the
+          user it is the same news — the run ended while they were elsewhere. */}
+      {tab.finished && !tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
+      {tab.taskId && !tab.exited && !tab.finished && (
+        <Sparkles className="h-3 w-3 shrink-0 animate-pulse text-primary" />
+      )}
       {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
       {tab.awaitingInput && !tab.exited && (
         <MessageCircleQuestion className="h-3 w-3 shrink-0 text-warning animate-pulse" />
@@ -359,12 +370,12 @@ export function TerminalPanel() {
       if (visibleIds.length > 0) {
         setTabs(prev => {
           const needsClear = prev.some(
-            t => visibleIds.includes(t.sessionId) && (t.hasNotification || t.awaitingInput)
+            t => visibleIds.includes(t.sessionId) && (t.hasNotification || t.awaitingInput || t.finished)
           )
           if (!needsClear) return prev
           return prev.map(t =>
-            visibleIds.includes(t.sessionId) && (t.hasNotification || t.awaitingInput)
-              ? { ...t, hasNotification: false, awaitingInput: false }
+            visibleIds.includes(t.sessionId) && (t.hasNotification || t.awaitingInput || t.finished)
+              ? { ...t, hasNotification: false, awaitingInput: false, finished: false }
               : t
           )
         })
@@ -415,6 +426,7 @@ export function TerminalPanel() {
               exited: false,
               hasNotification: false,
               awaitingInput: false,
+              finished: false,
               taskId: t.taskId || srv?.taskId, // Recover taskId
               ...labelFieldsOf(srv),
             })
@@ -765,20 +777,23 @@ export function TerminalPanel() {
   const handleTabExitRef = useRef(handleTabExit)
   handleTabExitRef.current = handleTabExit
 
-  // Claude CLI stopped to ask something. Flag the tab unless the user is
-  // already looking at it — otherwise the question sits unanswered behind
+  // Claude CLI stopped — to ask something, or because it finished. Either way
+  // the tab is flagged unless the user is already looking at it; otherwise the
+  // question sits unanswered, or the finished run goes unnoticed, behind
   // another tab.
-  const handleTabState = useCallback((sessionId: string, state: 'busy' | 'awaiting-input' | 'idle') => {
-    const awaiting = state === 'awaiting-input'
+  const handleTabState = useCallback((sessionId: string, state: TerminalState) => {
     const isVisibleToUser =
       (activeTabIdRef.current === sessionId || splitSessionIdRef.current === sessionId) && isVisibleRef.current
 
     setTabs(prev => {
       const tab = prev.find(t => t.sessionId === sessionId)
       if (!tab) return prev
-      const next = awaiting && !isVisibleToUser
-      if (!!tab.awaitingInput === next) return prev
-      return prev.map(t => (t.sessionId === sessionId ? { ...t, awaitingInput: next } : t))
+      const awaiting = state === 'awaiting-input' && !isVisibleToUser
+      // Going back to work clears the flag; the tab the user is on never gets
+      // one, since they can see the prompt for themselves.
+      const finished = state === 'finished' && !isVisibleToUser
+      if (!!tab.awaitingInput === awaiting && !!tab.finished === finished) return prev
+      return prev.map(t => (t.sessionId === sessionId ? { ...t, awaitingInput: awaiting, finished } : t))
     })
   }, [])
 
@@ -788,8 +803,8 @@ export function TerminalPanel() {
   const handleTerminalTabClick = useCallback((sessionId: string) => {
     // Clear notification when user views this tab
     setTabs(prev => prev.map(t =>
-      t.sessionId === sessionId && (t.hasNotification || t.awaitingInput)
-        ? { ...t, hasNotification: false, awaitingInput: false }
+      t.sessionId === sessionId && (t.hasNotification || t.awaitingInput || t.finished)
+        ? { ...t, hasNotification: false, awaitingInput: false, finished: false }
         : t
     ))
     followTabProject(sessionId)
@@ -856,6 +871,11 @@ export function TerminalPanel() {
 
   const isSplit = !!splitSessionId
 
+  // The dot on the closed panel: a question outranks a finished run, since one
+  // is blocking and the other is just news.
+  const someAsking = tabs.some(t => t.hasNotification || t.awaitingInput)
+  const someFinished = tabs.some(t => t.finished)
+
   return (
     <div ref={panelRef} className="relative shrink-0 border-t bg-[#0a0a0f]">
       {/* Drag handle */}
@@ -876,10 +896,16 @@ export function TerminalPanel() {
             >
               <span className="relative">
                 <Terminal className="h-3.5 w-3.5" />
-                {tabs.some(t => t.hasNotification || t.awaitingInput) && (
+                {(someAsking || someFinished) && (
                   <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-warning" />
+                    <span className={cn(
+                      'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
+                      someAsking ? 'bg-warning' : 'bg-success'
+                    )} />
+                    <span className={cn(
+                      'relative inline-flex rounded-full h-2 w-2',
+                      someAsking ? 'bg-warning' : 'bg-success'
+                    )} />
                   </span>
                 )}
               </span>

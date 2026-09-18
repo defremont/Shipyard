@@ -8,7 +8,8 @@ import { api } from '@/lib/api'
 import { toast } from 'sonner'
 import '@xterm/xterm/css/xterm.css'
 
-export type TerminalState = 'busy' | 'awaiting-input' | 'idle'
+/** `finished` is idle with a history: the CLI was given work and is done. */
+export type TerminalState = 'busy' | 'awaiting-input' | 'idle' | 'finished'
 
 interface IntegratedTerminalProps {
   sessionId: string

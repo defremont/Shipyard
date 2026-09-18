@@ -17,7 +17,12 @@ try {
   console.log('node-pty not available — integrated terminal disabled (native launchers still work)');
 }
 
-export type TerminalState = 'busy' | 'awaiting-input' | 'idle';
+/**
+ * What a Claude session is doing. `finished` is `idle` with a history: the CLI
+ * was given work and has now come back to an empty prompt, which is the moment
+ * worth flagging on a tab nobody is looking at.
+ */
+export type TerminalState = 'busy' | 'awaiting-input' | 'idle' | 'finished';
 
 export interface TerminalSession {
   id: string;
@@ -35,6 +40,10 @@ export interface TerminalSession {
   injecting?: boolean;
   /** Claude-type sessions only: what the CLI is doing right now */
   state?: TerminalState;
+  /** The CLI was given something to do and has not come back to the prompt yet.
+   *  Without it, the idle prompt a freshly opened CLI shows would read as
+   *  "finished" before any work was asked of it. */
+  working?: boolean;
   /** Set by the WS layer — called on every state transition */
   onStateChange?: (state: TerminalState) => void;
   /** True once the output watcher has been attached (never attach twice) */
@@ -201,7 +210,7 @@ export async function createSession(
   // The output watcher only starts once injection is done — during the ready
   // wait the CLI shows an idle prompt that would read as a false 'idle'.
   if (prompt && injectPrompt) {
-    injectPromptWhenReady(id, prompt, () => startOutputWatcher(id));
+    injectPromptWhenReady(id, prompt, () => startOutputWatcher(id, { working: true }));
   } else if (CLAUDE_SESSION_TYPES.has(type)) {
     startOutputWatcher(id);
   }
@@ -450,7 +459,7 @@ export function writeToSession(id: string, data: string): boolean {
   if (!sessions.has(id)) return false;
   // Short input (keystrokes) still goes through the queue so it can never
   // land in the middle of a paste that is currently being drained.
-  noteSessionInput(id);
+  noteSessionInput(id, data);
   return enqueueChunks(id, safeChunks(data).map(data => ({ data, delayAfter: CHUNK_DELAY })));
 }
 
@@ -618,10 +627,13 @@ function stopOutputWatcher(id: string): void {
   try { watcher.dispose(); } catch {}
 }
 
-function startOutputWatcher(sessionId: string): void {
+function startOutputWatcher(sessionId: string, options?: { working?: boolean }): void {
   const session = sessions.get(sessionId);
   if (!session || session.watching) return;
   session.watching = true;
+  // An injected prompt is work already under way; a bare CLI is not, and its
+  // first idle prompt only means it finished booting.
+  if (options?.working) session.working = true;
 
   let tail = '';
   let lastOutputTime = Date.now();
@@ -652,7 +664,16 @@ function startOutputWatcher(sessionId: string): void {
     if (DECISION_RE.test(settled)) {
       setSessionState(sessionId, 'awaiting-input');
     } else if (PROMPT_RE.test(settled)) {
-      setSessionState(sessionId, 'idle');
+      // Back at an empty prompt: a run just ended, or the CLI was never given
+      // anything to do. Only the first is worth telling the user about, and it
+      // is announced once — the next one needs new work behind it.
+      const current = sessions.get(sessionId);
+      if (current?.working) {
+        current.working = false;
+        setSessionState(sessionId, 'finished');
+      } else {
+        setSessionState(sessionId, 'idle');
+      }
     }
   }, WATCH_TICK);
 
@@ -755,10 +776,16 @@ function startSummaryWatcher(sessionId: string): void {
   summaryWatchers.set(sessionId, { timer, dispose: () => disposable.dispose() });
 }
 
-/** Any keystroke or paste means the user answered — back to busy. */
-function noteSessionInput(id: string): void {
+/**
+ * Any keystroke or paste means the user answered — back to busy. A submitted
+ * line (the Enter) is also what puts the CLI back to work, and only then is the
+ * next idle prompt worth calling "finished".
+ */
+function noteSessionInput(id: string, data?: string): void {
   const session = sessions.get(id);
-  if (session?.state && session.state !== 'busy') setSessionState(id, 'busy');
+  if (!session?.state) return;
+  if (data === undefined || /[\r\n]/.test(data)) session.working = true;
+  if (session.state !== 'busy') setSessionState(id, 'busy');
 }
 
 export function setStateListener(id: string, listener: ((state: TerminalState) => void) | undefined): TerminalState | null {
