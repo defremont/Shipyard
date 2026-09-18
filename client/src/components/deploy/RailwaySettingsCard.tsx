@@ -19,44 +19,81 @@ import { toast } from 'sonner'
 
 const TOKEN_URL = 'https://railway.com/account/tokens'
 
-/** One repo, several Railway services: the user picks which one to watch. */
+/**
+ * One repo, several Railway services. Sometimes that is a choice — staging next
+ * to production — and sometimes all of them are wanted at once, as when a
+ * marketplace runs one service per city. So each service is a toggle, already
+ * linked ones are marked, and "Watch all" takes the whole row.
+ */
 function AmbiguousMatch({ match }: { match: DeployMatch }) {
   const link = useLinkDeploy(match.projectId)
+  const linked = new Set(match.linkedServiceIds)
+
+  const watch = async (candidate: DeployMatch['candidates'][number]) => {
+    await link.mutateAsync({
+      projectId: candidate.railwayProjectId,
+      projectName: candidate.railwayProjectName,
+      serviceId: candidate.serviceId,
+      serviceName: candidate.serviceName,
+      ...(match.subrepo ? { subrepo: match.subrepo } : {}),
+      ...(candidate.environmentId ? { environmentId: candidate.environmentId } : {}),
+      ...(candidate.environmentName ? { environmentName: candidate.environmentName } : {}),
+    })
+  }
+
+  const pending = match.candidates.filter(candidate => !linked.has(candidate.serviceId))
 
   return (
     <div className="space-y-1.5 rounded-md border px-2.5 py-2">
-      <p className="text-[11px]">
-        <span className="font-medium">{match.projectName}</span>
-        {match.subrepo && <span className="text-foreground/70"> / {match.subrepo}</span>}
-        <span className="font-mono text-[10px] text-muted-foreground"> · {match.repo}</span>
-        {match.linked && <span className="text-[10px] text-success"> · linked</span>}
-      </p>
-      <div className="flex flex-wrap gap-1">
-        {match.candidates.map(candidate => (
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 text-[11px]">
+          <span className="font-medium">{match.projectName}</span>
+          {match.subrepo && <span className="text-foreground/70"> / {match.subrepo}</span>}
+          <span className="font-mono text-[10px] text-muted-foreground"> · {match.repo}</span>
+          {match.linked && (
+            <span className="text-[10px] text-success"> · {match.linkedServiceIds.length} watched</span>
+          )}
+        </p>
+        {pending.length > 1 && (
           <button
-            key={candidate.serviceId}
             disabled={link.isPending}
-            className="rounded border px-1.5 py-0.5 text-[10px] transition-colors hover:bg-accent"
+            className="shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-primary transition-colors hover:bg-accent"
             onClick={async () => {
               try {
-                await link.mutateAsync({
-                  projectId: candidate.railwayProjectId,
-                  projectName: candidate.railwayProjectName,
-                  serviceId: candidate.serviceId,
-                  serviceName: candidate.serviceName,
-                  ...(match.subrepo ? { subrepo: match.subrepo } : {}),
-                  ...(candidate.environmentId ? { environmentId: candidate.environmentId } : {}),
-                  ...(candidate.environmentName ? { environmentName: candidate.environmentName } : {}),
-                })
-                toast.success(`${match.subrepo || match.projectName} → ${candidate.serviceName}`)
+                for (const candidate of pending) await watch(candidate)
+                toast.success(`Watching ${pending.length} deploys of ${match.subrepo || match.projectName}`)
               } catch (err: any) {
                 toast.error(err.message || 'Could not link')
               }
             }}
           >
-            {candidate.railwayProjectName} · {candidate.serviceName}
+            Watch all {pending.length}
           </button>
-        ))}
+        )}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {match.candidates.map(candidate => {
+          const already = linked.has(candidate.serviceId)
+          return (
+            <button
+              key={candidate.serviceId}
+              disabled={already || link.isPending}
+              className={`rounded border px-1.5 py-0.5 text-[10px] transition-colors hover:bg-accent disabled:hover:bg-transparent ${
+                already ? 'border-success/40 text-success' : ''
+              }`}
+              onClick={async () => {
+                try {
+                  await watch(candidate)
+                  toast.success(`${match.subrepo || match.projectName} → ${candidate.serviceName}`)
+                } catch (err: any) {
+                  toast.error(err.message || 'Could not link')
+                }
+              }}
+            >
+              {candidate.railwayProjectName} · {candidate.serviceName}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
@@ -198,10 +235,10 @@ export function RailwaySettingsCard() {
             {report && report.ambiguous.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-[11px] text-muted-foreground">
-                  Several services build the same repository — pick the one to watch. A project folder can have one per sub-repository.
+                  Several services build the same repository — pick the ones to watch, or all of them when the same code deploys once per city or tenant.
                 </p>
                 {report.ambiguous.map(match => (
-                  <AmbiguousMatch key={match.projectId} match={match} />
+                  <AmbiguousMatch key={`${match.projectId}::${match.subrepo || '__root__'}`} match={match} />
                 ))}
               </div>
             )}

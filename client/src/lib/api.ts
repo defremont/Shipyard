@@ -71,9 +71,11 @@ export interface AppSettings {
 
 export type DeployState = 'success' | 'failed' | 'building' | 'idle' | 'unknown'
 
-/** "Did the last build go up?" for one checkout — a project or a sub-repo. */
+/** "Did the last build go up?" for one linked deploy. */
 export interface DeployStatus {
   configured: boolean
+  /** The link this status belongs to; absent when nothing is linked. */
+  id?: string
   /** Sub-repository this status belongs to; absent means the project root. */
   subrepo?: string
   provider?: 'railway'
@@ -84,6 +86,8 @@ export interface DeployStatus {
   projectName?: string
   environmentName?: string
   serviceName?: string
+  /** Railway service this watches — what the picker marks as already linked. */
+  serviceId?: string
   commitMessage?: string
   commitHash?: string
   branch?: string
@@ -116,6 +120,8 @@ export interface DeployMatch {
   /** Set when the repo came from a sub-repository rather than the project root. */
   subrepo?: string
   linked: boolean
+  /** Candidates already being watched, so the picker can mark them. */
+  linkedServiceIds: string[]
   candidates: DeployCandidate[]
 }
 
@@ -547,11 +553,15 @@ export const api = {
       body: JSON.stringify(body),
       timeout: 20_000,
     }),
-  unlinkDeploy: (projectId: string, subrepo?: string) =>
-    request(
-      `/projects/${projectId}/deploy${subrepo !== undefined ? `?subrepo=${encodeURIComponent(subrepo)}` : ''}`,
-      { method: 'DELETE' }
-    ),
+  /** `link` drops one deploy; `subrepo` every deploy of a checkout; neither, all. */
+  unlinkDeploy: (projectId: string, target?: { link?: string; subrepo?: string }) => {
+    const query = target?.link
+      ? `?link=${encodeURIComponent(target.link)}`
+      : target?.subrepo !== undefined
+        ? `?subrepo=${encodeURIComponent(target.subrepo)}`
+        : ''
+    return request(`/projects/${projectId}/deploy${query}`, { method: 'DELETE' })
+  },
 
   // Settings
   getSettings: () => request<AppSettings>('/settings'),

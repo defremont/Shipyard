@@ -92,15 +92,16 @@ export async function deployRoutes(app: FastifyInstance) {
     return { statuses };
   });
 
-  // Without `subrepo`, every linked checkout of the project; with it, just that
-  // one. The project toolbar wants the first, the git panel the second.
+  // Without `subrepo`, every deploy watched for the project; with it, only the
+  // ones of that checkout. The project toolbar wants the first, the git panel
+  // the second — and either can answer with several links.
   app.get<{ Params: { projectId: string }; Querystring: { subrepo?: string } }>(
     '/api/projects/:projectId/deploy',
     async (request) => {
       const { projectId } = request.params;
       const { subrepo } = request.query;
       if (subrepo !== undefined) {
-        return { statuses: [await deployService.getStatus(projectId, subrepo || undefined)] };
+        return { statuses: await deployService.getScopeStatuses(projectId, subrepo || undefined) };
       }
       return { statuses: await deployService.getProjectStatuses(projectId) };
     }
@@ -133,21 +134,23 @@ export async function deployRoutes(app: FastifyInstance) {
         ...(body.serviceName ? { serviceName: body.serviceName } : {}),
         ...(body.subrepo ? { subrepo: body.subrepo } : {}),
       });
-      deployService.invalidate(request.params.projectId, body.subrepo);
-      log.info('server', 'Deploy link saved', `${link.projectName || link.projectId}${body.subrepo ? ` (${body.subrepo})` : ''}`, request.params.projectId);
-      return { link, status: await deployService.getStatus(request.params.projectId, body.subrepo) };
+      deployService.invalidate(request.params.projectId, link.id);
+      log.info('server', 'Deploy link saved', `${link.projectName || link.projectId}${link.serviceName ? ` · ${link.serviceName}` : ''}${body.subrepo ? ` (${body.subrepo})` : ''}`, request.params.projectId);
+      return { link, status: await deployService.getStatus(request.params.projectId, link) };
     }
   );
 
-  // `subrepo` removes one checkout's link; without it the whole project's go.
-  app.delete<{ Params: { projectId: string }; Querystring: { subrepo?: string } }>(
+  // `link` removes one deploy, `subrepo` every deploy of one checkout, and
+  // neither removes the whole project's.
+  app.delete<{ Params: { projectId: string }; Querystring: { link?: string; subrepo?: string } }>(
     '/api/projects/:projectId/deploy',
     async (request) => {
       const { projectId } = request.params;
-      const { subrepo } = request.query;
-      if (subrepo !== undefined) await deployStore.clearLink(projectId, subrepo || undefined);
+      const { link, subrepo } = request.query;
+      if (link) await deployStore.clearLink(projectId, link);
+      else if (subrepo !== undefined) await deployStore.clearScope(projectId, subrepo || undefined);
       else await deployStore.clearProject(projectId);
-      deployService.invalidate(projectId, subrepo);
+      deployService.invalidate(projectId, link);
       return { linked: false };
     }
   );

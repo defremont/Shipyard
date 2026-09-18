@@ -1,7 +1,7 @@
 import { CheckCircle2, CircleDashed, ExternalLink, Loader2, TriangleAlert, HelpCircle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { useAllDeployStatus, useDeployStatus, useDeployStatuses } from '@/hooks/useDeploy'
+import { useAllDeployStatus, useDeployStatuses, useScopeDeployStatuses } from '@/hooks/useDeploy'
 import type { DeployState, DeployStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -9,9 +9,9 @@ import { cn } from '@/lib/utils'
  * Did the last build go up? One pill in the project toolbar, so the answer
  * doesn't need a trip to the Railway dashboard.
  *
- * A project can deploy from several checkouts at once — a client folder with a
- * dozen sub-repositories is the normal case here — so the pill speaks for all
- * of them: the worst state wins, and the popover lists each one.
+ * A project can have several deploys at once — a client folder with a dozen
+ * sub-repositories, or one repository deployed once per city — so the pill
+ * speaks for all of them: the worst state wins, and the popover lists each one.
  *
  * A project with nothing linked shows nothing at all; this must not add chrome
  * to the projects that don't use it.
@@ -49,11 +49,18 @@ function relative(date?: string): string {
   }
 }
 
+/**
+ * What names this deploy in a list. The service is what tells two deploys of the
+ * same checkout apart, so it wins; the sub-repository is only added when the
+ * project has more than one checkout to confuse.
+ */
 function scopeLabel(status: DeployStatus): string {
-  return status.subrepo || status.serviceName || status.projectName || 'root'
+  const name = status.serviceName || status.projectName
+  if (status.subrepo && name) return `${status.subrepo} · ${name}`
+  return status.subrepo || name || 'root'
 }
 
-/** One checkout, as a row in the popover. */
+/** One deploy, as a row in the popover. */
 function DeployRow({ status }: { status: DeployStatus }) {
   const config = STATE_CONFIG[status.state]
   const Icon = status.error ? HelpCircle : config.icon
@@ -136,14 +143,14 @@ function Pill({ statuses, className }: { statuses: DeployStatus[]; className?: s
       </PopoverTrigger>
       <PopoverContent align="end" className="max-h-80 w-72 space-y-2 overflow-y-auto p-3">
         {statuses.map(status => (
-          <DeployRow key={`${status.subrepo || '__root__'}`} status={status} />
+          <DeployRow key={status.id || status.subrepo || '__root__'} status={status} />
         ))}
       </PopoverContent>
     </Popover>
   )
 }
 
-/** Every linked checkout of a project, folded into one pill. */
+/** Every deploy of a project, folded into one pill. */
 export function DeployBadge({ projectId, className }: { projectId: string; className?: string }) {
   const { data: statuses } = useDeployStatuses(projectId)
   const linked = (statuses || []).filter(status => status.configured)
@@ -151,15 +158,16 @@ export function DeployBadge({ projectId, className }: { projectId: string; class
   return <Pill statuses={linked} className={className} />
 }
 
-/** One checkout — used beside the repository picker in Source Control. */
+/** One checkout's deploys — used beside the repository picker in Source Control. */
 export function DeployScopeBadge({ projectId, subrepo, className }: {
   projectId: string
   subrepo?: string
   className?: string
 }) {
-  const { data: status } = useDeployStatus(projectId, subrepo)
-  if (!status?.configured) return null
-  return <Pill statuses={[status]} className={className} />
+  const { data: statuses } = useScopeDeployStatuses(projectId, subrepo)
+  const linked = (statuses || []).filter(status => status.configured)
+  if (linked.length === 0) return null
+  return <Pill statuses={linked} className={className} />
 }
 
 /** Just the icon, for dense lists like the dashboard cards — one shared query. */

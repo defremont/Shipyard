@@ -18,13 +18,18 @@ export const DEPLOY_PROVIDERS = ['railway'] as const;
 export type DeployProvider = (typeof DEPLOY_PROVIDERS)[number];
 
 /**
- * Which Railway project and service a checkout deploys to.
+ * Which Railway project, service and environment a deploy link watches.
  *
- * The unit is a **checkout**, not a Shipyard project: a client folder holds a
- * dozen repositories that each deploy somewhere of their own, so a project can
- * hold several links — one per sub-repository, plus one for the root.
+ * The unit is a **deploy**, not a Shipyard project and not a checkout either: a
+ * client folder holds a dozen repositories that each deploy somewhere of their
+ * own, and one repository can be deployed several times over — one service per
+ * city, per tenant, per environment. So a project holds a list of links, each
+ * identified by what it points at in Railway, and `subrepo` is only a label
+ * saying which checkout it came from.
  */
 export interface ProjectDeployLink {
+  /** Stable id derived from the Railway target — see `linkId`. */
+  id: string;
   provider: DeployProvider;
   projectId: string;
   projectName?: string;
@@ -37,33 +42,60 @@ export interface ProjectDeployLink {
   updatedAt: string;
 }
 
-/** Key a link is stored under inside a project. */
+/** Key a link is stored under when it has no sub-repository. */
 export const ROOT_SCOPE = '__root__';
 
 export function scopeKey(subrepo?: string | null): string {
   return subrepo && subrepo.trim() ? subrepo : ROOT_SCOPE;
 }
 
+/**
+ * What a link points at, as one string. Two links to the same Railway service
+ * in the same environment are the same link — that is what makes saving an
+ * upsert instead of a duplicate.
+ */
+export function linkId(link: {
+  provider: DeployProvider;
+  projectId: string;
+  serviceId?: string;
+  environmentId?: string;
+}): string {
+  return [link.provider, link.projectId, link.serviceId || 'project', link.environmentId || 'default'].join(':');
+}
+
 interface DeployConfig {
   tokens: Partial<Record<DeployProvider, string>>;
-  /** projectId → scope key → link */
-  projects: Record<string, Record<string, ProjectDeployLink>>;
+  /** projectId → every deploy watched for it */
+  projects: Record<string, ProjectDeployLink[]>;
 }
 
 const EMPTY: DeployConfig = { tokens: {}, projects: {} };
 
+function withId(raw: any, subrepo?: string): ProjectDeployLink {
+  const link: ProjectDeployLink = {
+    ...raw,
+    provider: raw.provider || 'railway',
+    ...(subrepo && subrepo !== ROOT_SCOPE ? { subrepo } : {}),
+  };
+  return { ...link, id: link.id || linkId(link) };
+}
+
 /**
- * v1 stored one link per project, unscoped. Reading it as the root scope keeps
- * every link people already have — nobody reconnects because of this change.
+ * v1 stored one link per project, unscoped; v2 one per checkout, keyed by
+ * sub-repository. Both fold into the list without anyone reconnecting.
  */
 function migrateProjects(raw: any): DeployConfig['projects'] {
   const projects: DeployConfig['projects'] = {};
   for (const [projectId, value] of Object.entries(raw || {})) {
     if (!value || typeof value !== 'object') continue;
-    if ((value as any).provider) {
-      projects[projectId] = { [ROOT_SCOPE]: value as ProjectDeployLink };
+    if (Array.isArray(value)) {
+      projects[projectId] = value.map(link => withId(link));
+    } else if ((value as any).provider) {
+      projects[projectId] = [withId(value)];
     } else {
-      projects[projectId] = value as Record<string, ProjectDeployLink>;
+      projects[projectId] = Object.entries(value as Record<string, any>).map(([scope, link]) =>
+        withId(link, scope),
+      );
     }
   }
   return projects;
@@ -133,7 +165,7 @@ async function persist(config: DeployConfig): Promise<void> {
   for (const [provider, token] of Object.entries(config.tokens)) {
     if (token) tokens[provider] = encrypt(token, key);
   }
-  const payload = JSON.stringify({ version: 2, tokens, projects: config.projects }, null, 2);
+  const payload = JSON.stringify({ version: 3, tokens, projects: config.projects }, null, 2);
   await mkdir(DATA_DIR, { recursive: true });
   const tmp = `${CONFIG_FILE}.tmp`;
   await writeFile(tmp, payload, 'utf-8');
@@ -169,50 +201,64 @@ export async function clearToken(provider: DeployProvider): Promise<void> {
   });
 }
 
-/** One checkout's link: the root, or a named sub-repository. */
-export async function getLink(projectId: string, subrepo?: string | null): Promise<ProjectDeployLink | null> {
-  return (await load()).projects[projectId]?.[scopeKey(subrepo)] ?? null;
+/** One link by its id. */
+export async function getLink(projectId: string, id: string): Promise<ProjectDeployLink | null> {
+  return (await load()).projects[projectId]?.find(link => link.id === id) ?? null;
 }
 
-/** Every link of one project, keyed by scope. */
-export async function getProjectLinks(projectId: string): Promise<Record<string, ProjectDeployLink>> {
-  return { ...((await load()).projects[projectId] || {}) };
+/** Every deploy watched for one project. */
+export async function getProjectLinks(projectId: string): Promise<ProjectDeployLink[]> {
+  return [...((await load()).projects[projectId] || [])];
+}
+
+/** Every deploy watched for one checkout of a project. */
+export async function getScopeLinks(projectId: string, subrepo?: string | null): Promise<ProjectDeployLink[]> {
+  const scope = scopeKey(subrepo);
+  return (await getProjectLinks(projectId)).filter(link => scopeKey(link.subrepo) === scope);
 }
 
 /** Every link of every project, flattened. */
-export async function listLinks(): Promise<{ projectId: string; scope: string; link: ProjectDeployLink }[]> {
+export async function listLinks(): Promise<{ projectId: string; link: ProjectDeployLink }[]> {
   const { projects } = await load();
-  const list: { projectId: string; scope: string; link: ProjectDeployLink }[] = [];
-  for (const [projectId, scopes] of Object.entries(projects)) {
-    for (const [scope, link] of Object.entries(scopes)) {
-      list.push({ projectId, scope, link });
-    }
+  const list: { projectId: string; link: ProjectDeployLink }[] = [];
+  for (const [projectId, links] of Object.entries(projects)) {
+    for (const link of links) list.push({ projectId, link });
   }
   return list;
 }
 
+/** Save a link, replacing the one pointing at the same Railway target. */
 export async function setLink(
   projectId: string,
-  link: Omit<ProjectDeployLink, 'updatedAt'>,
+  link: Omit<ProjectDeployLink, 'updatedAt' | 'id'>,
 ): Promise<ProjectDeployLink> {
-  const stored: ProjectDeployLink = { ...link, updatedAt: new Date().toISOString() };
-  const scope = scopeKey(link.subrepo);
+  const stored: ProjectDeployLink = { ...link, id: linkId(link), updatedAt: new Date().toISOString() };
   await mutate(config => {
-    config.projects[projectId] = { ...(config.projects[projectId] || {}), [scope]: stored };
+    const existing = config.projects[projectId] || [];
+    config.projects[projectId] = [...existing.filter(entry => entry.id !== stored.id), stored];
   });
   return stored;
 }
 
-export async function clearLink(projectId: string, subrepo?: string | null): Promise<void> {
-  const scope = scopeKey(subrepo);
-  await mutate(config => {
-    const scopes = config.projects[projectId];
-    if (!scopes) return;
-    const next = { ...scopes };
-    delete next[scope];
-    if (Object.keys(next).length === 0) delete config.projects[projectId];
+function drop(projectId: string, keep: (link: ProjectDeployLink) => boolean): Promise<void> {
+  return mutate(config => {
+    const existing = config.projects[projectId];
+    if (!existing) return;
+    const next = existing.filter(keep);
+    if (next.length === 0) delete config.projects[projectId];
     else config.projects[projectId] = next;
   });
+}
+
+/** Drop one link. */
+export async function clearLink(projectId: string, id: string): Promise<void> {
+  await drop(projectId, link => link.id !== id);
+}
+
+/** Drop every link of one checkout. */
+export async function clearScope(projectId: string, subrepo?: string | null): Promise<void> {
+  const scope = scopeKey(subrepo);
+  await drop(projectId, link => scopeKey(link.subrepo) !== scope);
 }
 
 /** Drop every link of a project — used when the user unlinks the whole thing. */

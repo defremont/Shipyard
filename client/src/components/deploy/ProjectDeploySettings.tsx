@@ -7,11 +7,13 @@ import {
 import { toast } from 'sonner'
 
 /**
- * Which Railway service each checkout of this project deploys to.
+ * Which Railway services this project deploys to.
  *
- * Most of this is filled in automatically by matching git remotes against
- * Railway's own repositories; what is left here is the exception — a checkout
- * whose repo matches several services, or none.
+ * A project can watch as many as it needs: one per checkout, and one per
+ * service when the same repository is deployed several times over — a
+ * marketplace running one service per city is the case that asked for this.
+ * Most links are filled in automatically by matching git remotes against
+ * Railway's own repositories; what is left here is the exception.
  */
 export function ProjectDeploySettings({ projectId, subRepos }: { projectId: string; subRepos?: string[] }) {
   const { data: providers } = useDeployProviders()
@@ -31,19 +33,30 @@ export function ProjectDeploySettings({ projectId, subRepos }: { projectId: stri
 
   const reset = () => { setAdding(false); setScope(''); setRailwayProject('') }
 
-  const save = async (input: {
-    projectId: string; projectName: string
-    serviceId?: string; serviceName?: string
-    environmentId?: string; environmentName?: string
-  }) => {
+  /**
+   * `keepOpen` is for the service list: picking one city's service is rarely
+   * the whole job — the next two are right there — so the list stays up and
+   * marks what is already linked instead of making the user reopen it.
+   */
+  const save = async (
+    input: {
+      projectId: string; projectName: string
+      serviceId?: string; serviceName?: string
+      environmentId?: string; environmentName?: string
+    },
+    keepOpen = false,
+  ) => {
     try {
       await link.mutateAsync({ ...input, ...(scope ? { subrepo: scope } : {}) })
       toast.success(`Linked ${scope || 'the project'} to ${input.serviceName || input.projectName}`)
-      reset()
+      if (!keepOpen) reset()
     } catch (err: any) {
       toast.error(err.message || 'Could not link')
     }
   }
+
+  /** Already watched, so the service list can say so instead of duplicating. */
+  const linkedServiceIds = new Set(linked.map(status => status.serviceId).filter(Boolean) as string[])
 
   if (!connected) {
     return (
@@ -63,14 +76,16 @@ export function ProjectDeploySettings({ projectId, subRepos }: { projectId: stri
       {linked.length > 0 && (
         <div className="space-y-1">
           {linked.map(status => (
-            <div key={status.subrepo || '__root__'} className="flex items-center gap-2 rounded-md border px-3 py-2">
+            <div key={status.id} className="flex items-center gap-2 rounded-md border px-3 py-2">
               <Rocket className="h-3.5 w-3.5 shrink-0 text-primary" />
               <div className="min-w-0 flex-1">
+                {/* The service is what tells two deploys of the same checkout apart */}
                 <p className="truncate text-xs font-medium">
-                  {status.subrepo || 'Project root'}
+                  {status.serviceName || status.projectName || 'Railway'}
                 </p>
                 <p className="truncate text-[10px] text-muted-foreground">
-                  {[status.projectName, status.serviceName, status.environmentName].filter(Boolean).join(' · ')}
+                  {[status.subrepo || 'Project root', status.projectName, status.environmentName]
+                    .filter(Boolean).join(' · ')}
                 </p>
               </div>
               <Button
@@ -80,7 +95,7 @@ export function ProjectDeploySettings({ projectId, subRepos }: { projectId: stri
                 title="Unlink"
                 disabled={unlink.isPending}
                 onClick={async () => {
-                  await unlink.mutateAsync(status.subrepo ?? '')
+                  await unlink.mutateAsync({ link: status.id })
                   toast.success('Unlinked')
                 }}
               >
@@ -94,7 +109,7 @@ export function ProjectDeploySettings({ projectId, subRepos }: { projectId: stri
       {!adding && (
         <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAdding(true)}>
           <Plus className="h-3.5 w-3.5" />
-          {linked.length > 0 ? 'Link another checkout' : 'Link a Railway project'}
+          {linked.length > 0 ? 'Link another deploy' : 'Link a Railway project'}
         </Button>
       )}
 
@@ -169,33 +184,39 @@ export function ProjectDeploySettings({ projectId, subRepos }: { projectId: stri
                 Which service of <span className="text-foreground">{chosen.name}</span>?
               </p>
               <div className="max-h-48 space-y-0.5 overflow-y-auto">
-                {chosen.services.map(service => (
-                  <button
-                    key={service.id}
-                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
-                    onClick={() => save({
-                      projectId: chosen.id,
-                      projectName: chosen.name,
-                      serviceId: service.id,
-                      serviceName: service.name,
-                      ...(chosen.environments.length === 1
-                        ? { environmentId: chosen.environments[0].id, environmentName: chosen.environments[0].name }
-                        : {}),
-                    })}
-                  >
-                    <span className="truncate">{service.name}</span>
-                    {service.repo && (
-                      <span className="shrink-0 truncate pl-2 font-mono text-[9px] text-muted-foreground">{service.repo}</span>
-                    )}
-                  </button>
-                ))}
+                {chosen.services.map(service => {
+                  const already = linkedServiceIds.has(service.id)
+                  return (
+                    <button
+                      key={service.id}
+                      disabled={already || link.isPending}
+                      className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-accent disabled:opacity-60 disabled:hover:bg-transparent"
+                      onClick={() => save({
+                        projectId: chosen.id,
+                        projectName: chosen.name,
+                        serviceId: service.id,
+                        serviceName: service.name,
+                        ...(chosen.environments.length === 1
+                          ? { environmentId: chosen.environments[0].id, environmentName: chosen.environments[0].name }
+                          : {}),
+                      }, true)}
+                    >
+                      <span className="truncate">{service.name}</span>
+                      {already ? (
+                        <span className="shrink-0 pl-2 text-[9px] text-success">linked</span>
+                      ) : service.repo ? (
+                        <span className="shrink-0 truncate pl-2 font-mono text-[9px] text-muted-foreground">{service.repo}</span>
+                      ) : null}
+                    </button>
+                  )
+                })}
               </div>
             </div>
           )}
 
           <div className="flex justify-end gap-2 border-t pt-2">
             <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={reset}>
-              Cancel
+              {chosen ? 'Done' : 'Cancel'}
             </Button>
           </div>
         </div>
