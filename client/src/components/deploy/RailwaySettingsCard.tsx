@@ -27,9 +27,9 @@ function AmbiguousMatch({ match }: { match: DeployMatch }) {
     <div className="space-y-1.5 rounded-md border px-2.5 py-2">
       <p className="text-[11px]">
         <span className="font-medium">{match.projectName}</span>
-        <span className="text-muted-foreground">
-          {match.subrepo ? ` · ${match.subrepo}` : ''} · {match.repo}
-        </span>
+        {match.subrepo && <span className="text-foreground/70"> / {match.subrepo}</span>}
+        <span className="font-mono text-[10px] text-muted-foreground"> · {match.repo}</span>
+        {match.linked && <span className="text-[10px] text-success"> · linked</span>}
       </p>
       <div className="flex flex-wrap gap-1">
         {match.candidates.map(candidate => (
@@ -44,10 +44,11 @@ function AmbiguousMatch({ match }: { match: DeployMatch }) {
                   projectName: candidate.railwayProjectName,
                   serviceId: candidate.serviceId,
                   serviceName: candidate.serviceName,
+                  ...(match.subrepo ? { subrepo: match.subrepo } : {}),
                   ...(candidate.environmentId ? { environmentId: candidate.environmentId } : {}),
                   ...(candidate.environmentName ? { environmentName: candidate.environmentName } : {}),
                 })
-                toast.success(`${match.projectName} → ${candidate.serviceName}`)
+                toast.success(`${match.subrepo || match.projectName} → ${candidate.serviceName}`)
               } catch (err: any) {
                 toast.error(err.message || 'Could not link')
               }
@@ -82,7 +83,7 @@ export function RailwaySettingsCard() {
       const count = result.linked?.length || 0
       toast.success(
         count > 0
-          ? `Railway connected — ${count} project${count === 1 ? '' : 's'} linked by repository`
+          ? `Railway connected — ${count} checkout${count === 1 ? '' : 's'} linked by repository`
           : 'Railway connected'
       )
     } catch (err: any) {
@@ -95,7 +96,7 @@ export function RailwaySettingsCard() {
       const result = await autoLink.mutateAsync({})
       toast.success(
         result.linked.length > 0
-          ? `Linked ${result.linked.length} project${result.linked.length === 1 ? '' : 's'}`
+          ? `Linked ${result.linked.length} checkout${result.linked.length === 1 ? '' : 's'}`
           : 'Nothing new to link'
       )
     } catch (err: any) {
@@ -168,7 +169,7 @@ export function RailwaySettingsCard() {
               <p className="text-[11px] text-muted-foreground">
                 {matching && !report
                   ? 'Reading your Railway projects…'
-                  : `${linkedCount} project${linkedCount === 1 ? '' : 's'} linked by repository`}
+                  : `${linkedCount} checkout${linkedCount === 1 ? '' : 's'} linked by repository`}
               </p>
               <Button
                 size="sm"
@@ -197,7 +198,7 @@ export function RailwaySettingsCard() {
             {report && report.ambiguous.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-[11px] text-muted-foreground">
-                  Several services build the same repository — pick the one to watch:
+                  Several services build the same repository — pick the one to watch. A project folder can have one per sub-repository.
                 </p>
                 {report.ambiguous.map(match => (
                   <AmbiguousMatch key={match.projectId} match={match} />

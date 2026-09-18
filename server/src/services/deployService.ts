@@ -16,8 +16,10 @@ import * as log from './logService.js';
 export type DeployState = 'success' | 'failed' | 'building' | 'idle' | 'unknown';
 
 export interface DeployStatus {
-  /** False when the project has no deploy linked — the UI shows nothing. */
+  /** False when this checkout has no deploy linked — the UI shows nothing. */
   configured: boolean;
+  /** Sub-repository this status belongs to; absent means the project root. */
+  subrepo?: string;
   provider?: deployStore.DeployProvider;
   state: DeployState;
   /** Railway's own word for it, kept for the tooltip. */
@@ -68,11 +70,11 @@ function toState(raw: string): DeployState {
   }
 }
 
-async function read(projectId: string): Promise<DeployStatus> {
-  const link = await deployStore.getLink(projectId);
+async function read(projectId: string, subrepo?: string): Promise<DeployStatus> {
+  const link = await deployStore.getLink(projectId, subrepo);
   const checkedAt = new Date().toISOString();
 
-  if (!link) return { configured: false, state: 'unknown', checkedAt };
+  if (!link) return { configured: false, state: 'unknown', checkedAt, ...(subrepo ? { subrepo } : {}) };
 
   const consoleUrl = `https://railway.com/project/${link.projectId}`;
   const base: DeployStatus = {
@@ -81,6 +83,7 @@ async function read(projectId: string): Promise<DeployStatus> {
     state: 'unknown',
     checkedAt,
     consoleUrl,
+    ...(link.subrepo ? { subrepo: link.subrepo } : {}),
     ...(link.projectName ? { projectName: link.projectName } : {}),
     ...(link.environmentName ? { environmentName: link.environmentName } : {}),
     ...(link.serviceName ? { serviceName: link.serviceName } : {}),
@@ -111,35 +114,62 @@ async function read(projectId: string): Promise<DeployStatus> {
   }
 }
 
-export async function getStatus(projectId: string): Promise<DeployStatus> {
-  const cached = cache.get(projectId);
+function cacheKey(projectId: string, subrepo?: string): string {
+  return `${projectId}::${deployStore.scopeKey(subrepo)}`;
+}
+
+export async function getStatus(projectId: string, subrepo?: string): Promise<DeployStatus> {
+  const key = cacheKey(projectId, subrepo);
+
+  const cached = cache.get(key);
   if (cached && Date.now() - cached.at < cached.ttl) return cached.status;
 
-  const running = inFlight.get(projectId);
+  const running = inFlight.get(key);
   if (running) return running;
 
-  const promise = read(projectId)
+  const promise = read(projectId, subrepo)
     .then(status => {
       const ttl = status.error
         ? ERROR_TTL_MS
         : status.state === 'building'
           ? IN_FLIGHT_TTL_MS
           : SETTLED_TTL_MS;
-      cache.set(projectId, { at: Date.now(), ttl, status });
+      cache.set(key, { at: Date.now(), ttl, status });
       return status;
     })
     .finally(() => {
-      inFlight.delete(projectId);
+      inFlight.delete(key);
     });
 
-  inFlight.set(projectId, promise);
+  inFlight.set(key, promise);
   return promise;
 }
 
-/** Drop a project's cached answer — after linking, unlinking or a token change. */
-export function invalidate(projectId?: string): void {
-  if (projectId) cache.delete(projectId);
-  else cache.clear();
+/**
+ * Every linked checkout of a project. A client folder deploys from several of
+ * its sub-repositories, and the badge has to speak for all of them.
+ */
+export async function getProjectStatuses(projectId: string): Promise<DeployStatus[]> {
+  const links = await deployStore.getProjectLinks(projectId);
+  const scopes = Object.values(links);
+  if (scopes.length === 0) return [];
+  return Promise.all(scopes.map(link => getStatus(projectId, link.subrepo)));
+}
+
+/** Drop cached answers — after linking, unlinking or a token change. */
+export function invalidate(projectId?: string, subrepo?: string): void {
+  if (!projectId) {
+    cache.clear();
+    return;
+  }
+  if (subrepo !== undefined) {
+    cache.delete(cacheKey(projectId, subrepo));
+    return;
+  }
+  // Whole project: every scope under it.
+  for (const key of [...cache.keys()]) {
+    if (key.startsWith(`${projectId}::`)) cache.delete(key);
+  }
 }
 
 // ── Linking projects by their GitHub repository ──────────────────────────
@@ -177,7 +207,7 @@ export interface MatchReport {
   /** Several services build the same repo; the user picks. */
   ambiguous: DeployMatch[];
   /** No Railway service builds this repo. */
-  unmatched: { projectId: string; projectName: string; repo: string | null }[];
+  unmatched: { projectId: string; projectName: string; repo: string | null; subrepo?: string }[];
 }
 
 /** `https://github.com/Owner/Repo.git` and `git@github.com:Owner/Repo` → `owner/repo`. */
@@ -255,61 +285,60 @@ export async function findMatches(): Promise<MatchReport> {
     }
   }
 
+  const linkedScopes = new Set(links.map(entry => `${entry.projectId}::${entry.scope}`));
   const report: MatchReport = { sourceAvailable: sawAnyRepo, matched: [], ambiguous: [], unmatched: [] };
 
   for (const project of projects) {
+    // One checkout at a time: the root and each sub-repository deploy on their
+    // own, so each gets its own match rather than competing for one slot.
     const repos = await projectRepos(project);
-
-    // A project can own several repos (one per sub-repository); every service
-    // building any of them is a candidate for this project's badge.
-    const candidates: DeployCandidate[] = [];
-    let firstRepo: { repo: string; subrepo?: string } | undefined;
-    for (const entry of repos) {
-      const found = byRepo.get(entry.repo);
-      if (!found?.length) continue;
-      if (!firstRepo) firstRepo = entry;
-      for (const candidate of found) {
-        if (!candidates.some(existing => existing.serviceId === candidate.serviceId)) {
-          candidates.push(candidate);
-        }
-      }
-    }
-
-    if (candidates.length === 0) {
-      report.unmatched.push({
-        projectId: project.id,
-        projectName: project.name,
-        repo: repos[0]?.repo ?? null,
-      });
+    if (repos.length === 0) {
+      report.unmatched.push({ projectId: project.id, projectName: project.name, repo: null });
       continue;
     }
 
-    const match: DeployMatch = {
-      projectId: project.id,
-      projectName: project.name,
-      repo: firstRepo!.repo,
-      ...(firstRepo!.subrepo ? { subrepo: firstRepo!.subrepo } : {}),
-      linked: !!links[project.id],
-      candidates,
-    };
-    if (candidates.length === 1) report.matched.push(match);
-    else report.ambiguous.push(match);
+    for (const entry of repos) {
+      const candidates = byRepo.get(entry.repo) || [];
+      if (candidates.length === 0) {
+        report.unmatched.push({
+          projectId: project.id,
+          projectName: project.name,
+          repo: entry.repo,
+          ...(entry.subrepo ? { subrepo: entry.subrepo } : {}),
+        });
+        continue;
+      }
+
+      const match: DeployMatch = {
+        projectId: project.id,
+        projectName: project.name,
+        repo: entry.repo,
+        ...(entry.subrepo ? { subrepo: entry.subrepo } : {}),
+        linked: linkedScopes.has(`${project.id}::${deployStore.scopeKey(entry.subrepo)}`),
+        candidates,
+      };
+      if (candidates.length === 1) report.matched.push(match);
+      else report.ambiguous.push(match);
+    }
   }
 
   return report;
 }
 
 /**
- * Link every project whose repo matches exactly one Railway service.
- * Projects already linked are left alone unless `relink` says otherwise.
+ * Link every checkout whose repo matches exactly one Railway service.
+ * Checkouts already linked are left alone unless `relink` says otherwise.
  */
 export async function autoLink(options?: { only?: string[]; relink?: boolean }): Promise<{
-  linked: { projectId: string; projectName: string; railwayProjectName: string; serviceName: string }[];
+  linked: { projectId: string; projectName: string; subrepo?: string; railwayProjectName: string; serviceName: string }[];
   report: MatchReport;
 }> {
   const report = await findMatches();
   const only = options?.only?.length ? new Set(options.only) : null;
-  const linked: { projectId: string; projectName: string; railwayProjectName: string; serviceName: string }[] = [];
+  const linked: {
+    projectId: string; projectName: string; subrepo?: string;
+    railwayProjectName: string; serviceName: string;
+  }[] = [];
 
   for (const match of report.matched) {
     if (only && !only.has(match.projectId)) continue;
@@ -322,21 +351,23 @@ export async function autoLink(options?: { only?: string[]; relink?: boolean }):
       projectName: candidate.railwayProjectName,
       serviceId: candidate.serviceId,
       serviceName: candidate.serviceName,
+      ...(match.subrepo ? { subrepo: match.subrepo } : {}),
       ...(candidate.environmentId ? { environmentId: candidate.environmentId } : {}),
       ...(candidate.environmentName ? { environmentName: candidate.environmentName } : {}),
     });
-    invalidate(match.projectId);
+    invalidate(match.projectId, match.subrepo);
     linked.push({
       projectId: match.projectId,
       projectName: match.projectName,
+      ...(match.subrepo ? { subrepo: match.subrepo } : {}),
       railwayProjectName: candidate.railwayProjectName,
       serviceName: candidate.serviceName,
     });
   }
 
   if (linked.length) {
-    log.info('server', `Linked ${linked.length} project(s) to Railway by repository`,
-      linked.map(l => `${l.projectName} → ${l.railwayProjectName}/${l.serviceName}`).join(', '));
+    log.info('server', `Linked ${linked.length} checkout(s) to Railway by repository`,
+      linked.map(l => `${l.projectName}${l.subrepo ? '/' + l.subrepo : ''} → ${l.railwayProjectName}/${l.serviceName}`).join(', '));
   }
   return { linked, report };
 }

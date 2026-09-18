@@ -131,8 +131,9 @@ interface Project {
     o POST ja devolve o que foi vinculado sozinho)
   GET /api/deploy/railway/projects (projetos/ambientes/servicos da conta)
   GET /api/deploy/railway/matches, POST /api/deploy/railway/autolink (`{ only?, relink? }`)
-  GET /api/deploy/status (todos os projetos linkados, numa chamada)
-  GET/PUT/DELETE /api/projects/:id/deploy
+  GET /api/deploy/status (todos os checkouts linkados, numa chamada)
+  GET/PUT/DELETE /api/projects/:id/deploy (`?subrepo=` escolhe o checkout;
+    sem ele o GET devolve todos e o DELETE remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
@@ -665,6 +666,10 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 - O input do GraphQL vai inline (`input: { projectId: $projectId, ... }`) para
   nao depender do nome do tipo de input do Railway: tipo renomeado do outro lado
   derruba a query inteira
+- **A unidade e o checkout, nao o projeto**: uma pasta de cliente guarda uma
+  duzia de repositorios e cada um sobe pro seu servico. `deploy-config.json` v2
+  guarda `projects[projectId][scope]`, onde scope e `__root__` ou o nome do
+  sub-repo; a migracao do v1 le o link antigo como `__root__` (ninguem reconecta)
 - Token da conta fica cifrado em `deploy-config.json` (mesma chave
   `.claude-key` do ai-config) e **nunca volta pro client**
 - Cache por projeto no server: 60s parado, 15s enquanto ha build rodando, 30s
@@ -673,10 +678,12 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 - Projeto sem link **nao desenha nada** (`configured: false`). O Dashboard usa
   `GET /api/deploy/status` (uma chamada para todos) — um `useDeployStatus` por
   card abriria uma dezena de requests por minuto
-- Onde aparece: badge na toolbar do Workspace (popover com servico, commit e
-  links) e um icone no card do Dashboard. Configuracao do token em
-  Settings > AI & Integrations; o projeto Railway se escolhe em
-  Project settings > Launch
+- Onde aparece: badge na toolbar do Workspace, que fala por **todos** os
+  checkouts do projeto (o pior estado vence — uma falha nao pode se esconder
+  atras de quatro verdes — e o popover lista um por um), badge do repo
+  selecionado no Source Control (`DeployScopeBadge`, ao lado do titulo GIT) e um
+  icone no card do Dashboard. Configuracao do token em
+  Settings > AI & Integrations; vinculo manual em Project settings > Launch
 - **Vinculo automatico pelo repositorio**: os dois lados ja sabem de qual repo
   do GitHub constroem — o Shipyard pelo `git remote`, o Railway pelo
   `source.repo` do servico. `deployService.findMatches/autoLink` cruzam os dois

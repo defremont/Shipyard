@@ -71,9 +71,11 @@ export interface AppSettings {
 
 export type DeployState = 'success' | 'failed' | 'building' | 'idle' | 'unknown'
 
-/** "Did the last build go up?" for one project. */
+/** "Did the last build go up?" for one checkout — a project or a sub-repo. */
 export interface DeployStatus {
   configured: boolean
+  /** Sub-repository this status belongs to; absent means the project root. */
+  subrepo?: string
   provider?: 'railway'
   state: DeployState
   rawStatus?: string
@@ -117,16 +119,24 @@ export interface DeployMatch {
   candidates: DeployCandidate[]
 }
 
+export interface AutoLinkedEntry {
+  projectId: string
+  projectName: string
+  subrepo?: string
+  railwayProjectName: string
+  serviceName: string
+}
+
 /** What Shipyard can link on its own, and what it needs a decision on. */
 export interface MatchReport {
   sourceAvailable: boolean
   matched: DeployMatch[]
   ambiguous: DeployMatch[]
-  unmatched: { projectId: string; projectName: string; repo: string | null }[]
+  unmatched: { projectId: string; projectName: string; repo: string | null; subrepo?: string }[]
 }
 
 export interface AutoLinkResult {
-  linked: { projectId: string; projectName: string; railwayProjectName: string; serviceName: string }[]
+  linked: AutoLinkedEntry[]
   report: MatchReport
 }
 
@@ -137,6 +147,8 @@ export interface DeployLinkInput {
   environmentName?: string
   serviceId?: string
   serviceName?: string
+  /** Which checkout of the Shipyard project this link belongs to. */
+  subrepo?: string
 }
 
 export interface SyncProviderStatus {
@@ -523,15 +535,23 @@ export const api = {
   getRailwayProjects: () =>
     request<{ projects: RailwayProjectSummary[] }>('/deploy/railway/projects', { timeout: 20_000 }),
   getAllDeployStatus: () =>
-    request<{ statuses: Record<string, DeployStatus> }>('/deploy/status', { timeout: 20_000 }),
-  getDeployStatus: (projectId: string) => request<DeployStatus>(`/projects/${projectId}/deploy`, { timeout: 20_000 }),
+    request<{ statuses: Record<string, DeployStatus[]> }>('/deploy/status', { timeout: 20_000 }),
+  getDeployStatus: (projectId: string, subrepo?: string) =>
+    request<{ statuses: DeployStatus[] }>(
+      `/projects/${projectId}/deploy${subrepo !== undefined ? `?subrepo=${encodeURIComponent(subrepo)}` : ''}`,
+      { timeout: 20_000 }
+    ),
   linkDeploy: (projectId: string, body: DeployLinkInput) =>
     request<{ status: DeployStatus }>(`/projects/${projectId}/deploy`, {
       method: 'PUT',
       body: JSON.stringify(body),
       timeout: 20_000,
     }),
-  unlinkDeploy: (projectId: string) => request(`/projects/${projectId}/deploy`, { method: 'DELETE' }),
+  unlinkDeploy: (projectId: string, subrepo?: string) =>
+    request(
+      `/projects/${projectId}/deploy${subrepo !== undefined ? `?subrepo=${encodeURIComponent(subrepo)}` : ''}`,
+      { method: 'DELETE' }
+    ),
 
   // Settings
   getSettings: () => request<AppSettings>('/settings'),

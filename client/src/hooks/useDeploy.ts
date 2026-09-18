@@ -1,15 +1,36 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { api, type DeployLinkInput } from '@/lib/api'
+import { api, type DeployLinkInput, type DeployStatus } from '@/lib/api'
 
 /**
- * Deploy status per project. The server caches the Railway call (60s settled,
- * 15s while a build is running), so this poll is cheap; it only asks while the
- * page is in front.
+ * Deploy status per checkout. A project deploys from its root, from each of its
+ * sub-repositories, or from several at once — a client folder holding a dozen
+ * repos has a dozen possible deploys — so the unit here is a checkout, and a
+ * project's badge speaks for all of them.
+ *
+ * The server caches the Railway call (60s settled, 15s mid-build), so these
+ * polls are cheap.
  */
-export function useDeployStatus(projectId: string | undefined) {
+
+function anyBuilding(statuses: DeployStatus[] | undefined): boolean {
+  return !!statuses?.some(status => status.state === 'building')
+}
+
+/** Every linked checkout of one project. */
+export function useDeployStatuses(projectId: string | undefined) {
   return useQuery({
     queryKey: ['deploy-status', projectId],
-    queryFn: () => api.getDeployStatus(projectId!),
+    queryFn: async () => (await api.getDeployStatus(projectId!)).statuses,
+    enabled: !!projectId,
+    refetchInterval: (query) => (anyBuilding(query.state.data) ? 20_000 : 60_000),
+    staleTime: 15_000,
+  })
+}
+
+/** One checkout — the git panel asks for the sub-repository it is showing. */
+export function useDeployStatus(projectId: string | undefined, subrepo?: string) {
+  return useQuery({
+    queryKey: ['deploy-status', projectId, subrepo ?? '__root__'],
+    queryFn: async () => (await api.getDeployStatus(projectId!, subrepo ?? '')).statuses[0] ?? null,
     enabled: !!projectId,
     refetchInterval: (query) => (query.state.data?.state === 'building' ? 20_000 : 60_000),
     staleTime: 15_000,
@@ -17,7 +38,7 @@ export function useDeployStatus(projectId: string | undefined) {
 }
 
 /**
- * Deploy status of every linked project, in one request. The dashboard shows a
+ * Every linked checkout of every project, in one request. The dashboard shows a
  * dot per card, and a query per card would open a dozen requests a minute.
  */
 export function useAllDeployStatus() {
@@ -100,7 +121,8 @@ export function useLinkDeploy(projectId: string | undefined) {
   return useMutation({
     mutationFn: (body: DeployLinkInput) => api.linkDeploy(projectId!, body),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['deploy-status', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['deploy-status'] })
+      queryClient.invalidateQueries({ queryKey: ['deploy-matches'] })
     },
   })
 }
@@ -108,9 +130,10 @@ export function useLinkDeploy(projectId: string | undefined) {
 export function useUnlinkDeploy(projectId: string | undefined) {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => api.unlinkDeploy(projectId!),
+    mutationFn: (subrepo?: string) => api.unlinkDeploy(projectId!, subrepo),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['deploy-status', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['deploy-status'] })
+      queryClient.invalidateQueries({ queryKey: ['deploy-matches'] })
     },
   })
 }

@@ -334,7 +334,7 @@ export function ProjectSettingsDialog({ project, open, onOpenChange, defaultTab 
           {/* Launch preferences */}
           <TabsContent value="launch" className="space-y-4 mt-3">
             <div className="space-y-3">
-              <ProjectDeploySettings projectId={project.id} />
+              <ProjectDeploySettings projectId={project.id} subRepos={project.subRepos} />
 
               <p className="text-xs text-muted-foreground">
                 Launch shortcuts are available in the workspace header bar: Claude, Dev Server, Shell, and Open Folder.

@@ -1,42 +1,47 @@
 import { useState } from 'react'
-import { Loader2, Rocket, Unlink } from 'lucide-react'
+import { Loader2, Rocket, Unlink, Plus } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
-  useDeployProviders, useDeployStatus, useLinkDeploy, useRailwayProjects, useUnlinkDeploy,
+  useDeployProviders, useDeployStatuses, useLinkDeploy, useRailwayProjects, useUnlinkDeploy,
 } from '@/hooks/useDeploy'
 import { toast } from 'sonner'
-import { cn } from '@/lib/utils'
 
 /**
- * Which Railway project (and, if it has more than one, which service) this
- * project deploys to. Picked from the account's own list — nobody should have
- * to copy ids out of the Railway dashboard.
+ * Which Railway service each checkout of this project deploys to.
+ *
+ * Most of this is filled in automatically by matching git remotes against
+ * Railway's own repositories; what is left here is the exception — a checkout
+ * whose repo matches several services, or none.
  */
-export function ProjectDeploySettings({ projectId }: { projectId: string }) {
+export function ProjectDeploySettings({ projectId, subRepos }: { projectId: string; subRepos?: string[] }) {
   const { data: providers } = useDeployProviders()
-  const { data: status } = useDeployStatus(projectId)
+  const { data: statuses } = useDeployStatuses(projectId)
   const connected = !!providers?.providers?.railway?.connected
 
-  const [picking, setPicking] = useState(false)
-  const { data: railway, isLoading, error } = useRailwayProjects(picking && connected)
+  const [adding, setAdding] = useState(false)
+  const [scope, setScope] = useState<string>('')
+  const [railwayProject, setRailwayProject] = useState<string>('')
+  const { data: railway, isLoading, error } = useRailwayProjects(adding && connected)
   const link = useLinkDeploy(projectId)
   const unlink = useUnlinkDeploy(projectId)
 
-  const [selectedProject, setSelectedProject] = useState<string>('')
-  const chosen = railway?.projects.find(p => p.id === selectedProject)
+  const linked = (statuses || []).filter(status => status.configured)
+  const chosen = railway?.projects.find(p => p.id === railwayProject)
+  const checkouts = ['', ...(subRepos || [])]
+
+  const reset = () => { setAdding(false); setScope(''); setRailwayProject('') }
 
   const save = async (input: {
     projectId: string; projectName: string
-    environmentId?: string; environmentName?: string
     serviceId?: string; serviceName?: string
+    environmentId?: string; environmentName?: string
   }) => {
     try {
-      await link.mutateAsync(input)
-      setPicking(false)
-      setSelectedProject('')
-      toast.success('Railway project linked')
+      await link.mutateAsync({ ...input, ...(scope ? { subrepo: scope } : {}) })
+      toast.success(`Linked ${scope || 'the project'} to ${input.serviceName || input.projectName}`)
+      reset()
     } catch (err: any) {
-      toast.error(err.message || 'Could not link the project')
+      toast.error(err.message || 'Could not link')
     }
   }
 
@@ -55,62 +60,81 @@ export function ProjectDeploySettings({ projectId }: { projectId: string }) {
     <div className="space-y-2">
       <label className="text-xs font-medium text-muted-foreground">Deploys</label>
 
-      {status?.configured && !picking && (
-        <div className="flex items-center gap-2 rounded-md border px-3 py-2">
-          <Rocket className="h-3.5 w-3.5 shrink-0 text-primary" />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-xs font-medium">{status.projectName || 'Railway project'}</p>
-            <p className="truncate text-[10px] text-muted-foreground">
-              {[status.serviceName, status.environmentName].filter(Boolean).join(' · ') || 'All services'}
-            </p>
-          </div>
-          <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={() => setPicking(true)}>
-            Change
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            title="Unlink"
-            disabled={unlink.isPending}
-            onClick={async () => {
-              await unlink.mutateAsync()
-              toast.success('Railway project unlinked')
-            }}
-          >
-            <Unlink className="h-3.5 w-3.5" />
-          </Button>
+      {linked.length > 0 && (
+        <div className="space-y-1">
+          {linked.map(status => (
+            <div key={status.subrepo || '__root__'} className="flex items-center gap-2 rounded-md border px-3 py-2">
+              <Rocket className="h-3.5 w-3.5 shrink-0 text-primary" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-xs font-medium">
+                  {status.subrepo || 'Project root'}
+                </p>
+                <p className="truncate text-[10px] text-muted-foreground">
+                  {[status.projectName, status.serviceName, status.environmentName].filter(Boolean).join(' · ')}
+                </p>
+              </div>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
+                title="Unlink"
+                disabled={unlink.isPending}
+                onClick={async () => {
+                  await unlink.mutateAsync(status.subrepo ?? '')
+                  toast.success('Unlinked')
+                }}
+              >
+                <Unlink className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
         </div>
       )}
 
-      {!status?.configured && !picking && (
-        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setPicking(true)}>
-          <Rocket className="h-3.5 w-3.5" />
-          Link a Railway project
+      {!adding && (
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={() => setAdding(true)}>
+          <Plus className="h-3.5 w-3.5" />
+          {linked.length > 0 ? 'Link another checkout' : 'Link a Railway project'}
         </Button>
       )}
 
-      {picking && (
+      {adding && (
         <div className="space-y-2 rounded-md border p-2">
+          {/* Which checkout — only worth asking when the project holds several */}
+          {checkouts.length > 1 && (
+            <div className="space-y-1">
+              <p className="px-1 text-[10px] text-muted-foreground">Which checkout?</p>
+              <div className="flex flex-wrap gap-1">
+                {checkouts.map(value => (
+                  <button
+                    key={value || '__root__'}
+                    className={`rounded border px-1.5 py-0.5 text-[10px] transition-colors hover:bg-accent ${
+                      scope === value ? 'border-primary text-primary' : ''
+                    }`}
+                    onClick={() => setScope(value)}
+                  >
+                    {value || 'Project root'}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {isLoading && (
             <p className="flex items-center gap-2 px-1 py-2 text-[11px] text-muted-foreground">
               <Loader2 className="h-3 w-3 animate-spin" />
               Reading your Railway projects…
             </p>
           )}
-          {error && (
-            <p className="px-1 py-2 text-[11px] text-destructive">{(error as Error).message}</p>
-          )}
+          {error && <p className="px-1 py-2 text-[11px] text-destructive">{(error as Error).message}</p>}
 
-          {railway && !selectedProject && (
+          {railway && !railwayProject && (
             <div className="max-h-48 space-y-0.5 overflow-y-auto">
               {railway.projects.map(project => (
                 <button
                   key={project.id}
                   className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
                   onClick={() => {
-                    // One service and one environment is the common case — no
-                    // point asking a question with a single answer.
                     if (project.services.length <= 1) {
                       save({
                         projectId: project.id,
@@ -123,7 +147,7 @@ export function ProjectDeploySettings({ projectId }: { projectId: string }) {
                           : {}),
                       })
                     } else {
-                      setSelectedProject(project.id)
+                      setRailwayProject(project.id)
                     }
                   }}
                 >
@@ -148,7 +172,7 @@ export function ProjectDeploySettings({ projectId }: { projectId: string }) {
                 {chosen.services.map(service => (
                   <button
                     key={service.id}
-                    className={cn('w-full truncate rounded px-2 py-1.5 text-left text-xs hover:bg-accent')}
+                    className="flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
                     onClick={() => save({
                       projectId: chosen.id,
                       projectName: chosen.name,
@@ -159,7 +183,10 @@ export function ProjectDeploySettings({ projectId }: { projectId: string }) {
                         : {}),
                     })}
                   >
-                    {service.name}
+                    <span className="truncate">{service.name}</span>
+                    {service.repo && (
+                      <span className="shrink-0 truncate pl-2 font-mono text-[9px] text-muted-foreground">{service.repo}</span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -167,12 +194,7 @@ export function ProjectDeploySettings({ projectId }: { projectId: string }) {
           )}
 
           <div className="flex justify-end gap-2 border-t pt-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-7 text-[10px]"
-              onClick={() => { setPicking(false); setSelectedProject('') }}
-            >
+            <Button size="sm" variant="ghost" className="h-7 text-[10px]" onClick={reset}>
               Cancel
             </Button>
           </div>

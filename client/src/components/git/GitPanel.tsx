@@ -10,6 +10,7 @@ import { CommitDetailDialog } from './CommitDetailDialog'
 import { useGitStatus, useGitLog, useGitMainCommit, useGitBranches, useCheckoutBranch, useStageAll, useUnstageAll, useGitPush, useGitPull, useDiscardAll, useUndoCommit } from '@/hooks/useGit'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { DeployScopeBadge } from '@/components/deploy/DeployBadge'
 
 interface GitPanelProps {
   projectId: string
@@ -67,7 +68,11 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
     <div className="space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Git</h2>
+        <div className="flex min-w-0 items-center gap-2">
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Git</h2>
+          {/* Deploy of the repository on screen — nothing when it has none */}
+          <DeployScopeBadge projectId={projectId} subrepo={subrepo} />
+        </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => refetch()} title="Refresh" disabled={isFetching}>
             <RefreshCw className={cn('h-3.5 w-3.5', isFetching && 'animate-spin')} />

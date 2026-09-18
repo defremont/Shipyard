@@ -80,21 +80,29 @@ export async function deployRoutes(app: FastifyInstance) {
     }
   );
 
-  // Every linked project in one call — the dashboard draws a dot per card and
-  // must not open one request per card.
+  // Every linked checkout in one call — the dashboard draws a dot per card and
+  // must not open one request per card. Keyed by project, since that is what a
+  // card is; a project with several sub-repositories carries several entries.
   app.get('/api/deploy/status', async () => {
     const links = await deployStore.listLinks();
-    const ids = Object.keys(links);
-    const results = await Promise.all(ids.map(id => deployService.getStatus(id)));
-    const statuses: Record<string, deployService.DeployStatus> = {};
+    const ids = [...new Set(links.map(entry => entry.projectId))];
+    const results = await Promise.all(ids.map(id => deployService.getProjectStatuses(id)));
+    const statuses: Record<string, deployService.DeployStatus[]> = {};
     ids.forEach((id, index) => { statuses[id] = results[index]; });
     return { statuses };
   });
 
-  app.get<{ Params: { projectId: string } }>(
+  // Without `subrepo`, every linked checkout of the project; with it, just that
+  // one. The project toolbar wants the first, the git panel the second.
+  app.get<{ Params: { projectId: string }; Querystring: { subrepo?: string } }>(
     '/api/projects/:projectId/deploy',
     async (request) => {
-      return deployService.getStatus(request.params.projectId);
+      const { projectId } = request.params;
+      const { subrepo } = request.query;
+      if (subrepo !== undefined) {
+        return { statuses: [await deployService.getStatus(projectId, subrepo || undefined)] };
+      }
+      return { statuses: await deployService.getProjectStatuses(projectId) };
     }
   );
 
@@ -107,6 +115,7 @@ export async function deployRoutes(app: FastifyInstance) {
       environmentName?: string;
       serviceId?: string;
       serviceName?: string;
+      subrepo?: string;
     };
   }>(
     '/api/projects/:projectId/deploy',
@@ -122,18 +131,23 @@ export async function deployRoutes(app: FastifyInstance) {
         ...(body.environmentName ? { environmentName: body.environmentName } : {}),
         ...(body.serviceId ? { serviceId: body.serviceId } : {}),
         ...(body.serviceName ? { serviceName: body.serviceName } : {}),
+        ...(body.subrepo ? { subrepo: body.subrepo } : {}),
       });
-      deployService.invalidate(request.params.projectId);
-      log.info('server', 'Deploy link saved', link.projectName || link.projectId, request.params.projectId);
-      return { link, status: await deployService.getStatus(request.params.projectId) };
+      deployService.invalidate(request.params.projectId, body.subrepo);
+      log.info('server', 'Deploy link saved', `${link.projectName || link.projectId}${body.subrepo ? ` (${body.subrepo})` : ''}`, request.params.projectId);
+      return { link, status: await deployService.getStatus(request.params.projectId, body.subrepo) };
     }
   );
 
-  app.delete<{ Params: { projectId: string } }>(
+  // `subrepo` removes one checkout's link; without it the whole project's go.
+  app.delete<{ Params: { projectId: string }; Querystring: { subrepo?: string } }>(
     '/api/projects/:projectId/deploy',
     async (request) => {
-      await deployStore.clearLink(request.params.projectId);
-      deployService.invalidate(request.params.projectId);
+      const { projectId } = request.params;
+      const { subrepo } = request.query;
+      if (subrepo !== undefined) await deployStore.clearLink(projectId, subrepo || undefined);
+      else await deployStore.clearProject(projectId);
+      deployService.invalidate(projectId, subrepo);
       return { linked: false };
     }
   );

@@ -17,7 +17,13 @@ const ENCRYPTION_KEY_FILE = join(DATA_DIR, '.claude-key');
 export const DEPLOY_PROVIDERS = ['railway'] as const;
 export type DeployProvider = (typeof DEPLOY_PROVIDERS)[number];
 
-/** Which Railway project (and optionally which service) a project deploys to. */
+/**
+ * Which Railway project and service a checkout deploys to.
+ *
+ * The unit is a **checkout**, not a Shipyard project: a client folder holds a
+ * dozen repositories that each deploy somewhere of their own, so a project can
+ * hold several links — one per sub-repository, plus one for the root.
+ */
 export interface ProjectDeployLink {
   provider: DeployProvider;
   projectId: string;
@@ -26,15 +32,42 @@ export interface ProjectDeployLink {
   environmentName?: string;
   serviceId?: string;
   serviceName?: string;
+  /** Sub-repository this link belongs to; absent means the project root. */
+  subrepo?: string;
   updatedAt: string;
+}
+
+/** Key a link is stored under inside a project. */
+export const ROOT_SCOPE = '__root__';
+
+export function scopeKey(subrepo?: string | null): string {
+  return subrepo && subrepo.trim() ? subrepo : ROOT_SCOPE;
 }
 
 interface DeployConfig {
   tokens: Partial<Record<DeployProvider, string>>;
-  projects: Record<string, ProjectDeployLink>;
+  /** projectId → scope key → link */
+  projects: Record<string, Record<string, ProjectDeployLink>>;
 }
 
 const EMPTY: DeployConfig = { tokens: {}, projects: {} };
+
+/**
+ * v1 stored one link per project, unscoped. Reading it as the root scope keeps
+ * every link people already have — nobody reconnects because of this change.
+ */
+function migrateProjects(raw: any): DeployConfig['projects'] {
+  const projects: DeployConfig['projects'] = {};
+  for (const [projectId, value] of Object.entries(raw || {})) {
+    if (!value || typeof value !== 'object') continue;
+    if ((value as any).provider) {
+      projects[projectId] = { [ROOT_SCOPE]: value as ProjectDeployLink };
+    } else {
+      projects[projectId] = value as Record<string, ProjectDeployLink>;
+    }
+  }
+  return projects;
+}
 
 // ── Encryption (AES-256-GCM, same key file as the AI credentials) ────────
 
@@ -87,7 +120,7 @@ async function load(): Promise<DeployConfig> {
         // Encrypted with a different key — unrecoverable, ask for it again.
       }
     }
-    cached = { tokens, projects: data.projects || {} };
+    cached = { tokens, projects: migrateProjects(data.projects) };
   } catch {
     cached = { ...EMPTY };
   }
@@ -100,7 +133,7 @@ async function persist(config: DeployConfig): Promise<void> {
   for (const [provider, token] of Object.entries(config.tokens)) {
     if (token) tokens[provider] = encrypt(token, key);
   }
-  const payload = JSON.stringify({ version: 1, tokens, projects: config.projects }, null, 2);
+  const payload = JSON.stringify({ version: 2, tokens, projects: config.projects }, null, 2);
   await mkdir(DATA_DIR, { recursive: true });
   const tmp = `${CONFIG_FILE}.tmp`;
   await writeFile(tmp, payload, 'utf-8');
@@ -136,12 +169,26 @@ export async function clearToken(provider: DeployProvider): Promise<void> {
   });
 }
 
-export async function getLink(projectId: string): Promise<ProjectDeployLink | null> {
-  return (await load()).projects[projectId] ?? null;
+/** One checkout's link: the root, or a named sub-repository. */
+export async function getLink(projectId: string, subrepo?: string | null): Promise<ProjectDeployLink | null> {
+  return (await load()).projects[projectId]?.[scopeKey(subrepo)] ?? null;
 }
 
-export async function listLinks(): Promise<Record<string, ProjectDeployLink>> {
-  return { ...(await load()).projects };
+/** Every link of one project, keyed by scope. */
+export async function getProjectLinks(projectId: string): Promise<Record<string, ProjectDeployLink>> {
+  return { ...((await load()).projects[projectId] || {}) };
+}
+
+/** Every link of every project, flattened. */
+export async function listLinks(): Promise<{ projectId: string; scope: string; link: ProjectDeployLink }[]> {
+  const { projects } = await load();
+  const list: { projectId: string; scope: string; link: ProjectDeployLink }[] = [];
+  for (const [projectId, scopes] of Object.entries(projects)) {
+    for (const [scope, link] of Object.entries(scopes)) {
+      list.push({ projectId, scope, link });
+    }
+  }
+  return list;
 }
 
 export async function setLink(
@@ -149,13 +196,27 @@ export async function setLink(
   link: Omit<ProjectDeployLink, 'updatedAt'>,
 ): Promise<ProjectDeployLink> {
   const stored: ProjectDeployLink = { ...link, updatedAt: new Date().toISOString() };
+  const scope = scopeKey(link.subrepo);
   await mutate(config => {
-    config.projects[projectId] = stored;
+    config.projects[projectId] = { ...(config.projects[projectId] || {}), [scope]: stored };
   });
   return stored;
 }
 
-export async function clearLink(projectId: string): Promise<void> {
+export async function clearLink(projectId: string, subrepo?: string | null): Promise<void> {
+  const scope = scopeKey(subrepo);
+  await mutate(config => {
+    const scopes = config.projects[projectId];
+    if (!scopes) return;
+    const next = { ...scopes };
+    delete next[scope];
+    if (Object.keys(next).length === 0) delete config.projects[projectId];
+    else config.projects[projectId] = next;
+  });
+}
+
+/** Drop every link of a project — used when the user unlinks the whole thing. */
+export async function clearProject(projectId: string): Promise<void> {
   await mutate(config => {
     delete config.projects[projectId];
   });
