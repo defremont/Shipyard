@@ -9,6 +9,8 @@ import { useProjects, useRefreshProjects, type Project } from '@/hooks/useProjec
 import { useAllTasks } from '@/hooks/useTasks'
 import { useTabs } from '@/hooks/useTabs'
 import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
+import { useQueryClient } from '@tanstack/react-query'
+import { prefetchProject } from '@/lib/prefetch'
 
 // Restrained, desaturated set — enough hues to tell projects apart without
 // turning the sidebar into a rainbow.
@@ -34,19 +36,22 @@ function ProjectAvatar({ name, className }: { name: string; className?: string }
 }
 
 function ProjectItem({
-  project, isCurrent, taskCount, isActive, onClick,
+  project, isCurrent, taskCount, isActive, onClick, onHover,
 }: {
   project: Project
   isCurrent: boolean
   taskCount?: number
   isActive?: boolean
   onClick: () => void
+  onHover: () => void
 }) {
   const changes = (project.gitStaged ?? 0) + (project.gitUnstaged ?? 0) + (project.gitUntracked ?? 0)
   return (
     <ProjectContextMenu project={project}>
     <button
       onClick={onClick}
+      onMouseEnter={onHover}
+      onFocus={onHover}
       className={cn(
         'flex items-center gap-2 px-2 py-1 rounded-md text-[12px] transition-colors w-full text-left',
         isCurrent
@@ -125,6 +130,7 @@ export function ProjectsView() {
   const { data: tasks } = useAllTasks()
   const refreshProjects = useRefreshProjects()
   const { openTab } = useTabs()
+  const queryClient = useQueryClient()
 
   const { pendingByProject, inProgressProjects } = useMemo(() => {
     const pending = new Map<string, number>()
@@ -198,6 +204,7 @@ export function ProjectsView() {
                   taskCount={pendingByProject.get(p.id)}
                   isActive={inProgressProjects.has(p.id)}
                   onClick={() => openTab(p.id)}
+                  onHover={() => prefetchProject(queryClient, p.id)}
                 />
               ))}
             </div>
@@ -213,6 +220,7 @@ export function ProjectsView() {
                   taskCount={pendingByProject.get(p.id)}
                   isActive
                   onClick={() => openTab(p.id)}
+                  onHover={() => prefetchProject(queryClient, p.id)}
                 />
               ))}
             </div>
@@ -242,6 +250,7 @@ export function ProjectsView() {
                   isCurrent={location.pathname === `/project/${p.id}`}
                   taskCount={pendingByProject.get(p.id)}
                   onClick={() => openTab(p.id)}
+                  onHover={() => prefetchProject(queryClient, p.id)}
                 />
               ))}
             </div>

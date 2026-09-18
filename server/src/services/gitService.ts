@@ -20,18 +20,87 @@ function getGit(projectPath: string): SimpleGit {
   return instance;
 }
 
-export async function fetch(projectPath: string): Promise<void> {
-  const git = getGit(projectPath);
-  try {
-    await git.fetch();
-  } catch {
-    // ignore fetch errors (no remote, no network, etc)
+// `fetch` talks to the network: a slow remote or a credential prompt can hold
+// it for a minute or more. It gets its own SimpleGit instance so it never sits
+// in the shared queue in front of a status/log read, and it never asks for
+// credentials — an unanswerable prompt is what made it hang in the first place.
+const fetchInstances = new Map<string, SimpleGit>();
+const fetchInFlight = new Map<string, Promise<void>>();
+const FETCH_BLOCK_TIMEOUT_MS = 120_000;
+
+function getFetchGit(projectPath: string): SimpleGit {
+  const key = path.resolve(projectPath);
+  let instance = fetchInstances.get(key);
+  if (!instance) {
+    instance = simpleGit(projectPath, {
+      config: ['core.quotepath=false'],
+      timeout: { block: FETCH_BLOCK_TIMEOUT_MS },
+    });
+    fetchInstances.set(key, instance);
   }
+  return instance;
+}
+
+/** Refresh remote refs. Callers should not await it on a request path. */
+export function fetch(projectPath: string): Promise<void> {
+  const key = path.resolve(projectPath);
+  const running = fetchInFlight.get(key);
+  if (running) return running;
+
+  const promise = (async () => {
+    try {
+      const git = getFetchGit(projectPath).env({
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        GCM_INTERACTIVE: 'never',
+      });
+      await git.fetch();
+      // ahead/behind just moved — don't serve the pre-fetch counts.
+      invalidateStatus(projectPath);
+    } catch {
+      // ignore fetch errors (no remote, no network, no credentials)
+    } finally {
+      fetchInFlight.delete(key);
+    }
+  })();
+
+  fetchInFlight.set(key, promise);
+  return promise;
+}
+
+// A repo's status is polled by the git panel (5s), the project list refresh
+// (15s) and the task review at once. Without this, each of those spawns its own
+// `git status` and they queue up behind each other on the same repo.
+const STATUS_TTL_MS = 2_500;
+const statusCache = new Map<string, { at: number; result: StatusResult }>();
+const statusInFlight = new Map<string, Promise<StatusResult>>();
+
+/** Drop the cached status of a repo — every write path below calls this. */
+function invalidateStatus(projectPath: string): void {
+  statusCache.delete(path.resolve(projectPath));
 }
 
 export async function getStatus(projectPath: string): Promise<StatusResult> {
-  const git = getGit(projectPath);
-  return git.status();
+  const key = path.resolve(projectPath);
+
+  const cached = statusCache.get(key);
+  if (cached && Date.now() - cached.at < STATUS_TTL_MS) return cached.result;
+
+  const inFlight = statusInFlight.get(key);
+  if (inFlight) return inFlight;
+
+  const promise = getGit(projectPath)
+    .status()
+    .then(result => {
+      statusCache.set(key, { at: Date.now(), result });
+      return result;
+    })
+    .finally(() => {
+      statusInFlight.delete(key);
+    });
+
+  statusInFlight.set(key, promise);
+  return promise;
 }
 
 export async function getRemotes(projectPath: string) {
@@ -54,37 +123,44 @@ export async function getFileAtRef(projectPath: string, file: string, ref = 'HEA
 export async function stageFile(projectPath: string, file: string): Promise<void> {
   const git = getGit(projectPath);
   await git.add(file);
+  invalidateStatus(projectPath);
 }
 
 export async function stageAll(projectPath: string): Promise<void> {
   const git = getGit(projectPath);
   await git.add('-A');
+  invalidateStatus(projectPath);
 }
 
 export async function unstageFile(projectPath: string, file: string): Promise<void> {
   const git = getGit(projectPath);
   await git.reset(['HEAD', '--', file]);
+  invalidateStatus(projectPath);
 }
 
 export async function unstageAll(projectPath: string): Promise<void> {
   const git = getGit(projectPath);
   await git.reset(['HEAD']);
+  invalidateStatus(projectPath);
 }
 
 export async function commit(projectPath: string, message: string): Promise<string> {
   const git = getGit(projectPath);
   const result = await git.commit(message);
+  invalidateStatus(projectPath);
   return result.commit;
 }
 
 export async function push(projectPath: string): Promise<void> {
   const git = getGit(projectPath);
   await git.push();
+  invalidateStatus(projectPath);
 }
 
 export async function pull(projectPath: string): Promise<void> {
   const git = getGit(projectPath);
   await git.pull();
+  invalidateStatus(projectPath);
 }
 
 export async function getLog(projectPath: string, maxCount = 20): Promise<LogResult> {
@@ -100,6 +176,7 @@ export async function getBranches(projectPath: string) {
 export async function checkoutBranch(projectPath: string, branch: string): Promise<void> {
   const git = getGit(projectPath);
   await git.checkout(branch);
+  invalidateStatus(projectPath);
 }
 
 export async function discardFile(projectPath: string, file: string, type: 'staged' | 'unstaged' | 'untracked'): Promise<void> {
@@ -126,6 +203,7 @@ export async function discardFile(projectPath: string, file: string, type: 'stag
       await fsp.unlink(fullPath);
     }
   }
+  invalidateStatus(projectPath);
 }
 
 export async function discardAll(projectPath: string, section: 'staged' | 'unstaged'): Promise<void> {
@@ -158,6 +236,7 @@ export async function discardAll(projectPath: string, section: 'staged' | 'unsta
       } catch { /* ignore */ }
     }
   }
+  invalidateStatus(projectPath);
 }
 
 export async function undoLastCommit(projectPath: string): Promise<void> {
@@ -169,6 +248,7 @@ export async function undoLastCommit(projectPath: string): Promise<void> {
     throw new Error('No commits to undo');
   }
   await git.reset(['--soft', 'HEAD~1']);
+  invalidateStatus(projectPath);
 }
 
 export async function getCommitDiff(projectPath: string, hash: string): Promise<{ files: { file: string; status: string; additions: number; deletions: number }[]; diff: string }> {

@@ -111,7 +111,7 @@ interface Project {
 **Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
 **Git**: GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
-**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
+**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **AI (multi-provedor)**: GET /api/ai/status, POST /api/ai/preferred, POST/DELETE /api/ai/config/:provider, POST /api/ai/config/:provider/test
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
@@ -129,7 +129,7 @@ interface Project {
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
   POST /api/worktrees/clean (`{ all? }`), DELETE /api/projects/:id/tasks/:tid/worktree
-**Sistema**: GET /api/settings, POST /api/browse
+**Sistema**: GET/PATCH /api/settings (PATCH so aceita `terminalAiTitles`), POST /api/browse
 
 ## Portas
 
@@ -272,7 +272,10 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `detectSubRepos()` em projectDiscovery.ts escaneia 1 nivel de profundidade
 - `subRepos` armazena caminhos relativos dos sub-repos encontrados
 - Todas rotas git aceitam parametro opcional `subrepo` (query para GET, body para POST)
-- GitPanel mostra tabs para selecionar sub-repo quando ha mais de um
+- O seletor de repo no Source Control e um **dropdown com filtro**
+  (`RepoSelector` em GitPanel.tsx) — uma fila de tabs era ilegivel num painel de
+  280px com 12 sub-repos. A escolha e lembrada por projeto em
+  `shipyard:git-repo:{projectId}` e restaurada ao voltar pro projeto
 - Query keys incluem `subrepo`: `['git-status', projectId, subrepo]`
 
 ### MCP (servidor de ferramentas para agentes)
@@ -311,6 +314,18 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `projectDiscovery`: refresh de git a cada 15s usa `gitService` (instancia
   compartilhada por repo = fila serializada). `status.current` ja da o branch —
   nao chamar `git.branch()`. Remote URL e sub-repos sao cacheados
+- `gitService`: **`fetch` nunca bloqueia uma rota**. Ele fala com a rede (um
+  remote lento ou um prompt de credencial travava `git/status` por dezenas de
+  segundos — medido em 80s num sub-repo), roda numa instancia SimpleGit propria
+  (fila separada da de leitura), com `GIT_TERMINAL_PROMPT=0` e dedupe por repo.
+  A rota de status dispara com `void` e o poll de 5s pega o novo ahead/behind
+- `gitService.getStatus`: cache de 2,5s por repo + dedupe de chamadas em voo —
+  o painel (5s), o refresh de projetos (15s) e o task review pediam o mesmo
+  `git status` e enfileiravam no mesmo repo. **Toda mutacao chama
+  `invalidateStatus`** (senao a UI mostra estado velho depois de um stage)
+- `lib/prefetch.ts`: passar o mouse numa aba/linha de projeto ja busca tasks e
+  git status daquele projeto (cooldown de 10s). As chaves tem que espelhar
+  `useTasks`/`useGitStatus` — chave diferente enche cache que ninguem le
 - `logService`: escritas em disco sao bufferizadas (flush 200ms / 64 linhas)
 - Componentes de lista (`TaskItem`, `SortableTaskItem`, `TaskRow`) sao `React.memo` —
   o structural sharing do react-query mantem `task` estavel entre polls
@@ -355,6 +370,39 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Transicoes viram frame WS `{ type: 'state', state }`; o estado atual e
   reenviado quando um socket conecta. No client vira `awaitingInput` no
   `GlobalTab` (transitorio: resetado na validacao de sessoes no mount)
+
+### Abas do terminal: nome, ordem e split
+- O nome de uma aba nao e uma string so: o server guarda `projectName`,
+  `typeLabel`, `taskTitle`/`taskNumber`, `customTitle` e `summary` na sessao, e
+  `describeTab()` (TerminalPanel) escolhe nessa ordem —
+  **customTitle > task > summary da IA > tipo**. O `title` antigo
+  (`[Projeto] Shell`) so serve de fallback para sessao velha
+- Sessao aberta para uma task recebe titulo e numero da task **no server**
+  (`POST /api/terminal/sessions` le a task) — sobrevive a refresh sem o client
+  carregar nada
+- Aba sem task ganha um rotulo escrito pela IA a partir da saida do proprio
+  terminal (`terminalSummary.ts` + `startSummaryWatcher`). Regras que nao podem
+  cair: so tipos `shell`/`dev`, so depois de 3s de silencio e 120 chars novos,
+  no maximo uma chamada a cada 45s por sessao, **uma chamada por vez no
+  processo inteiro** (fila em terminalSummary) e a sessao sai do watcher depois
+  de 2 falhas. Desliga em Settings > AI (`terminalAiTitles`)
+- `cleanTerminalOutput` existe porque o ConPTY **move o cursor** em vez de
+  escrever `
+`: sem transformar `ESC[linha;colH` em quebra de linha, um
+  `git status` inteiro vira uma linha so. E o `
+` do CRLF tem que sair antes
+  do split de redraw, senao o texto da linha some com ele
+- Renomear: duplo clique na aba ou "Rename tab" no menu. Campo vazio devolve a
+  aba ao nome automatico. O nome vai pro server (sobrevive a refresh)
+- O tooltip da aba e o `title` nativo, como nas abas de projeto: um Tooltip do
+  Radix em volta do trigger **engole o clique direito** que abre o menu
+- Abas dividem a largura (`basis-0 flex-1`), truncam e sao reordenaveis por
+  drag (mesmo gesto das abas de projeto)
+- Fechar uma aba leva o workspace para o projeto da aba vizinha
+  (`followTabProject`) — antes o terminal trocava e o projeto ficava para tras
+- No split, a cor vive **so** no numero do pane (1 azul / 2 verde) e na regua
+  do topo do pane focado. Nada de anel colorido em volta da aba: ao lado das
+  abas de projeto, neutras, aquilo virava ruido
 
 ### Atalhos globais e comportamento das abas
 - `useGlobalShortcuts` (chamado em `LayoutInner`) e a casa dos atalhos que valem

@@ -5,15 +5,18 @@ import { cn } from '@/lib/utils'
 import { useTabs } from '@/hooks/useTabs'
 import { useProjects, type Project } from '@/hooks/useProjects'
 import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
+import { useQueryClient } from '@tanstack/react-query'
+import { prefetchProject } from '@/lib/prefetch'
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu'
 
-const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDragging, isDragOver, onSwitch, onClose, onCloseOthers, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
+const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDragging, isDragOver, onSwitch, onHover, onClose, onCloseOthers, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
   tabId: string
   project?: Project
   isActive: boolean
   isDragging: boolean
   isDragOver: boolean
   onSwitch: () => void
+  onHover: () => void
   onClose: () => void
   onCloseOthers: () => void
   onDragStart: (event: React.DragEvent) => void
@@ -36,6 +39,7 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
           onClose()
         }
       }}
+      onMouseEnter={onHover}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onDragOver={onDragOver}
@@ -114,6 +118,7 @@ export function TabBar() {
   const { data: projects } = useProjects()
   const location = useLocation()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [draggingId, setDraggingId] = useState<string | null>(null)
   const [dragOverId, setDragOverId] = useState<string | null>(null)
 
@@ -149,6 +154,7 @@ export function TabBar() {
             isDragging={draggingId === tab.id}
             isDragOver={dragOverId === tab.id && draggingId !== tab.id}
             onSwitch={() => switchTab(tab.id)}
+            onHover={() => prefetchProject(queryClient, tab.id)}
             onClose={() => closeTab(tab.id)}
             onCloseOthers={() => closeOtherTabs(tab.id)}
             onDragStart={(event) => {

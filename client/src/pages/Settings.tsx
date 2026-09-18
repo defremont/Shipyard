@@ -7,6 +7,7 @@ import { SyncSettingsCard } from '@/components/sync/SyncSettingsCard'
 import { AiSettingsCard } from '@/components/ai/AiSettingsCard'
 import { AgentSettingsCard } from '@/components/ai/AgentSettingsCard'
 import { WorktreeSettingsCard } from '@/components/ai/WorktreeSettingsCard'
+import { TerminalTitleSettingsCard } from '@/components/ai/TerminalTitleSettingsCard'
 import { McpSettingsCard } from '@/components/mcp/McpSettingsCard'
 import { FolderPlus, Plus, FolderOpen, Check, Loader2, GitBranch, X, FolderSearch, Download, Upload, Volume2, VolumeX, Sparkles, Server, Cloud, Database } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
@@ -426,6 +427,7 @@ export function Settings() {
               <AiSettingsCard />
               <AgentSettingsCard />
               <WorktreeSettingsCard />
+              <TerminalTitleSettingsCard />
               <McpSettingsCard />
               <SyncSettingsCard projects={projects || []} />
             </>

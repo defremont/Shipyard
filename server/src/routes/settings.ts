@@ -1,5 +1,5 @@
 import { FastifyInstance } from 'fastify';
-import { getSettings } from '../services/settingsStore.js';
+import { getSettings, saveSettings } from '../services/settingsStore.js';
 import { TASKS_DIR } from '../services/taskStore.js';
 import { readdir, stat } from 'fs/promises';
 import { join } from 'path';
@@ -8,6 +8,20 @@ export async function settingsRoutes(app: FastifyInstance) {
   app.get('/api/settings', async () => {
     return { ...getSettings(), tasksDir: TASKS_DIR };
   });
+
+  // Preferences the UI can flip. Only the keys listed here are writable —
+  // project selection and agents have their own endpoints.
+  app.patch<{ Body: { terminalAiTitles?: boolean } }>(
+    '/api/settings',
+    async (request) => {
+      const next = { ...getSettings() };
+      if (request.body?.terminalAiTitles !== undefined) {
+        next.terminalAiTitles = !!request.body.terminalAiTitles;
+      }
+      await saveSettings(next);
+      return { ...getSettings(), tasksDir: TASKS_DIR };
+    }
+  );
 
   // List subdirectories of a given path (for folder browser)
   app.post<{ Body: { path: string } }>(

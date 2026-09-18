@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { resolveAgent, buildAgentLaunch, DEFAULT_AGENT_ID } from './agentRegistry.js';
+import { aiTitlesEnabled, summarizeTerminal } from './terminalSummary.js';
 import type { AgentDefinition } from '../types/index.js';
 
 const os = platform();
@@ -38,6 +39,17 @@ export interface TerminalSession {
   onStateChange?: (state: TerminalState) => void;
   /** True once the output watcher has been attached (never attach twice) */
   watching?: boolean;
+  /** Project name, so the client can build the tab label itself */
+  projectName?: string;
+  /** What runs here: 'Shell', 'Dev', 'Claude Code'… */
+  typeLabel?: string;
+  /** Task this session was opened for — the tab is named after it */
+  taskTitle?: string;
+  taskNumber?: number;
+  /** Name the user typed for this tab. Wins over every other label. */
+  customTitle?: string;
+  /** Short AI-written label for a plain shell, from its own output */
+  summary?: string;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -83,6 +95,8 @@ export async function createSession(
   agentId?: string,
   /** Overrides projectPath — a task running in its own worktree passes it. */
   cwd?: string,
+  /** Task behind this session, so the tab can say what it is working on. */
+  task?: { title?: string; number?: number },
 ): Promise<string | null> {
   if (!nodePty) return null;
 
@@ -163,7 +177,11 @@ export async function createSession(
     pty,
     cwd: workdir,
     createdAt: new Date().toISOString(),
+    projectName: projectName || projectId,
+    typeLabel,
     ...(taskId ? { taskId } : {}),
+    ...(task?.title ? { taskTitle: task.title } : {}),
+    ...(task?.number ? { taskNumber: task.number } : {}),
     ...(agent ? { agent: agent.id } : {}),
     ...(CLAUDE_SESSION_TYPES.has(type) ? { state: 'busy' as TerminalState } : {}),
   };
@@ -188,6 +206,11 @@ export async function createSession(
     startOutputWatcher(id);
   }
 
+  // A tab with no task behind it gets its name from what the terminal shows.
+  if (!taskId && SUMMARY_SESSION_TYPES.has(type)) {
+    startSummaryWatcher(id);
+  }
+
   return id;
 }
 
@@ -206,6 +229,7 @@ export function killSession(id: string): boolean {
   clearQueue(id);
   pendingResizes.delete(id);
   stopOutputWatcher(id);
+  stopSummaryWatcher(id);
   return true;
 }
 
@@ -633,6 +657,102 @@ function startOutputWatcher(sessionId: string): void {
   }, WATCH_TICK);
 
   watchers.set(sessionId, { timer, dispose: () => disposable.dispose() });
+}
+
+/**
+ * Name a tab by hand. An empty title clears it, which hands the tab back to
+ * the automatic label (task title, AI summary or the session type).
+ */
+export function renameSession(id: string, title: string | null | undefined): boolean {
+  const session = sessions.get(id);
+  if (!session) return false;
+  const clean = (title || '').trim().slice(0, 60);
+  if (clean) session.customTitle = clean;
+  else delete session.customTitle;
+  return true;
+}
+
+// ── AI tab labels ──────────────────────────────────────────────────────
+//
+// A shell has no task to name it, so the tab is named after its own output.
+// Every guard here exists to keep that from turning into a stream of AI calls:
+// only after the output settles, at most once per session per interval, one
+// call at a time process-wide (the queue lives in terminalSummary), and a
+// session whose calls fail twice is dropped — there is no usable backend.
+
+const SUMMARY_SESSION_TYPES = new Set(['shell', 'dev']);
+const SUMMARY_SETTLE_MS = 3_000;
+const SUMMARY_MIN_INTERVAL_MS = 45_000;
+const SUMMARY_MIN_CHARS = 120;
+const SUMMARY_TICK = 1_500;
+const SUMMARY_MAX_FAILURES = 2;
+
+const summaryWatchers = new Map<string, { timer: NodeJS.Timeout; dispose: () => void }>();
+
+function stopSummaryWatcher(id: string): void {
+  const watcher = summaryWatchers.get(id);
+  if (!watcher) return;
+  summaryWatchers.delete(id);
+  clearInterval(watcher.timer);
+  try { watcher.dispose(); } catch {}
+}
+
+function startSummaryWatcher(sessionId: string): void {
+  const session = sessions.get(sessionId);
+  if (!session || summaryWatchers.has(sessionId)) return;
+  if (!aiTitlesEnabled()) return;
+
+  let buffer = '';
+  let lastOutputAt = 0;
+  let lastAskedAt = 0;
+  let freshChars = 0;
+  let failures = 0;
+  let running = false;
+
+  const disposable = session.pty.onData((data: string) => {
+    lastOutputAt = Date.now();
+    freshChars += data.length;
+    buffer += data;
+    if (buffer.length > 12_000) buffer = buffer.slice(-8_000);
+  });
+
+  const timer = setInterval(() => {
+    const current = sessions.get(sessionId);
+    if (!current) {
+      stopSummaryWatcher(sessionId);
+      return;
+    }
+    // A hand-typed name is the user's, and the setting can be turned off
+    // while sessions are open.
+    if (running || current.customTitle || !aiTitlesEnabled()) return;
+
+    const now = Date.now();
+    if (freshChars < SUMMARY_MIN_CHARS) return;
+    if (now - lastOutputAt < SUMMARY_SETTLE_MS) return;
+    if (lastAskedAt && now - lastAskedAt < SUMMARY_MIN_INTERVAL_MS) return;
+
+    running = true;
+    freshChars = 0;
+    const snapshot = buffer;
+
+    summarizeTerminal(snapshot, current.cwd)
+      .then(label => {
+        failures = 0;
+        if (!label) return;
+        const live = sessions.get(sessionId);
+        if (live && !live.customTitle) live.summary = label;
+      })
+      .catch(() => {
+        failures += 1;
+        if (failures >= SUMMARY_MAX_FAILURES) stopSummaryWatcher(sessionId);
+      })
+      .finally(() => {
+        lastAskedAt = Date.now();
+        running = false;
+      });
+  }, SUMMARY_TICK);
+
+  summaryWatchers.set(sessionId, { timer, dispose: () => disposable.dispose() });
 }
 
 /** Any keystroke or paste means the user answered — back to busy. */

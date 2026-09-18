@@ -1,5 +1,5 @@
-import { useState, useRef, useCallback, useEffect, lazy, Suspense } from 'react'
-import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2, MessageCircleQuestion } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect, memo, lazy, Suspense } from 'react'
+import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2, MessageCircleQuestion, Pencil } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
@@ -8,6 +8,8 @@ import {
   useTerminalStatus,
   useCreateTerminalSession,
   useKillTerminalSession,
+  useLiveTerminalSessions,
+  useRenameTerminalSession,
 } from '@/hooks/useTerminal'
 import { useLaunchTerminal } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
@@ -33,6 +35,53 @@ interface GlobalTab {
   awaitingInput?: boolean
   taskId?: string
   taskNumber?: number
+  /** Label parts the server keeps for this session — see describeTab(). */
+  projectName?: string
+  typeLabel?: string
+  taskTitle?: string
+  customTitle?: string
+  summary?: string
+}
+
+/** Fields the server owns. Copied onto the tab whenever a session is read. */
+function labelFieldsOf(session: any): Partial<GlobalTab> {
+  return {
+    projectName: session?.projectName,
+    typeLabel: session?.typeLabel,
+    taskTitle: session?.taskTitle,
+    customTitle: session?.customTitle,
+    summary: session?.summary,
+    ...(session?.taskNumber ? { taskNumber: session.taskNumber } : {}),
+  }
+}
+
+/** The old one-string title, "[Project] Shell", split back into its halves. */
+function parseLegacyTitle(title: string): { project: string; detail: string } {
+  const clean = title.replace(/\s*\[exited\]\s*$/, '')
+  const match = clean.match(/^\[(.*?)\]\s*(.*)$/)
+  if (match) return { project: match[1], detail: match[2] || 'Shell' }
+  return { project: '', detail: clean }
+}
+
+/**
+ * What a tab says and what its tooltip spells out. The short line is what fits
+ * in a narrow tab; the tooltip carries the whole thing — the full task title,
+ * which agent runs there, and the folder.
+ */
+function describeTab(tab: GlobalTab): { project: string; detail: string; tooltip: string[] } {
+  const legacy = parseLegacyTitle(tab.title)
+  const project = tab.projectName || legacy.project
+  const taskLabel = tab.taskTitle ? `#${tab.taskNumber ?? '?'} ${tab.taskTitle}` : ''
+  const kind = tab.typeLabel || legacy.detail
+  const detail = tab.customTitle || taskLabel || tab.summary || kind
+
+  const tooltip: string[] = []
+  tooltip.push(project ? `${project} · ${kind}` : kind)
+  if (tab.customTitle) tooltip.push(tab.customTitle)
+  if (taskLabel) tooltip.push(taskLabel)
+  else if (tab.summary) tooltip.push(tab.summary)
+  if (tab.exited) tooltip.push('Process exited')
+  return { project, detail, tooltip }
 }
 
 const PANEL_HEIGHT_KEY = 'shipyard:terminal-height'
@@ -66,6 +115,167 @@ function loadSplitSessionId(): string | null {
   return null
 }
 
+/**
+ * What ties a tab to the pane it is showing in. Only the small number badge
+ * and the pane's top rule carry colour — an outline around the tab itself read
+ * as noise next to the neutral project tabs.
+ */
+const PANE_STYLES = [
+  { badge: 'bg-primary text-primary-foreground', rule: 'border-primary' },
+  { badge: 'bg-success text-success-foreground', rule: 'border-success' },
+] as const
+
+interface TerminalTabProps {
+  tab: GlobalTab
+  /** Which pane shows this tab (0 left, 1 right), or null when it is hidden. */
+  paneIndex: 0 | 1 | null
+  isSplit: boolean
+  isDragging: boolean
+  isDragOver: boolean
+  isRenaming: boolean
+  onClick: () => void
+  onClose: () => void
+  onCloseOthers: () => void
+  onCloseAll: () => void
+  onOpenExternal: () => void
+  onClearExited: () => void
+  onRenameStart: () => void
+  onRenameCommit: (title: string) => void
+  onRenameCancel: () => void
+  onDragStart: (event: React.DragEvent) => void
+  onDragEnd: () => void
+  onDragOver: (event: React.DragEvent) => void
+  onDragLeave: () => void
+  onDrop: (event: React.DragEvent) => void
+}
+
+const TerminalTab = memo(function TerminalTab({
+  tab, paneIndex, isSplit, isDragging, isDragOver, isRenaming,
+  onClick, onClose, onCloseOthers, onCloseAll, onOpenExternal, onClearExited,
+  onRenameStart, onRenameCommit, onRenameCancel,
+  onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
+}: TerminalTabProps) {
+  const { project, detail, tooltip } = describeTab(tab)
+  const inPane = paneIndex !== null
+  const pane = paneIndex !== null ? PANE_STYLES[paneIndex] : null
+
+  if (isRenaming) {
+    return (
+      <div className="flex h-6 min-w-[120px] max-w-[260px] basis-0 flex-1 items-center rounded-sm bg-background px-1.5 ring-1 ring-primary/60">
+        <input
+          autoFocus
+          defaultValue={tab.customTitle || detail}
+          placeholder="Tab name"
+          // Typing replaces the old name; an empty field restores the automatic one.
+          onFocus={(e) => e.currentTarget.select()}
+          className="w-full bg-transparent text-[11px] text-foreground outline-none"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); onRenameCommit(e.currentTarget.value) }
+            else if (e.key === 'Escape') { e.preventDefault(); onRenameCancel() }
+          }}
+          onBlur={(e) => onRenameCommit(e.currentTarget.value)}
+        />
+      </div>
+    )
+  }
+
+  const tab_ = (
+    <div
+      role="tab"
+      aria-selected={inPane}
+      // Native title, like the project tab strip: a Radix tooltip wrapped
+      // around the trigger swallows the right-click that opens this menu.
+      title={tooltip.join('\n')}
+      draggable
+      onClick={onClick}
+      onDoubleClick={(e) => { e.preventDefault(); onRenameStart() }}
+      onAuxClick={(e) => {
+        if (e.button === 1) { e.preventDefault(); onClose() }
+      }}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        'group flex h-6 min-w-[104px] max-w-[260px] basis-0 flex-1 cursor-pointer items-center gap-1.5 overflow-hidden rounded-sm px-2 text-[11px] transition-colors',
+        inPane
+          ? 'bg-background text-foreground shadow-sm ring-1 ring-border/80'
+          : 'text-muted-foreground hover:bg-background/40 hover:text-foreground',
+        tab.exited && !tab.hasNotification && 'opacity-60',
+        isDragging && 'opacity-40',
+        isDragOver && 'ring-2 ring-primary ring-inset'
+      )}
+    >
+      {/* Split: the number says which pane this tab is showing in */}
+      {isSplit && pane && paneIndex !== null && (
+        <span className={cn(
+          'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] text-[8px] font-bold leading-none',
+          pane.badge
+        )}>
+          {paneIndex + 1}
+        </span>
+      )}
+      {tab.taskId && !tab.exited && <Sparkles className="h-3 w-3 shrink-0 animate-pulse text-primary" />}
+      {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
+      {tab.awaitingInput && !tab.exited && (
+        <MessageCircleQuestion className="h-3 w-3 shrink-0 text-warning animate-pulse" />
+      )}
+      {tab.hasNotification && (
+        <span className="relative flex h-2 w-2 shrink-0">
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
+        </span>
+      )}
+      <span className="min-w-0 flex-1 truncate text-left">
+        {project && <span className="opacity-50">{project} · </span>}
+        {detail}
+      </span>
+      <button
+        aria-label="Close terminal"
+        className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:text-destructive group-hover:opacity-100"
+        onClick={(e) => { e.stopPropagation(); onClose() }}
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  )
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{tab_}</ContextMenuTrigger>
+      <ContextMenuContent className="w-52">
+        <ContextMenuItem onClick={onRenameStart}>
+          <Pencil />
+          Rename tab
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={onClose}>
+          <X />
+          Close
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onCloseOthers}>
+          <XCircle />
+          Close Others
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onCloseAll}>
+          <Trash2 />
+          Close All
+        </ContextMenuItem>
+        <ContextMenuSeparator />
+        <ContextMenuItem onClick={onOpenExternal}>
+          <ExternalLink />
+          Open in External Terminal
+        </ContextMenuItem>
+        <ContextMenuItem onClick={onClearExited}>
+          <Trash2 />
+          Clear Exited Tabs
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  )
+})
+
 export function TerminalPanel() {
   const { data: status } = useTerminalStatus()
   const createSession = useCreateTerminalSession()
@@ -78,6 +288,10 @@ export function TerminalPanel() {
   const [activeTabId, setActiveTabId] = useState<string | null>(loadActiveTabId)
   const [splitSessionId, setSplitSessionId] = useState<string | null>(loadSplitSessionId)
   const [activePaneIndex, setActivePaneIndex] = useState<0 | 1>(0)
+  const [draggingId, setDraggingId] = useState<string | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const renameSession = useRenameTerminalSession()
   const [panelHeight, setPanelHeight] = useState(() => {
     const saved = localStorage.getItem(PANEL_HEIGHT_KEY)
     return saved ? Math.max(MIN_HEIGHT, parseInt(saved, 10)) : DEFAULT_HEIGHT
@@ -158,6 +372,29 @@ export function TerminalPanel() {
     }
   }, [isVisible, activeTabId, splitSessionId])
 
+  // Labels are written server-side after the tab exists — the AI summary of a
+  // shell, or a rename. Poll while there are tabs and copy them onto the tabs.
+  const { data: liveSessions } = useLiveTerminalSessions(tabs.length > 0)
+  useEffect(() => {
+    const sessions = liveSessions?.sessions
+    if (!sessions) return
+    const byId = new Map(sessions.map(s => [s.id, s]))
+    setTabs(prev => {
+      let changed = false
+      const next = prev.map(tab => {
+        const session = byId.get(tab.sessionId)
+        if (!session) return tab
+        const fields = labelFieldsOf(session)
+        const same = (Object.keys(fields) as (keyof GlobalTab)[])
+          .every(key => tab[key] === fields[key])
+        if (same) return tab
+        changed = true
+        return { ...tab, ...fields }
+      })
+      return changed ? next : prev
+    })
+  }, [liveSessions])
+
   // On mount: validate persisted tabs against server sessions (recovery from refresh)
   const initializedRef = useRef(false)
   useEffect(() => {
@@ -173,7 +410,14 @@ export function TerminalPanel() {
         for (const t of prev) {
           if (serverIds.has(t.sessionId)) {
             const srv = serverMap.get(t.sessionId) as any
-            valid.push({ ...t, exited: false, hasNotification: false, awaitingInput: false, taskId: t.taskId || srv?.taskId }) // Recover taskId
+            valid.push({
+              ...t,
+              exited: false,
+              hasNotification: false,
+              awaitingInput: false,
+              taskId: t.taskId || srv?.taskId, // Recover taskId
+              ...labelFieldsOf(srv),
+            })
           }
         }
         // Add any server sessions not in our persisted tabs (recovery)
@@ -187,6 +431,7 @@ export function TerminalPanel() {
               exited: false,
               hasNotification: false,
               taskId: (s as any).taskId,
+              ...labelFieldsOf(s),
             })
           }
         }
@@ -272,6 +517,7 @@ export function TerminalPanel() {
         hasNotification: false,
         taskId,
         taskNumber,
+        ...labelFieldsOf(session),
       }
       setTabs(prev => [...prev, tab])
 
@@ -354,9 +600,19 @@ export function TerminalPanel() {
     }
   }, [handleNewTab])
 
+  /** Bring the project tab of a terminal to the front — closing or focusing a
+   *  terminal that belongs to another project used to leave the workspace
+   *  showing the old one. */
+  const followTabProject = useCallback((sessionId: string | null | undefined) => {
+    if (!sessionId) return
+    const tab = tabsRef.current.find(t => t.sessionId === sessionId)
+    if (tab && tab.projectId !== activeProjectIdRef.current) openProjectTab(tab.projectId)
+  }, [openProjectTab])
+
   const handleCloseTab = useCallback((sessionId: string) => {
     killSession.mutate(sessionId)
     aiSessions.unregisterBySession(sessionId)
+    if (renamingId === sessionId) setRenamingId(null)
 
     // Handle split mode cleanup
     const isSplitLeft = activeTabIdRef.current === sessionId && !!splitSessionIdRef.current
@@ -365,10 +621,12 @@ export function TerminalPanel() {
     if (isSplitRight) {
       setSplitSessionId(null)
       setActivePaneIndex(0)
+      followTabProject(activeTabIdRef.current)
     } else if (isSplitLeft) {
       setActiveTabId(splitSessionIdRef.current!)
       setSplitSessionId(null)
       setActivePaneIndex(0)
+      followTabProject(splitSessionIdRef.current)
     }
 
     setTabs(prev => {
@@ -379,11 +637,38 @@ export function TerminalPanel() {
         // the last tab loses the user's place.
         const neighbour = next[Math.min(Math.max(index, 0), next.length - 1)]
         setActiveTabId(neighbour ? neighbour.sessionId : null)
+        // The tab that takes over may belong to another project; the workspace
+        // follows it, so terminal and project never disagree.
+        if (neighbour) followTabProject(neighbour.sessionId)
       }
       if (next.length === 0) setIsVisible(false)
       return next
     })
-  }, [killSession, aiSessions])
+  }, [killSession, aiSessions, followTabProject, renamingId])
+
+  /** Drag a tab onto another to reorder — same gesture as the project tabs. */
+  const reorderTabs = useCallback((fromId: string, toId: string) => {
+    if (fromId === toId) return
+    setTabs(prev => {
+      const fromIdx = prev.findIndex(t => t.sessionId === fromId)
+      const toIdx = prev.findIndex(t => t.sessionId === toId)
+      if (fromIdx === -1 || toIdx === -1) return prev
+      const next = prev.slice()
+      const [moved] = next.splice(fromIdx, 1)
+      next.splice(toIdx, 0, moved)
+      return next
+    })
+  }, [])
+
+  /** Name a tab by hand. An empty name hands it back to the automatic label. */
+  const handleRename = useCallback((sessionId: string, title: string) => {
+    const clean = title.trim()
+    setRenamingId(null)
+    setTabs(prev => prev.map(t => (
+      t.sessionId === sessionId ? { ...t, customTitle: clean || undefined } : t
+    )))
+    renameSession.mutate({ sessionId, title: clean || null })
+  }, [renameSession])
 
   const handleCloseAll = useCallback(() => {
     for (const tab of tabsRef.current) {
@@ -408,7 +693,9 @@ export function TerminalPanel() {
       if (splitGone && activeGone) {
         setSplitSessionId(null)
         setActivePaneIndex(0)
-        setActiveTabId(remaining.length > 0 ? remaining[remaining.length - 1].sessionId : null)
+        const fallback = remaining.length > 0 ? remaining[remaining.length - 1].sessionId : null
+        setActiveTabId(fallback)
+        followTabProject(fallback)
       } else if (splitGone) {
         setSplitSessionId(null)
         setActivePaneIndex(0)
@@ -417,15 +704,18 @@ export function TerminalPanel() {
           setActiveTabId(splitSessionIdRef.current)
           setSplitSessionId(null)
           setActivePaneIndex(0)
+          followTabProject(splitSessionIdRef.current)
         } else {
-          setActiveTabId(remaining.length > 0 ? remaining[remaining.length - 1].sessionId : null)
+          const fallback = remaining.length > 0 ? remaining[remaining.length - 1].sessionId : null
+          setActiveTabId(fallback)
+          followTabProject(fallback)
         }
       }
 
       if (remaining.length === 0) setIsVisible(false)
       return remaining
     })
-  }, [])
+  }, [followTabProject])
 
   const handleTabExit = useCallback((sessionId: string, _code: number) => {
     // Find the tab before modifying state — we need the taskId for needsReview
@@ -502,10 +792,7 @@ export function TerminalPanel() {
         ? { ...t, hasNotification: false, awaitingInput: false }
         : t
     ))
-    const tab = tabsRef.current.find(t => t.sessionId === sessionId)
-    if (tab) {
-      openProjectTab(tab.projectId)
-    }
+    followTabProject(sessionId)
 
     if (splitSessionIdRef.current) {
       // In split mode
@@ -524,7 +811,7 @@ export function TerminalPanel() {
     } else {
       setActiveTabId(sessionId)
     }
-  }, [openProjectTab])
+  }, [followTabProject])
 
   // Project tab change → find and activate a terminal for that project
   useEffect(() => {
@@ -606,96 +893,58 @@ export function TerminalPanel() {
           <TooltipContent side="top">Toggle terminal (Ctrl+`)</TooltipContent>
         </Tooltip>
 
-        {/* Session tabs */}
+        {/* Session tabs — they share the width, truncate and can be dragged
+            into a new order, like the project tab strip. */}
         {isVisible && (
-          <div className="flex items-center gap-0.5 flex-1 overflow-x-auto ml-1">
+          <div className="ml-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
             {tabs.map(tab => {
-              const isLeftPane = activeTabId === tab.sessionId
-              const isRightPane = splitSessionId === tab.sessionId
-              const isInPane = isLeftPane || isRightPane
+              const paneIndex: 0 | 1 | null = activeTabId === tab.sessionId
+                ? 0
+                : splitSessionId === tab.sessionId
+                  ? 1
+                  : null
               return (
-                <ContextMenu key={tab.sessionId}>
-                  <ContextMenuTrigger asChild>
-                <button
+                <TerminalTab
+                  key={tab.sessionId}
+                  tab={tab}
+                  paneIndex={paneIndex}
+                  isSplit={isSplit}
+                  isDragging={draggingId === tab.sessionId}
+                  isDragOver={dragOverId === tab.sessionId && draggingId !== tab.sessionId}
+                  isRenaming={renamingId === tab.sessionId}
                   onClick={() => handleTerminalTabClick(tab.sessionId)}
-                  onAuxClick={(e) => {
-                    if (e.button === 1) {
-                      e.preventDefault()
-                      handleCloseTab(tab.sessionId)
+                  onClose={() => handleCloseTab(tab.sessionId)}
+                  onCloseOthers={() => tabsRef.current
+                    .filter(t => t.sessionId !== tab.sessionId)
+                    .forEach(t => handleCloseTab(t.sessionId))}
+                  onCloseAll={handleCloseAll}
+                  onOpenExternal={handleOpenExternal}
+                  onClearExited={handleClearExited}
+                  onRenameStart={() => setRenamingId(tab.sessionId)}
+                  onRenameCommit={(title) => handleRename(tab.sessionId, title)}
+                  onRenameCancel={() => setRenamingId(null)}
+                  onDragStart={(event) => {
+                    setDraggingId(tab.sessionId)
+                    event.dataTransfer.effectAllowed = 'move'
+                    event.dataTransfer.setData('text/plain', tab.sessionId)
+                  }}
+                  onDragEnd={() => { setDraggingId(null); setDragOverId(null) }}
+                  onDragOver={(event) => {
+                    if (draggingId && draggingId !== tab.sessionId) {
+                      event.preventDefault()
+                      event.dataTransfer.dropEffect = 'move'
+                      setDragOverId(tab.sessionId)
                     }
                   }}
-                  className={cn(
-                    'flex items-center gap-1 px-2 py-0.5 text-[11px] rounded-sm transition-colors max-w-[200px] group',
-                    isInPane
-                      ? tab.taskId && !tab.exited
-                        ? 'bg-primary/15 text-primary ring-1 ring-primary/40'
-                        : tab.taskId && tab.exited
-                          ? 'bg-success/15 text-success ring-1 ring-success/40'
-                          : 'bg-background/60 text-foreground'
-                      : tab.taskId && !tab.exited
-                        ? 'text-primary/60 hover:text-primary hover:bg-primary/10'
-                        : tab.taskId && tab.exited
-                          ? 'text-success/60 hover:text-success hover:bg-success/10'
-                          : 'text-muted-foreground hover:text-foreground hover:bg-background/30',
-                    tab.exited && !tab.taskId && !tab.hasNotification && 'opacity-50'
-                  )}
-                >
-                  {/* Split pane indicator dot */}
-                  {isSplit && isLeftPane && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary shrink-0" />
-                  )}
-                  {isSplit && isRightPane && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-success shrink-0" />
-                  )}
-                  {tab.taskId && !tab.exited && <Sparkles className="h-3 w-3 shrink-0 animate-pulse" />}
-                  {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
-                  {tab.awaitingInput && !tab.exited && (
-                    <MessageCircleQuestion className="h-3 w-3 shrink-0 text-warning animate-pulse" />
-                  )}
-                  {tab.hasNotification && (
-                    <span className="relative flex h-2 w-2 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-warning" />
-                    </span>
-                  )}
-                  <span className="truncate">{tab.title.replace(/^\[(.*?)\]\s*/, '$1 · ')}</span>
-                  {tab.taskId && (
-                    <span className="text-[9px] font-mono opacity-60 shrink-0">#{tab.taskNumber || '?'}</span>
-                  )}
-                  <X
-                    className="h-3 w-3 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive"
-                    onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.sessionId) }}
-                  />
-                </button>
-                  </ContextMenuTrigger>
-                  <ContextMenuContent className="w-48">
-                    <ContextMenuItem onClick={() => handleCloseTab(tab.sessionId)}>
-                      <X />
-                      Close
-                    </ContextMenuItem>
-                    <ContextMenuItem
-                      onClick={() => tabsRef.current
-                        .filter(t => t.sessionId !== tab.sessionId)
-                        .forEach(t => handleCloseTab(t.sessionId))}
-                    >
-                      <Columns2 />
-                      Close Others
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={handleCloseAll}>
-                      <XCircle />
-                      Close All
-                    </ContextMenuItem>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem onClick={handleOpenExternal}>
-                      <ExternalLink />
-                      Open in External Terminal
-                    </ContextMenuItem>
-                    <ContextMenuItem onClick={handleClearExited}>
-                      <Trash2 />
-                      Clear Exited Tabs
-                    </ContextMenuItem>
-                  </ContextMenuContent>
-                </ContextMenu>
+                  onDragLeave={() => setDragOverId(prev => prev === tab.sessionId ? null : prev)}
+                  onDrop={(event) => {
+                    event.preventDefault()
+                    const fromId = event.dataTransfer.getData('text/plain') || draggingId
+                    if (fromId) reorderTabs(fromId, tab.sessionId)
+                    setDraggingId(null)
+                    setDragOverId(null)
+                  }}
+                />
               )
             })}
 
@@ -704,7 +953,7 @@ export function TerminalPanel() {
               <TooltipTrigger asChild>
                 <button
                   onClick={() => handleNewTab('shell')}
-                  className="p-0.5 text-muted-foreground hover:text-foreground transition-colors rounded-sm hover:bg-background/30"
+                  className="shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-background/30 hover:text-foreground"
                 >
                   <Plus className="h-3.5 w-3.5" />
                 </button>
@@ -780,28 +1029,21 @@ export function TerminalPanel() {
           {isSplit && (
             <div className="absolute top-0 left-1/2 -translate-x-px w-px h-full bg-border/60 z-10" />
           )}
-          {/* Active pane indicator bar */}
-          {isSplit && (
-            <div
-              className={cn(
-                'absolute top-0 h-0.5 z-10 transition-all duration-150',
-                activePaneIndex === 0
-                  ? 'left-0 w-[calc(50%-0.5px)] bg-primary/60'
-                  : 'left-[calc(50%+0.5px)] w-[calc(50%-0.5px)] bg-success/60'
-              )}
-            />
-          )}
 
           {tabs.map(tab => {
             const isLeft = activeTabId === tab.sessionId
             const isRight = splitSessionId === tab.sessionId
             const isShown = isLeft || isRight
+            const paneIndex: 0 | 1 = isLeft ? 0 : 1
+            const pane = PANE_STYLES[paneIndex]
+            const isPaneActive = isSplit && activePaneIndex === paneIndex
+            const { project, detail } = describeTab(tab)
 
             return (
               <div
                 key={tab.sessionId}
                 className={cn(
-                  isShown ? 'block' : 'hidden',
+                  isShown ? 'flex flex-col' : 'hidden',
                   !isSplit && 'h-full',
                   isSplit && isShown && 'absolute top-0',
                 )}
@@ -812,18 +1054,49 @@ export function TerminalPanel() {
                 } : undefined}
                 onMouseDown={() => {
                   if (isSplit && isShown) {
-                    setActivePaneIndex(isLeft ? 0 : 1)
+                    setActivePaneIndex(paneIndex)
                   }
                 }}
               >
-                <Suspense fallback={null}>
-                  <IntegratedTerminal
-                    sessionId={tab.sessionId}
-                    isActive={isShown}
-                    onExit={handleTabExit}
-                    onStateChange={handleTabState}
-                  />
-                </Suspense>
+                {/* Split: each pane says out loud which terminal it holds, in
+                    the same colour and number as that terminal's tab. */}
+                {isSplit && isShown && (
+                  <div className={cn(
+                    'flex h-6 shrink-0 items-center gap-1.5 border-b border-t-2 px-2 text-[10px] transition-colors',
+                    isPaneActive
+                      ? `${pane.rule} border-b-border/60 bg-card/70 text-foreground`
+                      : 'border-t-transparent border-b-border/30 bg-card/20 text-muted-foreground'
+                  )}>
+                    <span className={cn(
+                      'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] text-[8px] font-bold leading-none',
+                      pane.badge
+                    )}>
+                      {paneIndex + 1}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate">
+                      {project && <span className="opacity-50">{project} · </span>}
+                      {detail}
+                    </span>
+                    <button
+                      aria-label="Close terminal"
+                      className="shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:text-destructive"
+                      onClick={(e) => { e.stopPropagation(); handleCloseTab(tab.sessionId) }}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                )}
+
+                <div className={cn('min-h-0', isSplit ? 'flex-1' : 'h-full')}>
+                  <Suspense fallback={null}>
+                    <IntegratedTerminal
+                      sessionId={tab.sessionId}
+                      isActive={isShown}
+                      onExit={handleTabExit}
+                      onStateChange={handleTabState}
+                    />
+                  </Suspense>
+                </div>
               </div>
             )
           })}

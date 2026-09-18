@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { GitBranch, RefreshCw, Upload, Download, ChevronDown, ChevronRight, GitCommit, ArrowUp, ArrowDown, Trash2, Undo2, Loader2, Check, FolderGit2 } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { GitBranch, RefreshCw, Upload, Download, ChevronDown, ChevronRight, GitCommit, ArrowUp, ArrowDown, Trash2, Undo2, Loader2, Check, FolderGit2, Search } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -367,51 +367,146 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
   )
 }
 
-export function GitPanel({ projectId, subRepos, isGitRepo, onOpenInEditor, onOpenDiffInEditor, activeFilePath }: GitPanelProps) {
-  const hasSubRepos = subRepos && subRepos.length > 0
+const ROOT_KEY = '__root__'
 
-  // Build list of repo tabs
-  const repoTabs: { key: string | undefined; label: string }[] = []
-  if (isGitRepo) {
-    repoTabs.push({ key: undefined, label: 'root' })
-  }
-  if (hasSubRepos) {
-    for (const sr of subRepos) {
-      repoTabs.push({ key: sr, label: sr })
+/** Which repo of a project the user last had open, kept per project. */
+function repoStorageKey(projectId: string): string {
+  return `shipyard:git-repo:${projectId}`
+}
+
+function loadSavedRepo(projectId: string, available: (string | undefined)[]): string | undefined {
+  try {
+    const saved = localStorage.getItem(repoStorageKey(projectId))
+    if (saved) {
+      const value = saved === ROOT_KEY ? undefined : saved
+      if (available.some(key => key === value)) return value
     }
+  } catch {}
+  return available[0]
+}
+
+function saveRepo(projectId: string, repo: string | undefined) {
+  try {
+    localStorage.setItem(repoStorageKey(projectId), repo ?? ROOT_KEY)
+  } catch {}
+}
+
+/**
+ * Repo picker for a project with sub-repositories. A row of tabs stopped
+ * working at a dozen repos in a 280px panel, so this is a dropdown with a
+ * filter — typing three letters beats hunting through a scrolling strip.
+ */
+function RepoSelector({ repos, value, onChange }: {
+  repos: { key: string | undefined; label: string }[]
+  value: string | undefined
+  onChange: (key: string | undefined) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const filtered = useMemo(() => {
+    const term = query.trim().toLowerCase()
+    if (!term) return repos
+    return repos.filter(repo => repo.label.toLowerCase().includes(term))
+  }, [repos, query])
+
+  const current = repos.find(repo => repo.key === value)
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => { setOpen(next); if (!next) setQuery('') }}
+    >
+      <PopoverTrigger asChild>
+        <button className="flex w-full items-center gap-1.5 rounded-md border px-2 py-1 text-[11px] font-medium transition-colors hover:bg-accent">
+          <FolderGit2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate text-left">{current?.label || 'Select repository'}</span>
+          <span className="shrink-0 text-[9px] text-muted-foreground/60">{repos.length}</span>
+          <ChevronDown className="h-3 w-3 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[--radix-popover-trigger-width] min-w-56 p-1" align="start">
+        <div className="flex items-center gap-1.5 border-b px-2 pb-1.5">
+          <Search className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Filter repositories"
+            className="w-full bg-transparent py-0.5 text-xs outline-none placeholder:text-muted-foreground/60"
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && filtered.length > 0) {
+                e.preventDefault()
+                onChange(filtered[0].key)
+                setOpen(false)
+              } else if (e.key === 'Escape') {
+                setOpen(false)
+              }
+            }}
+          />
+        </div>
+        <div className="max-h-64 overflow-y-auto pt-1">
+          {filtered.map(repo => (
+            <button
+              key={repo.key ?? ROOT_KEY}
+              className={cn(
+                'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent',
+                repo.key === value && 'text-primary font-medium'
+              )}
+              onClick={() => { onChange(repo.key); setOpen(false) }}
+            >
+              {repo.key === value ? <Check className="h-3 w-3 shrink-0" /> : <span className="w-3 shrink-0" />}
+              <span className="truncate">{repo.label}</span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">No repository matches</div>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+export function GitPanel({ projectId, subRepos, isGitRepo, onOpenInEditor, onOpenDiffInEditor, activeFilePath }: GitPanelProps) {
+  // Build the repo list: the project root (when it is a repo) plus every
+  // sub-repository, sorted so a long list stays scannable.
+  const repoTabs = useMemo(() => {
+    const list: { key: string | undefined; label: string }[] = []
+    if (isGitRepo) list.push({ key: undefined, label: 'root' })
+    for (const sub of [...(subRepos || [])].sort((a, b) => a.localeCompare(b))) {
+      list.push({ key: sub, label: sub })
+    }
+    return list
+  }, [isGitRepo, subRepos])
+
+  const repoKeys = useMemo(() => repoTabs.map(tab => tab.key), [repoTabs])
+
+  const [activeRepo, setActiveRepo] = useState<string | undefined>(() => loadSavedRepo(projectId, repoKeys))
+
+  // Switching projects (the panel is not remounted) must restore that
+  // project's own last repo, not keep the previous project's selection.
+  useEffect(() => {
+    setActiveRepo(loadSavedRepo(projectId, repoKeys))
+  }, [projectId, repoKeys])
+
+  const selectRepo = (key: string | undefined) => {
+    setActiveRepo(key)
+    saveRepo(projectId, key)
   }
 
-  const [activeRepo, setActiveRepo] = useState<string | undefined>(repoTabs[0]?.key)
-
-  // If only one repo (root or single sub-repo), render directly without tabs
+  // If only one repo (root or single sub-repo), render directly without a picker
   if (repoTabs.length <= 1) {
     return <SingleRepoPanel projectId={projectId} subrepo={repoTabs[0]?.key} onOpenInEditor={onOpenInEditor} onOpenDiffInEditor={onOpenDiffInEditor} activeFilePath={activeFilePath} />
   }
 
   return (
     <div className="space-y-2">
-      {/* Sub-repo tabs */}
-      <div className="flex items-center gap-1 overflow-x-auto pb-1">
-        <FolderGit2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        {repoTabs.map(tab => (
-          <button
-            key={tab.key ?? '__root__'}
-            className={cn(
-              'px-2 py-1 text-[10px] font-medium rounded-md border transition-colors whitespace-nowrap',
-              activeRepo === tab.key
-                ? 'bg-accent border-accent-foreground/20 text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground hover:bg-accent/50'
-            )}
-            onClick={() => setActiveRepo(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
+      <RepoSelector repos={repoTabs} value={activeRepo} onChange={selectRepo} />
 
       {/* Active repo panel */}
       <SingleRepoPanel
-        key={activeRepo ?? '__root__'}
+        key={activeRepo ?? ROOT_KEY}
         projectId={projectId}
         subrepo={activeRepo}
         onOpenInEditor={onOpenInEditor}

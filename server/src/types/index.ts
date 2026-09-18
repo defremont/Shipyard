@@ -113,6 +113,8 @@ export interface Settings {
   worktreePerTask?: boolean;
   // Where those worktrees live (default: {DATA_DIR}/worktrees)
   worktreeBasePath?: string;
+  // Let the AI name terminal tabs that have no task behind them (default: on)
+  terminalAiTitles?: boolean;
 }
 
 // ── Coding agents (CLIs that can run a task) ────────────

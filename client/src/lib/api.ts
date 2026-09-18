@@ -41,6 +41,34 @@ export interface WorktreeSettings {
   worktrees: WorktreeInfo[]
 }
 
+/** A live integrated-terminal session, as the server describes it. */
+export interface TerminalSessionInfo {
+  id: string
+  projectId: string
+  type: string
+  /** Legacy one-string label: "[Project] Shell" */
+  title: string
+  createdAt: string
+  taskId?: string
+  agent?: string
+  cwd?: string
+  projectName?: string
+  typeLabel?: string
+  taskTitle?: string
+  taskNumber?: number
+  /** Name the user typed for the tab — wins over everything else. */
+  customTitle?: string
+  /** AI-written label for a shell, from its own output. */
+  summary?: string
+}
+
+export interface AppSettings {
+  tasksDir: string
+  terminalAiTitles?: boolean
+  worktreePerTask?: boolean
+  worktreeBasePath?: string
+}
+
 export interface SyncProviderStatus {
   providerId: 'trello' | 'clickup';
   connected: boolean;
@@ -360,16 +388,21 @@ export const api = {
   // Integrated terminal
   getTerminalStatus: () => request<{ available: boolean }>('/terminal/status'),
   getTerminalSessions: (projectId?: string) =>
-    request<{ sessions: { id: string; projectId: string; type: string; title: string; createdAt: string }[] }>(
+    request<{ sessions: TerminalSessionInfo[] }>(
       `/terminal/sessions${projectId ? `?projectId=${projectId}` : ''}`
     ),
   createTerminalSession: (projectId: string, type = 'shell', cols = 80, rows = 24, taskId?: string, prompt?: string, agent?: string) =>
-    request<{ id: string; projectId: string; type: string; title: string; createdAt: string; taskId?: string; agent?: string }>(
+    request<TerminalSessionInfo>(
       '/terminal/sessions',
       { method: 'POST', body: JSON.stringify({ projectId, type, cols, rows, ...(taskId ? { taskId } : {}), ...(prompt ? { prompt } : {}), ...(agent ? { agent } : {}) }) }
     ),
   killTerminalSession: (sessionId: string) =>
     request('/terminal/sessions/' + sessionId, { method: 'DELETE' }),
+  renameTerminalSession: (sessionId: string, title: string | null) =>
+    request<{ success: boolean; customTitle: string | null }>('/terminal/sessions/' + sessionId, {
+      method: 'PATCH',
+      body: JSON.stringify({ title }),
+    }),
   getAiTerminalSessions: () =>
     request<{ sessions: { id: string; projectId: string; type: string; taskId: string; createdAt: string }[] }>(
       '/terminal/ai-sessions'
@@ -396,7 +429,9 @@ export const api = {
   removeProject: (path: string) => request<{ projects: any[] }>('/projects/remove', { method: 'POST', body: JSON.stringify({ path }) }),
 
   // Settings
-  getSettings: () => request<{ tasksDir: string }>('/settings'),
+  getSettings: () => request<AppSettings>('/settings'),
+  updateSettings: (body: { terminalAiTitles?: boolean }) =>
+    request<AppSettings>('/settings', { method: 'PATCH', body: JSON.stringify(body) }),
 
   // Coding agents (which CLI runs a task)
   getAgents: () => request<{ agents: Agent[]; defaultAgent: string }>('/agents'),

@@ -4,6 +4,7 @@ import {
   createSession,
   getSession,
   killSession,
+  renameSession,
   listSessions,
   listAiSessions,
   writeToSession,
@@ -112,15 +113,19 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       // worktree-per-task setting is on — that is what lets two agents work
       // on the same repo at once. Anything else runs in the project folder.
       let cwd = project.path;
+      // The tab is named after the task, so the title survives a refresh
+      // without the client having to carry it around.
+      let taskLabel: { title?: string; number?: number } | undefined;
       if (taskId) {
         const task = await taskStore.getTask(projectId, taskId);
         if (task) {
+          taskLabel = { title: task.title, number: task.number };
           const worktree = await worktreeService.ensureTaskWorktree(project, task);
           cwd = worktree.path;
         }
       }
 
-      const sessionId = await createSession(projectId, project.path, type, cols, rows, project.name, taskId, prompt, agent, cwd);
+      const sessionId = await createSession(projectId, project.path, type, cols, rows, project.name, taskId, prompt, agent, cwd, taskLabel);
       if (!sessionId) {
         log.error('terminal', 'Failed to create terminal session', `type=${type}`, projectId);
         return reply.status(500).send({ error: 'Failed to create terminal session' });
@@ -138,6 +143,10 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         taskId: session?.taskId,
         agent: session?.agent,
         cwd: session?.cwd,
+        projectName: session?.projectName,
+        typeLabel: session?.typeLabel,
+        taskTitle: session?.taskTitle,
+        taskNumber: session?.taskNumber,
       };
     }
   );
@@ -157,6 +166,17 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       const ok = writeToSession(sessionId, data);
       if (!ok) return reply.status(404).send({ error: 'Session not found' });
       return { success: true };
+    }
+  );
+
+  // REST: Rename a tab by hand (empty title hands it back to the automatic one)
+  app.patch<{ Params: { sessionId: string }; Body: { title?: string | null } }>(
+    '/api/terminal/sessions/:sessionId',
+    async (request, reply) => {
+      const ok = renameSession(request.params.sessionId, request.body?.title);
+      if (!ok) return reply.status(404).send({ error: 'Session not found' });
+      const session = getSession(request.params.sessionId);
+      return { success: true, customTitle: session?.customTitle ?? null };
     }
   );
 

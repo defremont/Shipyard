@@ -56,12 +56,15 @@ export async function gitRoutes(app: FastifyInstance) {
       if (!path) return reply.status(404).send({ error: 'Project not found' });
 
       try {
-        // Fetch at most once per 60s to keep ahead/behind accurate
+        // Fetch at most once per 60s to keep ahead/behind accurate. It goes to
+        // the network — on a slow remote it took tens of seconds, and every
+        // status call waited on it. Kick it off in the background instead; the
+        // 5s poll picks the new counts up on the next tick.
         const now = Date.now();
         const last = lastFetch.get(path) || 0;
         if (now - last > 60_000) {
           lastFetch.set(path, now);
-          await gitService.fetch(path);
+          void gitService.fetch(path);
         }
 
         const status = await gitService.getStatus(path);
