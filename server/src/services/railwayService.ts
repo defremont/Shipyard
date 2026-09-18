@@ -98,80 +98,76 @@ export async function whoami(token: string): Promise<{ name?: string; email?: st
   return data.me || {};
 }
 
-// Two shapes of the same question. The rich one also asks which GitHub repo
-// each service builds from, which is what lets Shipyard link projects on its
-// own; if Railway ever renames those fields the whole query would fail, so a
-// failure falls back to the plain one and linking stays manual.
-const PROJECTS_QUERY_WITH_SOURCE = `
-  query {
-    me {
-      projects {
-        edges {
-          node {
-            id
-            name
-            environments { edges { node { id name } } }
-            services {
-              edges {
-                node {
-                  id
-                  name
-                  serviceInstances { edges { node { source { repo } } } }
-                }
-              }
-            }
-          }
-        }
+// The same question asked two ways, because projects reach an account by two
+// routes: owned personally (`me.projects`) and through a workspace the account
+// belongs to (`me.workspaces[].team.projects`). A personal-token account that
+// works inside a team sees nothing under the first, so both are asked and the
+// results merged.
+//
+// Each shape also has a rich and a plain form. The rich one asks which GitHub
+// repo every service builds from — that is what lets Shipyard link projects on
+// its own — and a renamed field there would fail the whole query, so failure
+// falls back to the plain form and linking stays manual.
+const PROJECT_FIELDS_WITH_SOURCE = `
+  id
+  name
+  environments { edges { node { id name } } }
+  services {
+    edges {
+      node {
+        id
+        name
+        serviceInstances { edges { node { source { repo } } } }
       }
     }
   }
 `;
 
-const PROJECTS_QUERY_PLAIN = `
+const PROJECT_FIELDS_PLAIN = `
+  id
+  name
+  environments { edges { node { id name } } }
+  services { edges { node { id name } } }
+`;
+
+const meQuery = (fields: string) => `query { me { projects { edges { node { ${fields} } } } } }`;
+const workspaceQuery = (fields: string) => `
   query {
     me {
-      projects {
-        edges {
-          node {
-            id
-            name
-            environments { edges { node { id name } } }
-            services { edges { node { id name } } }
-          }
-        }
+      workspaces {
+        id
+        name
+        team { projects { edges { node { ${fields} } } } }
       }
     }
   }
 `;
 
-type ProjectsResponse = {
-  me: {
-    projects: {
-      edges: {
-        node: {
-          id: string;
-          name: string;
-          environments?: { edges: { node: { id: string; name: string } }[] };
-          services?: {
-            edges: {
-              node: {
-                id: string;
-                name: string;
-                serviceInstances?: { edges: { node: { source?: { repo?: string | null } | null } }[] };
-              };
-            }[];
-          };
-        };
-      }[];
-    };
+interface ProjectNode {
+  id: string;
+  name: string;
+  environments?: { edges: { node: { id: string; name: string } }[] };
+  services?: {
+    edges: {
+      node: {
+        id: string;
+        name: string;
+        serviceInstances?: { edges: { node: { source?: { repo?: string | null } | null } }[] };
+      };
+    }[];
   };
+}
+
+type MeProjectsResponse = { me?: { projects?: { edges: { node: ProjectNode }[] } } };
+type WorkspaceProjectsResponse = {
+  me?: { workspaces?: { id: string; name: string; team?: { projects?: { edges: { node: ProjectNode }[] } } | null }[] };
 };
 
-/** Remembered across calls: asking for the source field twice is wasted work. */
+/** Remembered across calls: asking for a field Railway rejected is wasted work. */
 let sourceFieldUsable = true;
 
-function toSummaries(data: ProjectsResponse): RailwayProjectSummary[] {
-  return (data.me?.projects?.edges || []).map(({ node }) => ({
+function toSummary(node: ProjectNode): RailwayProjectSummary {
+  return {
     id: node.id,
     name: node.name,
     environments: (node.environments?.edges || []).map(e => ({ id: e.node.id, name: e.node.name })),
@@ -181,25 +177,62 @@ function toSummaries(data: ProjectsResponse): RailwayProjectSummary[] {
         .find(value => !!value);
       return { id: e.node.id, name: e.node.name, ...(repo ? { repo } : {}) };
     }),
-  }));
+  };
 }
 
-/** Projects the token can see, with their environments and services. */
-export async function listProjects(): Promise<RailwayProjectSummary[]> {
-  const token = await requireToken();
-
+/**
+ * Run one shape, rich first. Returns null when Railway refuses the shape
+ * itself — a workspace token has no `me`, and that is not an error worth
+ * showing as long as the other shape answers.
+ */
+async function runShape(
+  build: (fields: string) => string,
+  extract: (data: any) => ProjectNode[],
+  token: string,
+): Promise<RailwayProjectSummary[] | null> {
   if (sourceFieldUsable) {
     try {
-      return toSummaries(await graphql<ProjectsResponse>(PROJECTS_QUERY_WITH_SOURCE, {}, token));
+      return extract(await graphql<any>(build(PROJECT_FIELDS_WITH_SOURCE), {}, token)).map(toSummary);
     } catch (err: any) {
-      // A rejected token is not a schema problem — let it through untouched.
       if (/token/i.test(err?.message || '')) throw err;
+      // Could be the source field or the shape; the plain form below tells which.
       sourceFieldUsable = false;
-      log.warn('server', 'Railway service source unavailable, linking stays manual', err?.message);
+      log.warn('server', 'Railway rejected the service-source query', err?.message);
     }
   }
 
-  return toSummaries(await graphql<ProjectsResponse>(PROJECTS_QUERY_PLAIN, {}, token));
+  try {
+    return extract(await graphql<any>(build(PROJECT_FIELDS_PLAIN), {}, token)).map(toSummary);
+  } catch (err: any) {
+    if (/token/i.test(err?.message || '')) throw err;
+    return null;
+  }
+}
+
+/** Projects the token can see, personal and through every workspace. */
+export async function listProjects(): Promise<RailwayProjectSummary[]> {
+  const token = await requireToken();
+
+  const [own, shared] = await Promise.all([
+    runShape(meQuery, (data: MeProjectsResponse) => (data.me?.projects?.edges || []).map(e => e.node), token),
+    runShape(
+      workspaceQuery,
+      (data: WorkspaceProjectsResponse) =>
+        (data.me?.workspaces || []).flatMap(w => (w.team?.projects?.edges || []).map(e => e.node)),
+      token,
+    ),
+  ]);
+
+  if (own === null && shared === null) {
+    throw new RailwayError('Railway did not return any projects for this token');
+  }
+
+  // A project reachable both ways must not be listed twice.
+  const byId = new Map<string, RailwayProjectSummary>();
+  for (const project of [...(own || []), ...(shared || [])]) {
+    if (!byId.has(project.id)) byId.set(project.id, project);
+  }
+  return [...byId.values()];
 }
 
 // The input type is filled inline so this never has to name Railway's own input
@@ -269,10 +302,34 @@ export async function latestDeployment(input: {
   };
 }
 
-/** Save a token only once it has answered a real call. */
+/**
+ * Save a token once it has answered a real call.
+ *
+ * `me` is an account-token query: a workspace token has no personal account
+ * behind it and Railway refuses that field. So a refusal there is not a verdict
+ * on the token — listing projects is. The token has to be stored for that
+ * second attempt (the API client reads it from the store), and is removed again
+ * if it turns out to be no good.
+ */
 export async function connect(token: string): Promise<{ name?: string; email?: string }> {
-  const account = await whoami(token.trim());
-  await deployStore.setToken('railway', token.trim());
-  log.info('server', 'Railway connected', account.email || account.name || 'account');
-  return account;
+  const trimmed = token.trim();
+
+  try {
+    const account = await whoami(trimmed);
+    await deployStore.setToken('railway', trimmed);
+    log.info('server', 'Railway connected', account.email || account.name || 'account');
+    return account;
+  } catch (err: any) {
+    if (/rejected the token/i.test(err?.message || '')) throw err;
+
+    await deployStore.setToken('railway', trimmed);
+    try {
+      const projects = await listProjects();
+      log.info('server', 'Railway connected (workspace token)', `${projects.length} project(s)`);
+      return {};
+    } catch (second: any) {
+      await deployStore.clearToken('railway');
+      throw new RailwayError(second?.message || err?.message || 'Railway refused the token');
+    }
+  }
 }

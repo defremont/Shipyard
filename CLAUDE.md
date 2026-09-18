@@ -690,6 +690,14 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 - A query com `serviceInstances { source { repo } }` tem fallback: se o Railway
   renomear esses campos, `listProjects` cai na query simples, `sourceAvailable`
   vem `false` e a UI avisa que o vinculo tera de ser manual — nunca quebra
+- **Projeto chega a uma conta por dois caminhos** e `listProjects` pergunta os
+  dois, unindo por id: `me.projects` (pessoal) e
+  `me.workspaces[].team.projects` (workspace/time). So o primeiro deixaria de
+  fora quem trabalha dentro de um time
+- `me { name email }` e query de **account token**; um token de workspace nao
+  tem conta pessoal atras e o Railway recusa o campo. Por isso `connect()` nao
+  trata essa recusa como veredito: ele salva o token e tenta listar os projetos,
+  so removendo o token se isso tambem falhar
 
 ### Milestones
 - "General" e virtual (nao armazenado) — tasks sem milestoneId pertencem a ele
