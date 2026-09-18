@@ -69,6 +69,43 @@ export interface AppSettings {
   worktreeBasePath?: string
 }
 
+export type DeployState = 'success' | 'failed' | 'building' | 'idle' | 'unknown'
+
+/** "Did the last build go up?" for one project. */
+export interface DeployStatus {
+  configured: boolean
+  provider?: 'railway'
+  state: DeployState
+  rawStatus?: string
+  deployedAt?: string
+  url?: string
+  projectName?: string
+  environmentName?: string
+  serviceName?: string
+  commitMessage?: string
+  commitHash?: string
+  branch?: string
+  consoleUrl?: string
+  error?: string
+  checkedAt: string
+}
+
+export interface RailwayProjectSummary {
+  id: string
+  name: string
+  environments: { id: string; name: string }[]
+  services: { id: string; name: string }[]
+}
+
+export interface DeployLinkInput {
+  projectId: string
+  projectName?: string
+  environmentId?: string
+  environmentName?: string
+  serviceId?: string
+  serviceName?: string
+}
+
 export interface SyncProviderStatus {
   providerId: 'trello' | 'clickup';
   connected: boolean;
@@ -427,6 +464,29 @@ export const api = {
   scanDirectory: (directory: string) => request<{ projects: { path: string; name: string; techStack: string[]; isGitRepo: boolean }[] }>('/projects/scan', { method: 'POST', body: JSON.stringify({ directory }) }),
   addProjects: (paths: string[]) => request<{ projects: any[] }>('/projects/add', { method: 'POST', body: JSON.stringify({ paths }) }),
   removeProject: (path: string) => request<{ projects: any[] }>('/projects/remove', { method: 'POST', body: JSON.stringify({ path }) }),
+
+  // Deploys (Railway)
+  getDeployProviders: () =>
+    request<{ providers: { railway: { connected: boolean } } }>('/deploy/providers'),
+  connectRailway: (token: string) =>
+    request<{ connected: boolean; account: { name?: string; email?: string } }>('/deploy/providers/railway', {
+      method: 'POST',
+      body: JSON.stringify({ token }),
+      timeout: 20_000,
+    }),
+  disconnectRailway: () => request<{ connected: boolean }>('/deploy/providers/railway', { method: 'DELETE' }),
+  getRailwayProjects: () =>
+    request<{ projects: RailwayProjectSummary[] }>('/deploy/railway/projects', { timeout: 20_000 }),
+  getAllDeployStatus: () =>
+    request<{ statuses: Record<string, DeployStatus> }>('/deploy/status', { timeout: 20_000 }),
+  getDeployStatus: (projectId: string) => request<DeployStatus>(`/projects/${projectId}/deploy`, { timeout: 20_000 }),
+  linkDeploy: (projectId: string, body: DeployLinkInput) =>
+    request<{ status: DeployStatus }>(`/projects/${projectId}/deploy`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+      timeout: 20_000,
+    }),
+  unlinkDeploy: (projectId: string) => request(`/projects/${projectId}/deploy`, { method: 'DELETE' }),
 
   // Settings
   getSettings: () => request<AppSettings>('/settings'),

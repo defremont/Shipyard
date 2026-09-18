@@ -18,6 +18,7 @@ import { fileRoutes } from './routes/files.js';
 import { logRoutes } from './routes/logs.js';
 import { reportRoutes } from './routes/reports.js';
 import { worktreeRoutes } from './routes/worktrees.js';
+import { deployRoutes } from './routes/deploy.js';
 import { initProjectDiscovery } from './services/projectDiscovery.js';
 import { loadSettings } from './services/settingsStore.js';
 import { startWorktreeCleanup } from './services/worktreeService.js';
@@ -95,6 +96,7 @@ await app.register(fileRoutes);
 await app.register(logRoutes);
 await app.register(reportRoutes);
 await app.register(worktreeRoutes);
+await app.register(deployRoutes);
 
 // SPA fallback: serve index.html for all non-API, non-WS routes
 if (STATIC_DIR) {

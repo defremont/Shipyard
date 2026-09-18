@@ -45,6 +45,7 @@ data/           # Persistencia (auto-criado)
   projects.json, settings.json, ai-config.json, .claude-key,   # claude.json = legado, migrado
   mcp-config.json, mcp-auth.json, server.log,
   sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
+  deploy-config.json,              # token Railway (cifrado) + link por projeto
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
 
 electron/       # main.ts, preload.ts (desktop wrapper)
@@ -125,6 +126,11 @@ interface Project {
   GET /api/projects/:id/tasks/:tid/attachment/:aid?milestoneId=&preview=1
     (proxy autenticado — a URL do anexo no Trello exige header OAuth, um `<img>`
      apontando direto para ela recebe 401)
+**Deploys (Railway)**:
+  GET /api/deploy/providers, POST/DELETE /api/deploy/providers/railway (token da conta)
+  GET /api/deploy/railway/projects (projetos/ambientes/servicos da conta)
+  GET /api/deploy/status (todos os projetos linkados, numa chamada)
+  GET/PUT/DELETE /api/projects/:id/deploy
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
@@ -647,6 +653,28 @@ Shipyard so le):
 
 **Migracao v2 → v3**: integracoes Trello/ClickUp pre-existentes sao descartadas (creds
 globais sao mantidas) — usuarios reconectam cada milestone manualmente.
+
+### Indicador de deploy (Railway)
+- Responde uma pergunta so: **o ultimo build subiu?** `deployService.getStatus`
+  dobra os estados do Railway em quatro — `success` / `failed` / `building` /
+  `idle` — e a UI nunca inventa um quinto
+- `railwayService.ts` **so le** (`deployments(first: 1)` e a lista de projetos).
+  Nao redeploy, nao rollback — nada que mexa em producao a partir daqui
+- O input do GraphQL vai inline (`input: { projectId: $projectId, ... }`) para
+  nao depender do nome do tipo de input do Railway: tipo renomeado do outro lado
+  derruba a query inteira
+- Token da conta fica cifrado em `deploy-config.json` (mesma chave
+  `.claude-key` do ai-config) e **nunca volta pro client**
+- Cache por projeto no server: 60s parado, 15s enquanto ha build rodando, 30s
+  depois de erro. Falha de rede vira `error` no payload — o badge diz que nao
+  sabe, nunca mostra verde por engano
+- Projeto sem link **nao desenha nada** (`configured: false`). O Dashboard usa
+  `GET /api/deploy/status` (uma chamada para todos) — um `useDeployStatus` por
+  card abriria uma dezena de requests por minuto
+- Onde aparece: badge na toolbar do Workspace (popover com servico, commit e
+  links) e um icone no card do Dashboard. Configuracao do token em
+  Settings > AI & Integrations; o projeto Railway se escolhe em
+  Project settings > Launch
 
 ### Milestones
 - "General" e virtual (nao armazenado) — tasks sem milestoneId pertencem a ele

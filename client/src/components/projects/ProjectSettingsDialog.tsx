@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Star, Link2, Plus, Trash2, FolderOpen, Copy, Zap, FileSpreadsheet, FileJson, FileText, Download, Import, Loader2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ProjectDeploySettings } from '@/components/deploy/ProjectDeploySettings'
 import { Button } from '@/components/ui/button'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -333,6 +334,8 @@ export function ProjectSettingsDialog({ project, open, onOpenChange, defaultTab 
           {/* Launch preferences */}
           <TabsContent value="launch" className="space-y-4 mt-3">
             <div className="space-y-3">
+              <ProjectDeploySettings projectId={project.id} />
+
               <p className="text-xs text-muted-foreground">
                 Launch shortcuts are available in the workspace header bar: Claude, Dev Server, Shell, and Open Folder.
               </p>

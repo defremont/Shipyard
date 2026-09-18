@@ -1,4 +1,5 @@
 import { GitBranch, Star, Sparkles, Play, Monitor, Clock, FolderOpen, ArrowUp, ArrowDown, FileEdit } from 'lucide-react'
+import { DeployDot } from '@/components/deploy/DeployBadge'
 import { formatDistanceToNow } from 'date-fns'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -100,6 +101,8 @@ export function ProjectCard({ project, taskCounts }: ProjectCardProps) {
             <span className="shrink-0">{formatDistanceToNow(new Date(project.lastCommitDate), { addSuffix: true })}</span>
           </>
         )}
+        {/* Renders nothing unless the project has a deploy linked */}
+        <DeployDot projectId={project.id} />
       </div>
 
       {/* Tech stack */}

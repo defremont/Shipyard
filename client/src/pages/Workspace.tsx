@@ -23,6 +23,7 @@ import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
 import { useTerminalStatus } from '@/hooks/useTerminal'
+import { DeployBadge } from '@/components/deploy/DeployBadge'
 import { toast } from 'sonner'
 
 export function Workspace() {
@@ -179,6 +180,9 @@ export function Workspace() {
             {project.gitDirty && ' *'}
           </Badge>
         )}
+
+        {/* Nothing is drawn when the project has no deploy linked */}
+        <DeployBadge projectId={project.id} />
 
         {/* Mode toggle */}
         <div className="flex items-center ml-auto shrink-0">
