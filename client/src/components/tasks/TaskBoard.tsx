@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef, useEffect, memo, lazy, Suspense } from 'react'
+import { useState, useCallback, useDeferredValue, useMemo, useRef, useEffect, memo, lazy, Suspense } from 'react'
 import { Plus, Inbox, Loader, CheckCircle2, Copy, Import, LayoutGrid, List, ChevronDown, CheckCheck, Eye, EyeOff, FileText, MoreHorizontal } from 'lucide-react'
 import {
   DndContext,
@@ -32,6 +32,7 @@ import { BulkImportDialog } from './BulkImportDialog'
 import { ColumnBulkMenu } from './ColumnBulkMenu'
 import { SyncMenu } from '@/components/sync/SyncMenu'
 import { MilestoneSelector } from './MilestoneSelector'
+import { TaskSearchBox } from './TaskSearchBox'
 import { TaskForecastInline, TaskForecastSummary } from './TaskForecastSummary'
 // Pulls in CodeMirror for the markdown preview — keep it out of the board's chunk.
 const ReportDialog = lazy(() =>
@@ -42,6 +43,7 @@ import { useTasks, useTaskForecast, useUpdateTask, useReorderTasks, useCreateTas
 import { useTerminalStatus } from '@/hooks/useTerminal'
 import { tasksToCSV, parseCSV, diffTasks, type CsvDiff } from '@/lib/csv'
 import { buildColumnPrompt } from '@/lib/promptBuilder'
+import { parseSearchTerms, taskMatchesTerms } from '@/lib/taskSearch'
 import { PENDING_NEW_TASK_KEY } from '@/lib/shortcuts'
 import { useAutoSync } from '@/hooks/useSheetSync'
 import { useQuery } from '@tanstack/react-query'
@@ -78,6 +80,27 @@ function sortTasks(tasks: Task[], sort: SortOption): Task[] {
         return a.order - b.order
     }
   })
+}
+
+function groupTasks(tasks: Task[], sort: SortOption): Record<string, Task[]> {
+  const result: Record<string, Task[]> = { inbox: [], in_progress: [], done: [] }
+
+  const backlog: Task[] = []
+  const todo: Task[] = []
+  for (const task of tasks) {
+    if (task.status === 'done') result.done.push(task)
+    else if (task.status === 'in_progress') result.in_progress.push(task)
+    else if (task.status === 'backlog') backlog.push(task)
+    else todo.push(task)
+  }
+
+  result.in_progress = sortTasks(result.in_progress, sort)
+  result.done = sortTasks(result.done, sort)
+  // Inbox is ordered: todo tasks first, then backlog tasks — keeps sub-sections
+  // contiguous so a single SortableContext still works.
+  result.inbox = [...sortTasks(todo, sort), ...sortTasks(backlog, sort)]
+
+  return result
 }
 
 function InlineTaskInput({ projectId, status, milestoneId, onClose }: { projectId: string; status: Task['status']; milestoneId?: string; onClose: () => void }) {
@@ -344,6 +367,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     (localStorage.getItem(`shipyard:sort:${projectId}`) as SortOption) || 'updated'
   )
   const [addingInColumn, setAddingInColumn] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
   const [bulkImportOpen, setBulkImportOpen] = useState(false)
   const [reportOpen, setReportOpen] = useState(false)
   const [doneReadAt, setDoneReadAt] = useState<string | null>(() =>
@@ -363,6 +387,10 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
   useEffect(() => {
     setVisibleCounts({ inbox: INITIAL_VISIBLE, in_progress: INITIAL_VISIBLE, done: INITIAL_VISIBLE })
   }, [projectId])
+
+  // A filter is scoped to the board you typed it in — carrying it into another
+  // project or milestone would show an empty board for no visible reason.
+  useEffect(() => { setSearch('') }, [projectId, milestoneId])
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
@@ -455,27 +483,25 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     input.click()
   }
 
-  const grouped = useMemo(() => {
-    const result: Record<string, Task[]> = { inbox: [], in_progress: [], done: [] }
-    if (!tasks) return result
+  // Filtering keeps the input responsive on big boards: typing updates the
+  // field right away and the (cheap) re-group happens at React's leisure.
+  const deferredSearch = useDeferredValue(search)
+  const searchTerms = useMemo(() => parseSearchTerms(deferredSearch), [deferredSearch])
+  const isFiltering = searchTerms.length > 0
 
-    const backlog: Task[] = []
-    const todo: Task[] = []
-    for (const task of tasks) {
-      if (task.status === 'done') result.done.push(task)
-      else if (task.status === 'in_progress') result.in_progress.push(task)
-      else if (task.status === 'backlog') backlog.push(task)
-      else todo.push(task)
-    }
+  const filteredTasks = useMemo(() => {
+    if (!tasks) return []
+    if (!isFiltering) return tasks
+    return tasks.filter(t => taskMatchesTerms(t, searchTerms))
+  }, [tasks, searchTerms, isFiltering])
 
-    result.in_progress = sortTasks(result.in_progress, sortBy)
-    result.done = sortTasks(result.done, sortBy)
-    // Inbox is ordered: backlog tasks first, then todo tasks — keeps sub-sections
-    // contiguous so a single SortableContext still works.
-    result.inbox = [...sortTasks(todo, sortBy), ...sortTasks(backlog, sortBy)]
-
-    return result
-  }, [tasks, sortBy])
+  // The unfiltered grouping stays around so a drag while filtering still
+  // reorders against the real list instead of shuffling hidden tasks to the end.
+  const groupedAll = useMemo(() => groupTasks(tasks || [], sortBy), [tasks, sortBy])
+  const grouped = useMemo(
+    () => (isFiltering ? groupTasks(filteredTasks, sortBy) : groupedAll),
+    [isFiltering, filteredTasks, sortBy, groupedAll],
+  )
 
   const inboxSplit = useMemo(() => {
     const inbox = grouped.inbox || []
@@ -486,7 +512,8 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
   // Split done tasks into unread and read based on doneReadAt timestamp
   const { unreadDone, readDone } = useMemo(() => {
     const allDone = grouped.done || []
-    if (!doneReadAt) return { unreadDone: allDone, readDone: [] as Task[] }
+    // While filtering, a match must never hide behind "Show N read".
+    if (!doneReadAt || isFiltering) return { unreadDone: allDone, readDone: [] as Task[] }
     const cutoff = new Date(doneReadAt).getTime()
     const unread: Task[] = []
     const read: Task[] = []
@@ -496,7 +523,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
       else unread.push(task)
     }
     return { unreadDone: unread, readDone: read }
-  }, [grouped.done, doneReadAt])
+  }, [grouped.done, doneReadAt, isFiltering])
 
   const handleMarkAllRead = useCallback(() => {
     const now = new Date().toISOString()
@@ -565,8 +592,9 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
     if (!activeCol || !overCol) return
 
     if (activeCol === overCol) {
-      // Same column — reorder
-      const colTasks = grouped[activeCol]
+      // Same column — reorder. Always against the unfiltered column: sending a
+      // partial list would push every hidden task to the end of the board.
+      const colTasks = groupedAll[activeCol] || []
       const oldIndex = colTasks.findIndex(t => t.id === active.id)
       const newIndex = colTasks.findIndex(t => t.id === over.id)
       if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
@@ -577,7 +605,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           if (col.key === activeCol) {
             allIds.push(...reordered.map(t => t.id))
           } else {
-            allIds.push(...(grouped[col.key] || []).map(t => t.id))
+            allIds.push(...(groupedAll[col.key] || []).map(t => t.id))
           }
         }
         reorderTasks.mutate({ projectId, taskIds: allIds })
@@ -600,7 +628,9 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold flex items-center gap-1.5">
           Tasks
-          <span className="text-xs font-normal text-muted-foreground/60 tabular-nums">{tasks?.length || 0}</span>
+          <span className="text-xs font-normal text-muted-foreground/60 tabular-nums">
+            {isFiltering ? `${filteredTasks.length}/${tasks?.length || 0}` : tasks?.length || 0}
+          </span>
           {isSyncing && <Loader className="h-3 w-3 animate-spin text-muted-foreground" />}
           {onMilestoneChange && (
             <>
@@ -610,6 +640,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
           )}
         </h2>
         <div className="flex flex-wrap items-center gap-1">
+          <TaskSearchBox value={search} onChange={setSearch} resultCount={filteredTasks.length} />
           <TaskForecastSummary projectId={projectId} forecast={taskForecast} isLoading={isForecastLoading} />
           <SyncMenu projectId={projectId} projectName={projectName} milestoneId={milestoneId} tasks={tasks || []} />
           {/* Secondary controls live in one overflow menu — the toolbar stays minimal */}
@@ -822,7 +853,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
                         </button>
                       ) : (
                         <div className="text-xs text-muted-foreground/50 py-6 text-center">
-                          Drop tasks here
+                          {isFiltering ? 'No matches' : 'Drop tasks here'}
                         </div>
                       )}
                       {isDoneCol && showReadDone && readDone.map(task => (
@@ -854,7 +885,7 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
         </DndContext>
       ) : (
         <TaskListView
-          tasks={tasks || []}
+          tasks={filteredTasks}
           projectName={projectName}
           projectPath={projectPath}
           onEdit={handleEdit}

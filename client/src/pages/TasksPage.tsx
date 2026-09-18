@@ -26,6 +26,7 @@ import { useAllTasks, useUpdateTask, useDeleteTask, type Task } from '@/hooks/us
 import { useProjects, type Project } from '@/hooks/useProjects'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { parseSearchTerms, taskMatchesTerms } from '@/lib/taskSearch'
 import { TaskItem } from '@/components/tasks/TaskItem'
 import { TaskEditor } from '@/components/tasks/TaskEditor'
 import { TaskViewer } from '@/components/tasks/TaskViewer'
@@ -256,12 +257,10 @@ export function TasksPage() {
   const filteredTasks = useMemo(() => {
     if (!tasks) return []
     let filtered = tasks
-    if (search.trim()) {
-      const q = search.toLowerCase()
+    const terms = parseSearchTerms(search)
+    if (terms.length > 0) {
       filtered = filtered.filter(t =>
-        t.title.toLowerCase().includes(q) ||
-        t.description?.toLowerCase().includes(q) ||
-        projectMap.get(t.projectId)?.name.toLowerCase().includes(q)
+        taskMatchesTerms(t, terms, projectMap.get(t.projectId)?.name)
       )
     }
     if (priorityFilters.size > 0) {
@@ -398,6 +397,7 @@ export function TasksPage() {
                 placeholder="Search tasks..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape' && search) { e.stopPropagation(); setSearch('') } }}
                 className="h-8 pl-8 text-sm"
               />
             </div>

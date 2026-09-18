@@ -174,6 +174,22 @@ interface Project {
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao
 - Para tarefas done: prompt contem resumo da implementacao
 
+### Busca de tarefas (filtro do board)
+- `lib/taskSearch.ts` e a fonte unica do filtro por texto: `parseSearchTerms`
+  quebra a query em termos e `taskMatchesTerms` casa **todos** eles (AND) contra
+  titulo + description + prompt (mais um campo `extra`, usado na TasksPage para
+  o nome do projeto). Nao escrever um filtro proprio por tela
+- `TaskSearchBox` fica colapsado num icone de lupa na toolbar do board e so
+  expande ao clicar; **nunca colapsa com texto dentro** — filtro ativo tem que
+  estar visivel. Esc limpa e fecha, o X limpa e mantem o foco
+- Filtrar nao pode alterar dados: o reorder por drag usa `groupedAll` (lista
+  **sem** filtro), porque `POST /tasks/reorder` joga pro fim tudo que nao vier
+  na lista enviada — mandar so os visiveis embaralharia as tarefas ocultas
+- Com filtro ativo a coluna Done ignora o corte de lidas/nao lidas: um match
+  nunca pode ficar escondido atras de "Show N read"
+- A busca e efemera (nao vai pro localStorage) e zera ao trocar de projeto ou
+  milestone
+
 ### Dialogo de tarefa (TaskEditor)
 - Um unico componente serve New Task e Edit Task. O caminho comum e so titulo:
   titulo + descricao + a linha `Priority/Effort/Status` ficam sempre visiveis;
