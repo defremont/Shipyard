@@ -205,8 +205,10 @@ const TerminalTab = memo(function TerminalTab({
       onDrop={onDrop}
       className={cn(
         'group flex h-6 min-w-[104px] max-w-[260px] basis-0 flex-1 cursor-pointer items-center gap-1.5 overflow-hidden rounded-sm px-2 text-[11px] transition-colors',
+        // The open tab has to be findable at a glance in a row of eight: it
+        // keeps the lit background and adds weight and a rule of its own.
         inPane
-          ? 'bg-background text-foreground shadow-sm ring-1 ring-border/80'
+          ? 'bg-background font-medium text-foreground shadow-sm ring-1 ring-border relative before:absolute before:inset-x-1 before:top-0 before:h-[2px] before:rounded-full before:bg-foreground/40'
           : 'text-muted-foreground hover:bg-background/40 hover:text-foreground',
         tab.exited && !tab.hasNotification && 'opacity-60',
         isDragging && 'opacity-40',
