@@ -3,7 +3,7 @@ import { nanoid } from 'nanoid';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
 import { resolveAgent, buildAgentLaunch, DEFAULT_AGENT_ID } from './agentRegistry.js';
-import { aiTitlesEnabled, summarizeTerminal } from './terminalSummary.js';
+import { aiTitlesEnabled, cleanTerminalOutput, summarizeTerminal } from './terminalSummary.js';
 import type { AgentDefinition } from '../types/index.js';
 
 const os = platform();
@@ -209,9 +209,13 @@ export async function createSession(
   // For AI resolve/manage sessions: inject prompt when Claude CLI is ready.
   // The output watcher only starts once injection is done — during the ready
   // wait the CLI shows an idle prompt that would read as a false 'idle'.
+  //
+  // Every other session is watched too: a shell becomes a Claude session as
+  // soon as someone types `claude` in it, and the watcher stays silent until
+  // the screen says so.
   if (prompt && injectPrompt) {
     injectPromptWhenReady(id, prompt, () => startOutputWatcher(id, { working: true }));
-  } else if (CLAUDE_SESSION_TYPES.has(type)) {
+  } else {
     startOutputWatcher(id);
   }
 
@@ -598,12 +602,45 @@ export function injectPromptWhenReady(sessionId: string, prompt: string, onInjec
 
 const CLAUDE_SESSION_TYPES = new Set(['claude', 'claude-yolo', 'ai-resolve', 'ai-manage']);
 
+// Claude is not only where it was launched from: people open a shell and type
+// `claude` in it. So the screen decides, not the session type — these are the
+// marks the CLI leaves on it (the status line, the hint bar, its own banner).
+const CLAUDE_SCREEN_RE = /bypass permissions|\? for shortcuts|esc to interrupt|Claude Code v\d|shift\+tab to cycle/i;
+
 // A permission dialog or a numbered choice list — the CLI is blocked on a
 // decision, not merely idle.
 const DECISION_RE = /Do you want|❯\s*\d[.)]|\(y\/n\)/i;
 
+// The empty input box, as it survives cleanTerminalOutput: a line that is a
+// prompt character and nothing else, or the greyed-out suggestion the CLI
+// shows in an empty box. Anchoring on the end of the raw output cannot work —
+// a TUI redraw ends in cursor moves, never in the prompt.
+const IDLE_PROMPT_RE = /^[│|]?\s*[>❯]\s*(?:│\s*)?(?:Try\s*".*)?$/;
+
+// How far back to read the screen. The box sits above the status line, the
+// hint line and whatever warning the CLI decided to print today, so a short
+// window loses it.
+const IDLE_TAIL_LINES = 15;
+
+// A run in flight. The CLI keeps an empty input box on screen while it works,
+// so the box alone cannot mean "done" — this line is what says otherwise.
+const RUNNING_RE = /esc to interrupt/i;
+
 const WATCH_SETTLE_TIME = 1_200; // same silence window the injector trusts
 const WATCH_TICK = 300;
+
+/** Does this screen belong to a running Claude CLI? */
+function looksLikeClaude(clean: string): boolean {
+  return CLAUDE_SCREEN_RE.test(clean) || lastLines(clean).some(line => IDLE_PROMPT_RE.test(line));
+}
+
+function lastLines(clean: string): string[] {
+  return clean
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .slice(-IDLE_TAIL_LINES);
+}
 
 function setSessionState(id: string, state: TerminalState): void {
   const session = sessions.get(id);
@@ -613,9 +650,14 @@ function setSessionState(id: string, state: TerminalState): void {
 }
 
 /**
- * Observe a Claude session's output and classify it as busy / awaiting-input /
- * idle. Strictly read-only: it never writes to the PTY and never touches the
- * write queue or the `injecting` flag, so it cannot interleave with a paste.
+ * Watch a session's output and say what Claude is doing in it: busy,
+ * awaiting-input, idle, or finished. Strictly read-only — it never writes to
+ * the PTY and never touches the write queue or the `injecting` flag, so it
+ * cannot interleave with a paste.
+ *
+ * It runs on every session, because a shell becomes a Claude session the
+ * moment someone types `claude` in it, and stays silent until the screen says
+ * Claude is there.
  */
 const watchers = new Map<string, { timer: NodeJS.Timeout; dispose: () => void }>();
 
@@ -638,13 +680,14 @@ function startOutputWatcher(sessionId: string, options?: { working?: boolean }):
   let tail = '';
   let lastOutputTime = Date.now();
   let sawOutput = false;
+  let sawClaude = false;
 
   const disposable = session.pty.onData((data: string) => {
     lastOutputTime = Date.now();
     sawOutput = true;
     tail += data;
     if (tail.length > 8_000) tail = tail.slice(-4_000);
-    setSessionState(sessionId, 'busy');
+    if (sawClaude) setSessionState(sessionId, 'busy');
   });
 
   const timer = setInterval(() => {
@@ -658,22 +701,47 @@ function startOutputWatcher(sessionId: string, options?: { working?: boolean }):
     // Output has settled — decide what the CLI is showing, then start a fresh
     // buffer. Keeping the old text would let one answered permission dialog
     // re-flag the tab on every later pause.
-    const settled = tail;
+    const clean = cleanTerminalOutput(tail);
     tail = '';
     sawOutput = false;
-    if (DECISION_RE.test(settled)) {
-      setSessionState(sessionId, 'awaiting-input');
-    } else if (PROMPT_RE.test(settled)) {
-      // Back at an empty prompt: a run just ended, or the CLI was never given
-      // anything to do. Only the first is worth telling the user about, and it
-      // is announced once — the next one needs new work behind it.
+
+    // Once the CLI has shown itself, the session is a Claude session until it
+    // dies — a later frame that draws only the spinner still belongs to it.
+    if (!sawClaude && !looksLikeClaude(clean)) return;
+    if (!sawClaude) {
+      // The CLI has just appeared on screen. Typing `claude` and pressing
+      // Enter counts as input, but booting is not work, so the first prompt
+      // it draws must not be announced as a finished run.
+      sawClaude = true;
       const current = sessions.get(sessionId);
-      if (current?.working) {
-        current.working = false;
-        setSessionState(sessionId, 'finished');
-      } else {
-        setSessionState(sessionId, 'idle');
-      }
+      if (current) current.working = false;
+    }
+
+    // Read the screen as it stands, not the whole buffer: one settled chunk
+    // holds every frame drawn since the last one, so an "esc to interrupt"
+    // from a run that has already ended would answer for the run that has.
+    const screen = lastLines(clean);
+    const text = screen.join('\n');
+
+    if (DECISION_RE.test(text)) {
+      setSessionState(sessionId, 'awaiting-input');
+      return;
+    }
+    if (RUNNING_RE.test(text)) {
+      setSessionState(sessionId, 'busy');
+      return;
+    }
+    if (!screen.some(line => IDLE_PROMPT_RE.test(line))) return;
+
+    // Back at an empty prompt: a run just ended, or the CLI was never given
+    // anything to do. Only the first is worth telling the user about, and it
+    // is announced once — the next one needs new work behind it.
+    const current = sessions.get(sessionId);
+    if (current?.working) {
+      current.working = false;
+      setSessionState(sessionId, 'finished');
+    } else {
+      setSessionState(sessionId, 'idle');
     }
   }, WATCH_TICK);
 
@@ -701,7 +769,9 @@ export function renameSession(id: string, title: string | null | undefined): boo
 // call at a time process-wide (the queue lives in terminalSummary), and a
 // session whose calls fail twice is dropped — there is no usable backend.
 
-const SUMMARY_SESSION_TYPES = new Set(['shell', 'dev']);
+// Any tab with no task behind it, Claude's included: "Claude" as a label says
+// no more than "Shell" did once three of them are open side by side.
+const SUMMARY_SESSION_TYPES = new Set(['shell', 'dev', 'claude', 'claude-yolo']);
 const SUMMARY_SETTLE_MS = 3_000;
 const SUMMARY_MIN_INTERVAL_MS = 45_000;
 const SUMMARY_MIN_CHARS = 120;

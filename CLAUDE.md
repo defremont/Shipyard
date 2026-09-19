@@ -367,22 +367,36 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Renderer WebGL com fallback automatico para DOM (`attachRenderer`)
 
 ### Indicador de "esperando resposta" no terminal Claude
-- `startOutputWatcher` (terminalService.ts) observa a saida das sessoes Claude
-  (`claude`, `claude-yolo`, `ai-resolve`, `ai-manage`) e classifica em
-  `busy` / `awaiting-input` / `idle` / `finished`. So **observa**: nunca escreve
-  no PTY, nunca toca na fila de escrita nem no flag `injecting` — escrever ali
-  corromperia um paste em andamento
+- `startOutputWatcher` (terminalService.ts) roda em **toda** sessao e classifica
+  em `busy` / `awaiting-input` / `idle` / `finished`. So **observa**: nunca
+  escreve no PTY, nunca toca na fila de escrita nem no flag `injecting` —
+  escrever ali corromperia um paste em andamento
+- **Quem decide que ha Claude ali e a tela, nao o tipo da sessao**: o usuario
+  abre um shell e digita `claude`. `CLAUDE_SCREEN_RE` procura as marcas do CLI
+  (`bypass permissions`, `? for shortcuts`, `esc to interrupt`, banner) e o
+  watcher fica **mudo** ate uma delas aparecer — terminal comum nunca pisca.
+  Depois que apareceu (`sawClaude`), a sessao continua sendo Claude
 - `finished` e o `idle` que interessa: o CLI voltou ao prompt vazio **depois de
   receber trabalho**. Quem separa os dois e `session.working`, ligado pela
   injecao de prompt e por qualquer input do usuario que contenha Enter, e
   desligado ao anunciar. Sem ele, o prompt ocioso que um CLI recem-aberto mostra
   seria lido como "terminou" antes de qualquer pedido. O anuncio e unico: o
   proximo so vem com trabalho novo atras
-- Reaproveita `PROMPT_RE` (prompt ocioso) do injetor e acrescenta um padrao de
-  decisao (`Do you want`, opcoes numeradas, `(y/n)`), sempre depois de ~1.2s de
-  silencio. Qualquer input do usuario volta o estado para `busy`
+- A classificacao roda sobre a saida **limpa** (`cleanTerminalOutput`) e so
+  sobre as ultimas 15 linhas — a tela como esta agora. Duas armadilhas medidas
+  em sessao real: ancorar no fim da saida crua nunca casa (um redraw de TUI
+  termina em movimento de cursor, nao no prompt), e um `esc to interrupt` de
+  um frame antigo, ainda no buffer, responderia pela execucao que ja acabou
+- `IDLE_PROMPT_RE` e a caixa de input vazia (`❯` sozinho, ou com o placeholder
+  `Try "..."`); `RUNNING_RE` (`esc to interrupt`) tem precedencia, porque o CLI
+  mantem a caixa vazia na tela **enquanto trabalha**. Decisao (`Do you want`,
+  opcoes numeradas, `(y/n)`) vem antes das duas. Qualquer input do usuario volta
+  o estado para `busy`
 - O watcher so comeca depois que a injecao de prompt termina (`onInjected`) —
   durante a espera o CLI mostra prompt ocioso e daria falso `idle`
+- Digitar `claude` e dar Enter conta como input e ligaria `working`, entao o
+  reconhecimento da tela **zera `working`**: subir o CLI nao e trabalho, e o
+  primeiro prompt que ele desenha nao pode virar "terminou"
 - Transicoes viram frame WS `{ type: 'state', state }`; o estado atual e
   reenviado quando um socket conecta. No client viram `awaitingInput` e
   `finished` no `GlobalTab` (transitorios: resetados na validacao de sessoes no
@@ -405,10 +419,16 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   carregar nada
 - Aba sem task ganha um rotulo escrito pela IA a partir da saida do proprio
   terminal (`terminalSummary.ts` + `startSummaryWatcher`). Regras que nao podem
-  cair: so tipos `shell`/`dev`, so depois de 3s de silencio e 120 chars novos,
+  cair: so tipos `shell`/`dev`/`claude`/`claude-yolo` (aba de Claude tambem —
+  "Claude" diz tao pouco quanto "Shell" quando ha tres abertas), so depois de
+  3s de silencio e 120 chars novos,
   no maximo uma chamada a cada 45s por sessao, **uma chamada por vez no
   processo inteiro** (fila em terminalSummary) e a sessao sai do watcher depois
   de 2 falhas. Desliga em Settings > AI (`terminalAiTitles`)
+- `cleanTerminalOutput` transforma `ESC[nC` (mover para a direita) em n
+  espacos: a TUI do Claude Code desenha **todo** espaco assim, e descartar a
+  sequencia gruda a tela inteira numa palavra so (`fixlinterrors`) — era isso
+  que estragava o rotulo escrito pela IA
 - `cleanTerminalOutput` existe porque o ConPTY **move o cursor** em vez de
   escrever `
 `: sem transformar `ESC[linha;colH` em quebra de linha, um
@@ -421,6 +441,9 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   Radix em volta do trigger **engole o clique direito** que abre o menu
 - Abas dividem a largura (`basis-0 flex-1`), truncam e sao reordenaveis por
   drag (mesmo gesto das abas de projeto)
+- A aba aberta tem que ser achada num relance numa fila de oito: fundo aceso,
+  `font-medium` e uma regua neutra de 2px no topo (`before:`). Neutra de
+  proposito — cor ali brigaria com o numero do pane no split
 - Fechar uma aba leva o workspace para o projeto da aba vizinha
   (`followTabProject`) — antes o terminal trocava e o projeto ficava para tras
 - No split, a cor vive **so** no numero do pane (1 azul / 2 verde) e na regua
