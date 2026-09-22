@@ -133,6 +133,9 @@ function copyTree(src, dest, skip = new Set()) {
 // A briefing the other machine's agent can act on without guessing: it knows
 // where Shipyard comes from, what --root meant here, and what is still loose.
 function writePrompt(outDir, { manifest, shipyardRemote, dataDirEnvUsed, repoCount, bundleCount, taskCount }) {
+  const releasesUrl = shipyardRemote && shipyardRemote.includes('github.com')
+    ? shipyardRemote.replace(/\.git$/, '').replace(/^git@github\.com:/, 'https://github.com/') + '/releases/latest'
+    : null;
   const loose = manifest.projects.flatMap(p =>
     p.repos.filter(r => !r.remote).map(r => `${p.name}${r.rel ? '/' + r.rel : ''}`)
   );
@@ -171,12 +174,15 @@ Vou configurar o Shipyard neste computador a partir de um bundle exportado da mi
 
 1. Confirme que \`git\`, \`node\` e \`pnpm\` estão instalados. Se faltar o pnpm: \`npm i -g pnpm\`.
 
-2. Clone o Shipyard e instale as dependências:
-   \`\`\`
-   git clone ${shipyardRemote || '<remote do Shipyard>'} <pasta onde o Shipyard deve ficar>
-   cd <essa pasta>
-   pnpm install
-   \`\`\`
+2. Instale o Shipyard. São dois caminhos — me pergunte qual eu quero:
+   - **App pronto**: baixe o instalador mais recente em ${releasesUrl || '<pagina de releases>'} e instale. A data dir fica em \`%APPDATA%\\Shipyard\\data\`.
+   - **Do código** (necessário se eu for mexer no próprio Shipyard):
+     \`\`\`
+     git clone ${shipyardRemote || '<remote do Shipyard>'} <pasta onde o Shipyard deve ficar>
+     cd <essa pasta>
+     pnpm install
+     \`\`\`
+     A data dir aí é a pasta \`data/\` do repositório.
 
 3. Decida comigo onde os repositórios de trabalho vão ficar. Na máquina de origem a raiz era \`${manifest.root || '(mista)'}\`. Se aqui for a mesma, use a mesma; senão me pergunte.
 
