@@ -1,7 +1,8 @@
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import type { Settings } from '../types/index.js';
 import { DATA_DIR } from './dataDir.js';
+import { writeJsonAtomic } from './atomicJson.js';
 
 const SETTINGS_FILE = join(DATA_DIR, 'settings.json');
 
@@ -25,7 +26,7 @@ export async function loadSettings(): Promise<Settings> {
 export async function saveSettings(newSettings: Settings): Promise<Settings> {
   settings = newSettings;
   await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(SETTINGS_FILE, JSON.stringify(settings, null, 2), 'utf-8');
+  await writeJsonAtomic(SETTINGS_FILE, settings);
   return settings;
 }
 

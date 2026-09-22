@@ -3,6 +3,7 @@ import { join } from 'path';
 import { nanoid } from 'nanoid';
 import type { Task, Milestone, TasksFile, EffortPoints, EffortConfidence } from '../types/index.js';
 import { DATA_DIR } from './dataDir.js';
+import { writeJsonAtomic } from './atomicJson.js';
 
 export const TASKS_DIR = join(DATA_DIR, 'tasks');
 const EFFORT_POINTS = new Set<EffortPoints>([1, 2, 3, 5, 8]);
@@ -46,7 +47,7 @@ async function readTasks(projectId: string): Promise<Task[]> {
 
 async function writeFile_(projectId: string, file: TasksFile): Promise<void> {
   await ensureTasksDir();
-  await writeFile(getTasksFilePath(projectId), JSON.stringify(file, null, 2), 'utf-8');
+  await writeJsonAtomic(getTasksFilePath(projectId), file);
 }
 
 async function writeTasks(projectId: string, tasks: Task[]): Promise<void> {

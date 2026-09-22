@@ -1,9 +1,10 @@
-import { readFile, writeFile, mkdir } from 'fs/promises';
+import { readFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { randomBytes, createHash } from 'crypto';
 import * as jose from 'jose';
 import type { McpAuthData, OAuthClient } from '../types/index.js';
 import { DATA_DIR } from './dataDir.js';
+import { writeJsonAtomic } from './atomicJson.js';
 
 const AUTH_FILE = join(DATA_DIR, 'mcp-auth.json');
 
@@ -35,7 +36,7 @@ export async function loadAuthData(): Promise<McpAuthData> {
 
 async function saveAuthData(): Promise<void> {
   await mkdir(DATA_DIR, { recursive: true });
-  await writeFile(AUTH_FILE, JSON.stringify(authData, null, 2), 'utf-8');
+  await writeJsonAtomic(AUTH_FILE, authData);
 }
 
 function getJwtSecret(): Uint8Array {

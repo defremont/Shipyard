@@ -619,9 +619,16 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 
 ### Stores JSON (concorrencia)
 - `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)
-  e gravam atomicamente (tmp + rename). Leitura corrompida usa ultima copia boa
-  em memoria + backup `.corrupt-*.bak` — nunca retorna store vazio sobre dados existentes
-- Novos stores JSON DEVEM seguir esse padrao (read-modify-write sem lock corrompe dados)
+  e gravam pelo `writeJsonAtomic` de `atomicJson.ts` (tmp + rename). Leitura
+  corrompida usa ultima copia boa em memoria + backup `.corrupt-*.bak` — nunca
+  retorna store vazio sobre dados existentes
+- **Escrever direto por cima do arquivo trunca antes de gravar**: se o processo
+  morre nessa janela, o que fica no disco e meio JSON e a leitura seguinte
+  falha. Quanto maior o arquivo, maior a janela — um `tasks/*.json` de 1,3 MB
+  gerou sozinho 855 `.corrupt-*.bak` (1,4 GB) antes de o taskStore passar a
+  usar tmp + rename. `settingsStore` e `mcpAuth` tinham o mesmo furo
+- Novos stores JSON DEVEM seguir esse padrao (read-modify-write sem lock corrompe
+  dados; escrita nao atomica corrompe arquivo)
 
 ### Electron
 - Server roda como child process via spawn (`ELECTRON_RUN_AS_NODE=1`)
