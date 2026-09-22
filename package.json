@@ -20,7 +20,9 @@
     "dist": "pnpm build && electron-builder --publish never --config electron-builder.yml",
     "dist:win": "pnpm build && electron-builder --win --publish never --config electron-builder.yml",
     "dist:mac": "pnpm build && electron-builder --mac --publish never --config electron-builder.yml",
-    "dist:linux": "pnpm build && electron-builder --linux --publish never --config electron-builder.yml"
+    "dist:linux": "pnpm build && electron-builder --linux --publish never --config electron-builder.yml",
+    "workspace:export": "node scripts/workspace-export.mjs",
+    "workspace:import": "node scripts/workspace-import.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

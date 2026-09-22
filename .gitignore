@@ -44,3 +44,7 @@ release/
 .env
 .env.local
 .env.*.local
+
+# Workspace bundles (contain .env files and the encryption key)
+shipyard-workspace/
+shipyard-workspace*.zip

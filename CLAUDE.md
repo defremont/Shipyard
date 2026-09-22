@@ -757,6 +757,48 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 - Deletar milestone move tasks para "General"
 - Milestone ativo em localStorage: `shipyard:milestone:{projectId}`
 
+### Migracao entre maquinas (`scripts/workspace-*.mjs`)
+- O par export/import move a **configuracao**, nunca as pastas de codigo:
+  repositorio com remote e clonado do lado de la, repositorio sem remote
+  nenhum viaja como `git bundle` (historico inteiro num arquivo, sem
+  `node_modules`). Copiar working tree seria mais pesado e brigaria com o `.git`
+- O bundle leva tres coisas que o git nao leva: a data dir do Shipyard, os
+  `.env` **ignorados pelo git** (`git check-ignore` decide — `.env.example` ja
+  esta no repo e nao entra) e o `manifest.json` dizendo de onde clonar cada um
+- **A unidade e o checkout, nao o projeto**: uma pasta de cliente sem `.git`
+  na raiz guarda uma duzia de repositorios. O export varre 1 nivel atras de
+  `.git` (mesmo criterio de `detectSubRepos`) e trata cada um como repo proprio
+- O id do projeto e `slugify(nome da pasta)`, entao o import preserva o nome
+  exatamente e re-enraiza o resto com `--root`. Caminho diferente nao quebra o
+  vinculo com as tasks; nome de pasta diferente quebra
+- O import **reescreve** os caminhos absolutos de `projects.json` e
+  `settings.json` e move a data dir anterior para `.bak-<timestamp>` antes de
+  escrever. Rodar de novo e seguro: checkout que ja existe fica como esta
+- `.claude-key` viaja junto com os JSON cifrados — sem ela, Trello/ClickUp e
+  Railway sobem ilegiveis do outro lado. Por isso o bundle tem segredo dentro:
+  `--no-secrets` corta, e `shipyard-workspace*` esta no `.gitignore`
+- O export descarta o que e local da maquina: `server.log`,
+  `terminal-clipboard/`, `worktrees/`, `agent-prompts/` e os `.corrupt-*.bak`
+- Zip: o `tar` do Git Bash e MSYS e nao escreve zip. No Windows o arquivo passa
+  por `Compress-Archive`/`Expand-Archive`; fora dele, `tar -czf`
+- `--only a,b,c` exporta so esses projetos (por nome de pasta). A data dir vai
+  **inteira** mesmo assim: o arquivo de tasks de um projeto que ficou de fora
+  nao custa nada e perde-lo custaria
+- O export escreve `PROMPT.md` dentro do bundle: o briefing pronto para colar
+  no agente da outra maquina, ja com os numeros reais, o remote do Shipyard, a
+  raiz de origem e o que ficou sem push. Texto condicional — sem repo em bundle
+  nao aparece aviso de bundle
+- **O bundle e autossuficiente**: `workspace-import.mjs` viaja dentro dele. A
+  outra maquina pode clonar um Shipyard mais velho que o script, e ai o bundle
+  chegaria sem porta de entrada
+- Por isso o import **nao adivinha** a data dir a partir de onde o arquivo
+  esta: `--data-dir` manda, senao `SHIPYARD_DATA_DIR`, senao a `data/` do repo
+  — e so quando ha um `package.json` um nivel acima. Sem nenhum dos tres ele
+  recusa em vez de escrever no lugar errado
+- Com `--zip` o bundle e montado em `tmpdir()` e so o arquivo pronto vai para o
+  destino: o OneDrive abre cada arquivo novo do Desktop para upload e o
+  `Compress-Archive` morre com "arquivo em uso"
+
 ## Regras para Contribuicao
 
 1. **SEMPRE atualize este CLAUDE.md** quando mudar arquitetura, rotas, modelos ou convencoes
