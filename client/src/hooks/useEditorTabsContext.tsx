@@ -28,6 +28,9 @@ export function EditorTabsProvider({ children }: { children: ReactNode }) {
     (targetProjectId: string, path: string, name: string, extension: string, options?: { diffMode?: 'staged' | 'unstaged'; subrepo?: string }) => {
       if (targetProjectId === projectId) {
         editor.openFile(path, name, extension, '', options)
+        // Opening a file is an explicit intent to see it: flip the workspace
+        // to the editor even when the file was already the active tab.
+        window.dispatchEvent(new CustomEvent('shipyard:workspace-mode', { detail: { mode: 'editor' } }))
       } else {
         // Defer the open until the target project mounts
         localStorage.setItem('shipyard:pending-editor-file', JSON.stringify({

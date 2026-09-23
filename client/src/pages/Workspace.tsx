@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, lazy, Suspense } from 'react'
+import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
 import { useParams } from 'react-router-dom'
 import { TaskBoard } from '@/components/tasks/TaskBoard'
 import { useProjects, useUpdateProject, useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
@@ -93,39 +93,6 @@ export function Workspace() {
       localStorage.removeItem('shipyard:pending-editor-file')
     }
   }, [projectId, editor, setWorkspaceMode])
-
-  // Auto-switch to editor mode only when a file tab is opened *after* mount
-  // (e.g. clicking a file in the file tree or git diff). We must NOT switch on
-  // the initial activeTabPath value, since it can come from persisted tabs and
-  // would override the user's last-selected workspace mode for this project.
-  const activeTabPath = editor.activeTabPath
-  // `undefined` = baseline not yet captured for the current project. After a
-  // project change, useEditorTabs lags one render before activeTabPath reflects
-  // the new project's persisted value, so we discard that first observation
-  // instead of treating it as a user file-open.
-  const lastSeenTabPath = useRef<string | null | undefined>(undefined)
-  const lastSeenProjectId = useRef<string | undefined>(undefined)
-  useEffect(() => {
-    if (lastSeenProjectId.current !== projectId) {
-      lastSeenProjectId.current = projectId
-      lastSeenTabPath.current = undefined
-      return
-    }
-    if (lastSeenTabPath.current === undefined) {
-      lastSeenTabPath.current = activeTabPath
-      return
-    }
-    if (
-      activeTabPath &&
-      activeTabPath !== lastSeenTabPath.current &&
-      workspaceMode !== 'editor'
-    ) {
-      setWorkspaceMode('editor')
-    }
-    lastSeenTabPath.current = activeTabPath
-    // intentionally only react to activeTabPath / projectId changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTabPath, projectId])
 
   const openSettings = useCallback((tab?: string) => {
     setSettingsTab(tab)
