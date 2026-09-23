@@ -72,12 +72,14 @@ function parseLegacyTitle(title: string): { project: string; detail: string } {
  * in a narrow tab; the tooltip carries the whole thing — the full task title,
  * which agent runs there, and the folder.
  */
-function describeTab(tab: GlobalTab): { project: string; detail: string; tooltip: string[] } {
+function describeTab(tab: GlobalTab): { number: string; project: string; detail: string; tooltip: string[] } {
   const legacy = parseLegacyTitle(tab.title)
   const project = tab.projectName || legacy.project
   const taskLabel = tab.taskTitle ? `#${tab.taskNumber ?? '?'} ${tab.taskTitle}` : ''
+  // The task number leads the tab: truncation eats the end, never the number.
+  const number = tab.taskTitle && tab.taskNumber != null ? `#${tab.taskNumber}` : ''
   const kind = tab.typeLabel || legacy.detail
-  const detail = tab.customTitle || taskLabel || tab.summary || kind
+  const detail = tab.customTitle || tab.taskTitle || tab.summary || kind
 
   const tooltip: string[] = []
   tooltip.push(project ? `${project} · ${kind}` : kind)
@@ -87,7 +89,7 @@ function describeTab(tab: GlobalTab): { project: string; detail: string; tooltip
   if (tab.exited) tooltip.push('Process exited')
   else if (tab.finished) tooltip.push('Finished — waiting at the prompt')
   else if (tab.awaitingInput) tooltip.push('Waiting for an answer')
-  return { project, detail, tooltip }
+  return { number, project, detail, tooltip }
 }
 
 const PANEL_HEIGHT_KEY = 'shipyard:terminal-height'
@@ -161,7 +163,7 @@ const TerminalTab = memo(function TerminalTab({
   onRenameStart, onRenameCommit, onRenameCancel,
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
 }: TerminalTabProps) {
-  const { project, detail, tooltip } = describeTab(tab)
+  const { number, project, detail, tooltip } = describeTab(tab)
   const inPane = paneIndex !== null
   const pane = paneIndex !== null ? PANE_STYLES[paneIndex] : null
 
@@ -241,6 +243,7 @@ const TerminalTab = memo(function TerminalTab({
         </span>
       )}
       <span className="min-w-0 flex-1 truncate text-left">
+        {number && <span className="tabular-nums">{number} </span>}
         {project && <span className="opacity-50">{project} · </span>}
         {detail}
       </span>
@@ -1065,7 +1068,7 @@ export function TerminalPanel() {
             const paneIndex: 0 | 1 = isLeft ? 0 : 1
             const pane = PANE_STYLES[paneIndex]
             const isPaneActive = isSplit && activePaneIndex === paneIndex
-            const { project, detail } = describeTab(tab)
+            const { number, project, detail } = describeTab(tab)
 
             return (
               <div
@@ -1102,6 +1105,7 @@ export function TerminalPanel() {
                       {paneIndex + 1}
                     </span>
                     <span className="min-w-0 flex-1 truncate">
+                      {number && <span className="tabular-nums">{number} </span>}
                       {project && <span className="opacity-50">{project} · </span>}
                       {detail}
                     </span>

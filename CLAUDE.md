@@ -414,6 +414,8 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   `describeTab()` (TerminalPanel) escolhe nessa ordem —
   **customTitle > task > summary da IA > tipo**. O `title` antigo
   (`[Projeto] Shell`) so serve de fallback para sessao velha
+- Aba de task abre com o numero: `#12 Projeto · Titulo`. O truncamento come o
+  fim do rotulo, nunca o numero
 - Sessao aberta para uma task recebe titulo e numero da task **no server**
   (`POST /api/terminal/sessions` le a task) — sobrevive a refresh sem o client
   carregar nada
