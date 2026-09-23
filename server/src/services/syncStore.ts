@@ -429,3 +429,54 @@ export async function clearAll(): Promise<void> {
     try { await unlink(STORE_FILE); } catch { /* already gone */ }
   });
 }
+
+// ── Cloud sync ──────────────────────────────────────────────────────────
+
+export async function exportForCloud(): Promise<StoreV3> {
+  return readStore();
+}
+
+export async function applyCloudProvider(providerId: SyncProviderId, creds: ProviderCredentials | null): Promise<void> {
+  return withStoreLock(async () => {
+    const store = await readStore();
+    if (creds) store.providers[providerId] = creds;
+    else delete store.providers[providerId];
+    await writeStore(store);
+  });
+}
+
+/**
+ * Apply one (project, provider, milestone) integration from another machine.
+ * When the last push ran, and whether it failed, is this machine's own
+ * business, so those fields stay as they are here.
+ */
+export async function applyCloudProjectConfig(
+  projectId: string,
+  providerId: SyncProviderId,
+  milestoneId: string,
+  config: ProjectSyncConfig | null,
+): Promise<void> {
+  return withStoreLock(async () => {
+    const store = await readStore();
+    const byMilestone = store.projects[projectId]?.[providerId];
+    const existing = byMilestone?.[milestoneId];
+    if (!config) {
+      if (!existing) return;
+      delete byMilestone![milestoneId];
+    } else {
+      store.projects[projectId] ??= {};
+      store.projects[projectId][providerId] ??= {};
+      store.projects[projectId][providerId]![milestoneId] = {
+        ...config,
+        projectId,
+        providerId,
+        milestoneId,
+        lastSyncAt: existing?.lastSyncAt ?? null,
+        lastSyncStatus: existing?.lastSyncStatus ?? null,
+        lastSyncError: existing?.lastSyncError ?? null,
+        updatedAt: existing?.updatedAt ?? config.createdAt,
+      };
+    }
+    await writeStore(store);
+  });
+}

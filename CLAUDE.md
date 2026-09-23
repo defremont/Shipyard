@@ -46,6 +46,7 @@ data/           # Persistencia (auto-criado)
   mcp-config.json, mcp-auth.json, server.log,
   sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
   deploy-config.json,              # token Railway (cifrado) + link por projeto
+  cloud-sync.json,                 # Shipyard Cloud: sessao cifrada + cursor/hashes do sync
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
 
 electron/       # main.ts, preload.ts (desktop wrapper)
@@ -136,6 +137,7 @@ interface Project {
     no DELETE, `?link=` remove um deploy, `?subrepo=` os daquele checkout e
     nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
+**Shipyard Cloud**: GET /api/cloud/status, POST /api/cloud/signup|login|logout|sync
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
   POST /api/worktrees/clean (`{ all? }`), DELETE /api/projects/:id/tasks/:tid/worktree
@@ -645,6 +647,69 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Data path: `SHIPYARD_DATA_DIR` env var → AppData em prod, ./data em dev
 - Centralizado em `server/src/services/dataDir.ts`
 - asar desabilitado, afterPack reinstala deps via npm (pnpm symlinks nao sobrevivem)
+- O main process so tem uma dep de runtime, `electron-updater`. O afterPack a
+  instala num manifest descartavel e copia para `resources/app/node_modules`:
+  `npm install` contra o `package.json` da raiz resolve a arvore de dev inteira
+  (electron-builder junto) e estoura o timeout
+
+### Atualizacao automatica (app desktop)
+- `electron-updater` com provider GitHub (`publish` em electron-builder.yml).
+  O build escreve `latest*.yml` + `.blockmap`; o workflow de release sobe os
+  dois junto dos instaladores. Sem eles o app instalado nao ve versao nova
+- O workflow cria a release como **draft**, e o updater ignora draft:
+  **publicar o draft e o que libera a atualizacao** para quem ja tem o app
+- Confere no boot e a cada 4h, baixa em segundo plano. O Shipyard vive na
+  bandeja e quase nunca fecha, entao "instalar ao sair" nao basta: o renderer
+  mostra um toast persistente (`useAppUpdate`) e a bandeja ganha
+  "Restart to update"
+- macOS atualiza pelo `.zip` (Squirrel.Mac), nao pelo dmg, e exige app
+  assinado. Linux so pelo AppImage; o `.deb` nao se atualiza sozinho
+- So vale no app empacotado (`app.isPackaged`). Quem roda do codigo-fonte
+  atualiza com `git pull`
+
+### Shipyard Cloud (sync entre maquinas — servico pago)
+- Servico hospedado em repositorio **privado** (`C:\Code\shipyard-cloud`,
+  Railway: workspace Amachains, projeto Personal Projects, servico
+  `shipyard-cloud` + `Postgres-bqxs`). Aqui fica so o cliente, desligado ate o
+  usuario entrar em Settings > Cloud sync. `DEFAULT_CLOUD_URL` aponta para o
+  servico; `SHIPYARD_CLOUD_URL` e o campo "Server" trocam
+- **Criptografia ponta a ponta**: a senha nunca sai da maquina. scrypt → HKDF
+  gera `authKey` (o servidor so confere isso) e `kek`, que embrulha uma chave
+  de dados aleatoria. O servidor guarda a chave embrulhada e blobs AES-GCM
+  (com a chave do registro como AAD). Sem reset de senha: perdeu, perdeu a
+  copia na nuvem — as maquinas continuam com os dados
+- Modelo: cada coisa e um registro com chave (`task/{p}/{id}`,
+  `milestone/{p}/{id}`, `project/{id}`, `settings`, `ai`, `deploy`,
+  `integration/{provider}`, `integration/{provider}/{p}/{milestone}`). O
+  servidor numera cada escrita (`rev` por conta) e a maquina puxa "o que mudou
+  depois do rev N"
+- **Os stores nao avisam o que mudou**: `cloudSync.ts` observa a data dir
+  (chokidar), le tudo por `collectLocal()` e compara hash com o ultimo estado
+  combinado com o servidor (`synced`). Hash diferente vira `pending` com a hora
+  em que foi notado; chave que sumiu vira tombstone. Por isso delete fisico no
+  taskStore continua valendo
+- Conflito: vence a mudanca mais recente, por registro. O servidor responde
+  `stale` com o registro vencedor e a maquina aplica na hora
+- **Varredura antes do pull, sempre**: edicao local que o watcher ainda nao
+  notou nao tem relogio, e um registro puxado nessa janela a sobrescreveria sem
+  disputa (bug medido no teste de duas maquinas)
+- **Dado sincronizado tem que ser igual em toda maquina**. Caminho, worktree,
+  `lastSync*` e `updatedAt` da integracao ficam fora — se entrassem, cada
+  maquina veria o valor da outra como mudanca e devolveria para sempre. Pelo
+  mesmo motivo o hash gravado apos um pull e o do que ficou no disco, nao o do
+  que veio pela rede (os stores normalizam na entrada)
+- Primeira conexao de uma maquina que ja tem dados (`joined: false`): puxa
+  tudo antes, a nuvem vence, exceto task/milestone com `updatedAt` local mais
+  novo. So depois sobe o que a nuvem nao tinha
+- Projeto que chega de outra maquina e procurado pelo nome da pasta ao lado dos
+  projetos que esta maquina ja tem (e um nivel dentro dos pais). Nao achou:
+  entra em `missingProjects`, as tasks ficam gravadas e aparecem quando a pasta
+  for adicionada
+- Gatilhos: watcher (debounce 1,5s), eventos SSE do servidor (outra maquina
+  escreveu) e poll de 60s. Tudo passa pela mesma fila (`run`)
+- Plano: `free` (padrao; `TRIAL_DAYS` no servidor da teste), `trial`, `pro`.
+  Plano inativo recusa push com 402 e o pull continua — nada fica refem.
+  Cobranca ainda e manual: `POST /v1/admin/plan` com o `ADMIN_TOKEN` do servico
 
 ### Sync — milestone-scoped (Google Sheets, Trello, ClickUp)
 Toda integracao de tasks e por **(projectId, providerId, milestoneId)**. Cada milestone tem

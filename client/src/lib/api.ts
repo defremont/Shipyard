@@ -276,6 +276,32 @@ async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   return res.json();
 }
 
+export interface CloudStatus {
+  connected: boolean
+  defaultServerUrl: string
+  serverUrl?: string
+  email?: string
+  deviceName?: string
+  syncing?: boolean
+  lastSyncAt?: string | null
+  lastError?: string | null
+  /** Local changes not on the server yet. */
+  pending?: number
+  synced?: number
+  plan?: { plan: string; active: boolean; planExpiresAt: string | null; upgradeUrl: string | null } | null
+  usage?: { records: number; bytes: number } | null
+  devices?: { id: string; name: string; lastSeenAt: string; current: boolean }[]
+  /** Projects other machines have that this one has no folder for. */
+  missingProjects?: { id: string; name: string; folder: string; remote?: string }[]
+}
+
+export interface CloudCredentials {
+  email: string
+  password: string
+  serverUrl?: string
+  deviceName?: string
+}
+
 export type AiProvider = 'claude' | 'openai' | 'gemini'
 
 export interface AiProviderStatus {
@@ -300,6 +326,13 @@ export interface AiBackendStatus {
 }
 
 export const api = {
+  // Shipyard Cloud
+  getCloudStatus: () => request<CloudStatus>('/cloud/status'),
+  cloudSignup: (body: CloudCredentials) => request<CloudStatus>('/cloud/signup', { method: 'POST', body: JSON.stringify(body), timeout: 120_000 }),
+  cloudLogin: (body: CloudCredentials) => request<CloudStatus>('/cloud/login', { method: 'POST', body: JSON.stringify(body), timeout: 120_000 }),
+  cloudLogout: () => request<CloudStatus>('/cloud/logout', { method: 'POST' }),
+  cloudSyncNow: () => request<CloudStatus>('/cloud/sync', { method: 'POST', timeout: 300_000 }),
+
   // Projects
   getProjects: () => request<{ projects: any[] }>('/projects'),
   refreshProjects: () => request<{ projects: any[] }>('/projects/refresh', { method: 'POST' }),

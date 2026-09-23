@@ -10,6 +10,7 @@ import { WorktreeSettingsCard } from '@/components/ai/WorktreeSettingsCard'
 import { TerminalTitleSettingsCard } from '@/components/ai/TerminalTitleSettingsCard'
 import { RailwaySettingsCard } from '@/components/deploy/RailwaySettingsCard'
 import { McpSettingsCard } from '@/components/mcp/McpSettingsCard'
+import { CloudSettingsCard } from '@/components/cloud/CloudSettingsCard'
 import { FolderPlus, Plus, FolderOpen, Check, Loader2, GitBranch, X, FolderSearch, Download, Upload, Volume2, VolumeX, Sparkles, Server, Cloud, Database } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useProjects } from '@/hooks/useProjects'
@@ -205,13 +206,14 @@ export function Settings() {
     addMutation.mutate(Array.from(selectedPaths))
   }
 
-  type SectionId = 'projects' | 'preferences' | 'ai' | 'data'
+  type SectionId = 'projects' | 'preferences' | 'ai' | 'cloud' | 'data'
   const [activeSection, setActiveSection] = useState<SectionId>('projects')
 
   const sections: { id: SectionId; label: string; icon: React.ReactNode }[] = [
     { id: 'projects', label: 'Projects', icon: <FolderOpen className="h-4 w-4" /> },
     { id: 'preferences', label: 'Preferences', icon: <Volume2 className="h-4 w-4" /> },
     { id: 'ai', label: 'AI & Integrations', icon: <Sparkles className="h-4 w-4" /> },
+    { id: 'cloud', label: 'Cloud sync', icon: <Cloud className="h-4 w-4" /> },
     { id: 'data', label: 'Data', icon: <Database className="h-4 w-4" /> },
   ]
 
@@ -432,6 +434,16 @@ export function Settings() {
               <RailwaySettingsCard />
               <McpSettingsCard />
               <SyncSettingsCard projects={projects || []} />
+            </>
+          )}
+
+          {activeSection === 'cloud' && (
+            <>
+              <div>
+                <h2 className="text-sm font-semibold">Cloud sync</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Use Shipyard on more than one computer.</p>
+              </div>
+              <CloudSettingsCard />
             </>
           )}
 

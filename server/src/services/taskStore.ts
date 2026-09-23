@@ -571,3 +571,51 @@ export function appendPromptSection(existing: string | undefined, header: string
   const section = `${header}\n${body.trim()}`;
   return base ? `${base}\n\n${section}` : section;
 }
+
+// ── Cloud sync ─────────────────────────────────────────────
+
+/** Ids of every project that has a tasks file. */
+export async function listTaskProjectIds(): Promise<string[]> {
+  await ensureTasksDir();
+  const { readdir: rd } = await import('fs/promises');
+  return (await rd(TASKS_DIR)).filter(f => f.endsWith('.json')).map(f => f.replace(/\.json$/, ''));
+}
+
+/** The whole file as stored, for the cloud sync to diff. Never writes. */
+export async function readTasksFileForSync(projectId: string): Promise<TasksFile> {
+  const file = await readFile_(projectId);
+  normalizeTasks(file.tasks, projectId);
+  return file;
+}
+
+/**
+ * Apply what another machine changed. Worktree fields are local to this
+ * machine and survive, like they do in replaceTasks.
+ */
+export function applyCloudChanges(projectId: string, changes: {
+  tasks: Task[];
+  deletedTasks: string[];
+  milestones: Milestone[];
+  deletedMilestones: string[];
+}): Promise<void> {
+  return withLock(projectId, async () => {
+    const file = await readFile_(projectId);
+    const tasks = new Map(file.tasks.map(t => [t.id, t]));
+    for (const id of changes.deletedTasks) tasks.delete(id);
+    for (const t of changes.tasks) {
+      const existing = tasks.get(t.id);
+      tasks.set(t.id, {
+        ...t,
+        projectId,
+        worktreePath: existing?.worktreePath,
+        worktreeBranch: existing?.worktreeBranch,
+      });
+    }
+    const milestones = new Map((file.milestones || []).map(m => [m.id, m]));
+    for (const id of changes.deletedMilestones) milestones.delete(id);
+    for (const m of changes.milestones) milestones.set(m.id, { ...m, projectId });
+    file.tasks = [...tasks.values()];
+    if (milestones.size > 0 || file.milestones) file.milestones = [...milestones.values()];
+    await writeFile_(projectId, file);
+  });
+}

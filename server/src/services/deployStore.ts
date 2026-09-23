@@ -267,3 +267,16 @@ export async function clearProject(projectId: string): Promise<void> {
     delete config.projects[projectId];
   });
 }
+
+// ── Cloud sync ───────────────────────────────────────────────────────────
+
+export async function exportForCloud(): Promise<DeployConfig> {
+  return load();
+}
+
+export async function replaceFromCloud(config: DeployConfig): Promise<void> {
+  await mutate(next => {
+    next.tokens = { ...(config.tokens || {}) };
+    next.projects = migrateProjects(config.projects);
+  });
+}

@@ -206,3 +206,11 @@ export async function getPreferredProvider(): Promise<AiProvider> {
 export async function setPreferredProvider(provider: AiProvider): Promise<void> {
   await mutate(next => { next.preferredProvider = provider; });
 }
+
+/** Replace everything with what another machine synced. */
+export async function replaceFromCloud(config: AiConfig): Promise<void> {
+  await mutate(next => {
+    next.preferredProvider = isAiProvider(config.preferredProvider) ? config.preferredProvider : 'claude';
+    next.providers = { ...(config.providers || {}) };
+  });
+}
