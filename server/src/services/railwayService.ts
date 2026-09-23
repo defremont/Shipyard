@@ -240,7 +240,7 @@ export async function listProjects(): Promise<RailwayProjectSummary[]> {
 const DEPLOYMENTS_QUERY = `
   query($projectId: String!, $environmentId: String, $serviceId: String) {
     deployments(
-      first: 1
+      first: 10
       input: { projectId: $projectId, environmentId: $environmentId, serviceId: $serviceId }
     ) {
       edges {
@@ -272,7 +272,13 @@ type DeploymentsResponse = {
   };
 };
 
-/** The latest deployment of a project (optionally narrowed to one service). */
+/**
+ * The latest deployment of a project (optionally narrowed to one service).
+ *
+ * A commit that touches none of the service's watch paths still lands as a
+ * SKIPPED deployment on top of the list. Reporting that would hide the build
+ * actually running or live, so skipped ones are passed over.
+ */
 export async function latestDeployment(input: {
   projectId: string;
   environmentId?: string;
@@ -285,7 +291,8 @@ export async function latestDeployment(input: {
     serviceId: input.serviceId ?? null,
   }, token);
 
-  const node = data.deployments?.edges?.[0]?.node;
+  const nodes = (data.deployments?.edges || []).map(edge => edge.node);
+  const node = nodes.find(candidate => candidate.status !== 'SKIPPED') || nodes[0];
   if (!node) return null;
 
   const meta = node.meta || {};
