@@ -1,5 +1,6 @@
 const { execSync } = require('child_process');
-const { existsSync } = require('fs');
+const { existsSync, mkdtempSync, writeFileSync, cpSync, rmSync } = require('fs');
+const { tmpdir } = require('os');
 const path = require('path');
 
 /**
@@ -73,4 +74,20 @@ exports.default = async function (context) {
       throw err2;
     }
   }
+
+  // The Electron main process needs electron-updater next to it; `files`
+  // leaves node_modules out of the package. Installing against the app's own
+  // package.json would resolve the whole dev tree (electron-builder and all),
+  // so it goes through a throwaway manifest that lists only what main needs.
+  const rootPkg = require(path.join(appDir, 'package.json'));
+  const tmp = mkdtempSync(path.join(tmpdir(), 'shipyard-app-deps-'));
+  writeFileSync(path.join(tmp, 'package.json'), JSON.stringify({
+    name: 'shipyard-app-deps',
+    private: true,
+    dependencies: { 'electron-updater': rootPkg.dependencies['electron-updater'] },
+  }));
+  console.log('[afterPack] Installing electron-updater for the main process');
+  execSync('npm install --omit=dev --ignore-scripts --no-package-lock', { cwd: tmp, stdio: 'inherit', timeout: 300000 });
+  cpSync(path.join(tmp, 'node_modules'), path.join(appDir, 'node_modules'), { recursive: true });
+  rmSync(tmp, { recursive: true, force: true });
 };

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { spawn, execSync, type ChildProcess } from 'child_process';
 import { request } from 'http';
 import { homedir, platform as osPlatform } from 'os';
+import { autoUpdater } from 'electron-updater';
 
 const APP_ID = 'com.shipyard.dev';
 
@@ -408,6 +409,44 @@ function createApplicationMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// ── Auto-update ────────────────────────────────────────────────────
+//
+// Releases on GitHub carry latest*.yml next to the installers; electron-updater
+// reads them, downloads the new version in the background and installs it on
+// restart. Shipyard lives in the tray and almost never quits, so waiting for
+// "install on quit" would mean never — the renderer shows a prompt instead.
+// Drafts are invisible to the updater: publishing the draft is the release.
+
+const UPDATE_CHECK_MS = 4 * 60 * 60 * 1000;
+let updateReady: { version: string } | null = null;
+
+function setupAutoUpdates() {
+  if (isDev || !app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('update-downloaded', (info) => {
+    updateReady = { version: info.version };
+    mainWindow?.webContents.send('update-ready', updateReady);
+    createTray();
+  });
+  autoUpdater.on('error', (err) => {
+    console.error('[Updater]', err?.message || err);
+  });
+  const check = () => autoUpdater.checkForUpdates().catch(err => console.error('[Updater]', err?.message || err));
+  check();
+  setInterval(check, UPDATE_CHECK_MS);
+}
+
+function installUpdate() {
+  if (!updateReady) return;
+  isQuitting = true;
+  stopServer();
+  autoUpdater.quitAndInstall();
+}
+
+ipcMain.handle('update-state', () => updateReady);
+ipcMain.on('install-update', () => installUpdate());
+
 // ── Tray ───────────────────────────────────────────────────────────
 
 function createTray() {
@@ -415,10 +454,15 @@ function createTray() {
     ? nativeImage.createFromPath(ICON_PATH).resize({ width: 16, height: 16 })
     : nativeImage.createEmpty();
 
+  tray?.destroy();
   tray = new Tray(icon);
   tray.setToolTip('Shipyard');
 
   const contextMenu = Menu.buildFromTemplate([
+    ...(updateReady ? [
+      { label: `Restart to update to v${updateReady.version}`, click: () => installUpdate() },
+      { type: 'separator' as const },
+    ] : []),
     {
       label: 'Show Shipyard',
       click: () => {
@@ -469,6 +513,7 @@ if (!gotTheLock) {
       createWindow();
       createApplicationMenu();
       createTray();
+      setupAutoUpdates();
     } catch (err) {
       console.error('[Electron] Failed to start:', err);
       dialog.showErrorBox(

@@ -6,6 +6,14 @@ directories:
   output: release
   buildResources: assets
 
+# Where the installed app looks for new versions (electron-updater). The
+# release workflow uploads the latest*.yml files this makes electron-builder
+# write next to the installers.
+publish:
+  provider: github
+  owner: defremont
+  repo: Shipyard
+
 # Include compiled server, built client, and electron main
 files:
   - electron/dist/**/*
@@ -58,6 +66,9 @@ nsis:
 mac:
   target:
     - target: dmg
+      arch: [x64, arm64]
+    # Squirrel.Mac updates from the zip, not the dmg
+    - target: zip
       arch: [x64, arm64]
   icon: assets/icon.icns
   category: public.app-category.developer-tools
