@@ -43,8 +43,12 @@ win:
 nsis:
   oneClick: false
   perMachine: false
-  allowToChangeInstallationDirectory: true
-  # Recreate the desktop shortcut on reinstall while keeping the stable appId
+  # Must stay false: with a directory page, electron-builder never passes
+  # --keep-shortcuts to the old uninstaller on a manual reinstall, and that
+  # uninstaller calls WinShell::UninstShortcut, which unpins Shipyard from the
+  # taskbar. A reinstall still reuses the previous InstallLocation.
+  allowToChangeInstallationDirectory: false
+  # Recreate the desktop shortcut if it's missing, keeping the stable appId
   # used by Windows taskbar pins and Start Menu integration.
   createDesktopShortcut: always
   createStartMenuShortcut: true
