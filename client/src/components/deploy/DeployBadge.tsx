@@ -1,7 +1,8 @@
-import { CheckCircle2, CircleDashed, ExternalLink, Loader2, TriangleAlert, HelpCircle } from 'lucide-react'
+import { ArrowUp, CheckCircle2, CircleDashed, ExternalLink, GitCommitHorizontal, Loader2, TriangleAlert, HelpCircle } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { useAllDeployStatus, useDeployStatuses, useScopeDeployStatuses } from '@/hooks/useDeploy'
+import { useGitStatus } from '@/hooks/useGit'
 import type { DeployState, DeployStatus } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
@@ -60,8 +61,57 @@ function scopeLabel(status: DeployStatus): string {
   return status.subrepo || name || 'root'
 }
 
+/**
+ * What the checkout still holds back from the deploy: uncommitted changes and
+ * commits not pushed yet. The row only mounts while the popover is open, so this
+ * polls git only while someone is looking — and it shares the git panel's query
+ * key, so the same checkout is never asked twice.
+ */
+function PendingGit({ projectId, subrepo, deployBranch }: {
+  projectId: string
+  subrepo?: string
+  deployBranch?: string
+}) {
+  const { data: git } = useGitStatus(projectId, subrepo || undefined)
+  if (!git) return null
+
+  const uncommitted = (git.files || []).length as number
+  const ahead = (git.ahead || 0) as number
+  const current = git.current as string | undefined
+  const otherBranch = !!deployBranch && !!current && current !== deployBranch
+
+  if (uncommitted === 0 && ahead === 0 && git.tracking) {
+    return (
+      <p className="text-muted-foreground">
+        Nothing to commit or push{otherBranch && <> · on <span className="font-mono">{current}</span></>}
+      </p>
+    )
+  }
+
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 text-warning">
+      {uncommitted > 0 && (
+        <span className="inline-flex items-center gap-0.5">
+          <GitCommitHorizontal className="h-2.5 w-2.5" />
+          {uncommitted} uncommitted
+        </span>
+      )}
+      {ahead > 0 && (
+        <span className="inline-flex items-center gap-0.5">
+          <ArrowUp className="h-2.5 w-2.5" />
+          {ahead} to push
+        </span>
+      )}
+      {!git.tracking && <span>no upstream branch</span>}
+      {otherBranch && (
+        <span className="text-muted-foreground">on <span className="font-mono">{current}</span>, deploys <span className="font-mono">{deployBranch}</span></span>
+      )}
+    </p>
+  )
+}
+
 /** One deploy, as a row in the popover. */
-function DeployRow({ status }: { status: DeployStatus }) {
+function DeployRow({ projectId, status }: { projectId: string; status: DeployStatus }) {
   const config = STATE_CONFIG[status.state]
   const Icon = status.error ? HelpCircle : config.icon
 
@@ -91,6 +141,7 @@ function DeployRow({ status }: { status: DeployStatus }) {
             )}
           </>
         )}
+        <PendingGit projectId={projectId} subrepo={status.subrepo} deployBranch={status.branch} />
         <div className="flex items-center gap-3 pt-0.5">
           {status.url && (
             <a href={status.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-primary hover:underline">
@@ -110,7 +161,7 @@ function DeployRow({ status }: { status: DeployStatus }) {
   )
 }
 
-function Pill({ statuses, className }: { statuses: DeployStatus[]; className?: string }) {
+function Pill({ projectId, statuses, className }: { projectId: string; statuses: DeployStatus[]; className?: string }) {
   const state = worstState(statuses)
   const config = STATE_CONFIG[state]
   const Icon = config.icon
@@ -143,7 +194,7 @@ function Pill({ statuses, className }: { statuses: DeployStatus[]; className?: s
       </PopoverTrigger>
       <PopoverContent align="end" className="max-h-80 w-72 space-y-2 overflow-y-auto p-3">
         {statuses.map(status => (
-          <DeployRow key={status.id || status.subrepo || '__root__'} status={status} />
+          <DeployRow key={status.id || status.subrepo || '__root__'} projectId={projectId} status={status} />
         ))}
       </PopoverContent>
     </Popover>
@@ -155,7 +206,7 @@ export function DeployBadge({ projectId, className }: { projectId: string; class
   const { data: statuses } = useDeployStatuses(projectId)
   const linked = (statuses || []).filter(status => status.configured)
   if (linked.length === 0) return null
-  return <Pill statuses={linked} className={className} />
+  return <Pill projectId={projectId} statuses={linked} className={className} />
 }
 
 /** One checkout's deploys — used beside the repository picker in Source Control. */
@@ -167,7 +218,7 @@ export function DeployScopeBadge({ projectId, subrepo, className }: {
   const { data: statuses } = useScopeDeployStatuses(projectId, subrepo)
   const linked = (statuses || []).filter(status => status.configured)
   if (linked.length === 0) return null
-  return <Pill statuses={linked} className={className} />
+  return <Pill projectId={projectId} statuses={linked} className={className} />
 }
 
 /** Just the icon, for dense lists like the dashboard cards — one shared query. */

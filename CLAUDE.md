@@ -736,6 +736,11 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   do token em Settings > AI & Integrations; vinculo manual em
   Project settings > Launch, onde a lista de servicos fica aberta para marcar
   varios seguidos
+- Cada linha do popover diz o que o checkout ainda segura: `N uncommitted`,
+  `N to push`, falta de upstream e branch local diferente da que o deploy
+  constroi (`PendingGit` em DeployBadge.tsx). Usa `useGitStatus` com a mesma
+  chave do Source Control e so monta com o popover aberto — nao ha poll de git
+  por badge fechado
 - **Vinculo automatico pelo repositorio**: os dois lados ja sabem de qual repo
   do GitHub constroem — o Shipyard pelo `git remote`, o Railway pelo
   `source.repo` do servico. `deployService.findMatches/autoLink` cruzam os dois
