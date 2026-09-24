@@ -660,8 +660,9 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `electron-updater` com provider GitHub (`publish` em electron-builder.yml).
   O build escreve `latest*.yml` + `.blockmap`; o workflow de release sobe os
   dois junto dos instaladores. Sem eles o app instalado nao ve versao nova
-- O workflow cria a release como **draft**, e o updater ignora draft:
-  **publicar o draft e o que libera a atualizacao** para quem ja tem o app
+- Lancar versao = subir `version` no package.json, commit, push e tag `v*`.
+  O workflow publica a release direto (sem draft — o updater ignora draft) e
+  os apps instalados atualizam em ate 4h ou no proximo boot
 - Confere no boot e a cada 4h, baixa em segundo plano. O Shipyard vive na
   bandeja e quase nunca fecha, entao "instalar ao sair" nao basta: o renderer
   mostra um toast persistente (`useAppUpdate`) e a bandeja ganha
