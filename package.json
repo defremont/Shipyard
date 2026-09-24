@@ -3,7 +3,7 @@
   "productName": "Shipyard",
   "desktopName": "shipyard.desktop",
   "version": "1.21.0",
-  "description": "Local development dashboard for managing projects, tasks, git, and terminals",
+  "description": "Local-first command center for software projects: tasks, Git, terminals, and coding agents in one workspace",
   "author": {
     "name": "Shipyard Contributors",
     "email": "adcoderio@gmail.com"

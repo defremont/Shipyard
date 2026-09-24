@@ -9,8 +9,8 @@ Dashboard web local (localhost) para gerenciamento de projetos, tarefas, git, te
 
 ```bash
 pnpm dev          # client (5421) + server (5420)
-shipyard.cmd      # Windows: batch file na raiz
-./shipyard.sh     # Linux: server + browser
+devdash.cmd       # Windows: batch file na raiz
+./devdash.sh      # Linux: server + browser
 ```
 
 ## Stack
@@ -27,25 +27,29 @@ shipyard.cmd      # Windows: batch file na raiz
 
 ```
 client/src/
-  components/   # ui/ (shadcn), layout/, projects/, tasks/, git/, claude/,
+  components/   # ui/ (shadcn), layout/, projects/, tasks/, git/, claude/, ai/,
                 # terminals/, editor/, files/, sync/, mcp/, onboarding/
-  hooks/        # useProjects, useTasks, useGit, useClaude, useTerminal,
+  hooks/        # useProjects, useTasks, useGit, useClaude, useAi, useTerminal,
                 # useMilestones, useSheetSync, useFiles, useEditorTabs, useLogs, useMcp
   pages/        # Dashboard, Workspace, TasksPage, Settings, Help, LogsPage
   lib/          # api.ts (fetch wrapper), sync/ (provider pattern)
 
 server/src/
-  routes/       # projects, tasks, git, terminals, terminalWs, claude, mcp,
+  routes/       # projects, tasks, git, terminals, terminalWs, claude, ai, mcp,
                 # files, logs, sync, settings
   services/     # projectDiscovery, gitService, taskStore, terminalLauncher,
-                # terminalService, aiBackend, claudeService, claudeContextBuilder,
-                # claudeCliService, aiResolvePrompt, aiManagePrompt,
+                # terminalService, aiBackend, aiConfigStore, aiJson,
+                # claudeService, claudeCliService, openaiService, geminiService,
+                # cliDetect, cliRunner, sseStream, claudeContextBuilder,
+                # aiResolvePrompt, aiManagePrompt,
                 # mcpServer, mcpAuth, logService, settingsStore, dataDir
 
 data/           # Persistencia (auto-criado)
-  projects.json, settings.json, claude.json, .claude-key,
+  projects.json, settings.json, ai-config.json, .claude-key,   # claude.json = legado, migrado
   mcp-config.json, mcp-auth.json, server.log,
   sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
+  deploy-config.json,              # token Railway (cifrado) + link por projeto
+  cloud-sync.json,                 # Shipyard Cloud: sessao cifrada + cursor/hashes do sync
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
 
 electron/       # main.ts, preload.ts (desktop wrapper)
@@ -109,11 +113,12 @@ interface Project {
 
 **Projetos**: GET /api/projects, PATCH /:id, POST scan/add/remove/refresh
 **Milestones**: GET/POST /:id/milestones, PUT/DELETE /:id/milestones/:mid
-**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
-**Git**: GET /:id/git/status|diff|log|branches, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
+**Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
+**Git**: GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
-**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/DELETE /api/terminal/sessions (integrado), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
+**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
+**AI (multi-provedor)**: GET /api/ai/status, POST /api/ai/preferred, POST/DELETE /api/ai/config/:provider, POST /api/ai/config/:provider/test
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
 **Sync**:
   POST /api/sync/proxy|test (proxy stateless para Google Apps Script)
@@ -125,11 +130,21 @@ interface Project {
   GET /api/projects/:id/tasks/:tid/attachment/:aid?milestoneId=&preview=1
     (proxy autenticado — a URL do anexo no Trello exige header OAuth, um `<img>`
      apontando direto para ela recebe 401)
+**Deploys (Railway)**:
+  GET /api/deploy/providers, POST/DELETE /api/deploy/providers/railway (token da conta;
+    o POST ja devolve o que foi vinculado sozinho)
+  GET /api/deploy/railway/projects (projetos/ambientes/servicos da conta)
+  GET /api/deploy/railway/matches, POST /api/deploy/railway/autolink (`{ only?, relink? }`)
+  GET /api/deploy/status (todos os deploys linkados, numa chamada)
+  GET/PUT/DELETE /api/projects/:id/deploy (`?subrepo=` filtra por checkout;
+    no DELETE, `?link=` remove um deploy, `?subrepo=` os daquele checkout e
+    nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
+**Shipyard Cloud**: GET /api/cloud/status, POST /api/cloud/signup|login|logout|sync
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
   POST /api/worktrees/clean (`{ all? }`), DELETE /api/projects/:id/tasks/:tid/worktree
-**Sistema**: GET /api/settings, POST /api/browse
+**Sistema**: GET/PATCH /api/settings (PATCH so aceita `terminalAiTitles`), POST /api/browse
 
 ## Portas
 
@@ -174,6 +189,40 @@ interface Project {
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao
 - Para tarefas done: prompt contem resumo da implementacao
 
+### Busca de tarefas (filtro do board)
+- `lib/taskSearch.ts` e a fonte unica do filtro por texto: `parseSearchTerms`
+  quebra a query em termos e `taskMatchesTerms` casa **todos** eles (AND) contra
+  titulo + description + prompt (mais um campo `extra`, usado na TasksPage para
+  o nome do projeto). Nao escrever um filtro proprio por tela
+- `TaskSearchBox` fica colapsado num icone de lupa na toolbar do board e so
+  expande ao clicar; **nunca colapsa com texto dentro** — filtro ativo tem que
+  estar visivel. Esc limpa e fecha, o X limpa e mantem o foco
+- Filtrar nao pode alterar dados: o reorder por drag usa `groupedAll` (lista
+  **sem** filtro), porque `POST /tasks/reorder` joga pro fim tudo que nao vier
+  na lista enviada — mandar so os visiveis embaralharia as tarefas ocultas
+- Com filtro ativo a coluna Done ignora o corte de lidas/nao lidas: um match
+  nunca pode ficar escondido atras de "Show N read"
+- A busca e efemera (nao vai pro localStorage) e zera ao trocar de projeto ou
+  milestone
+
+### Dialogo de tarefa (TaskEditor)
+- Um unico componente serve New Task e Edit Task. O caminho comum e so titulo:
+  titulo + descricao + a linha `Priority/Effort/Status` ficam sempre visiveis;
+  **Details (prompt) e subtasks vivem atras do disclosure** "Technical details and
+  subtasks" — colapsado em tarefa nova, aberto sozinho quando a tarefa ja tem
+  prompt ou subtasks (contador no rotulo quando fechado)
+- Prioridade e status usam os icones/cores de `taskVisuals.ts`. Nao redefinir
+  labels ou cores aqui
+- **Ctrl/Cmd+Enter salva de qualquer campo** (Enter sozinho salva no titulo).
+  Registrado em `lib/shortcuts.ts`
+- A subtask ainda digitada no input entra no save — nao dependa do Enter.
+  `POST /api/projects/:id/tasks` aceita `subtasks` e descarta entradas sem titulo
+  (`sanitizeSubtasks` em routes/tasks.ts)
+- "Keep open for the next task" (`shipyard:quick-create` no localStorage) mantem
+  o dialogo aberto apos criar e **preserva priority/status** — so os campos de
+  texto, effort e subtasks sao limpos
+- O milestone alvo aparece como badge no titulo quando nao e o General
+
 ### Timestamps de Status (cascading)
 Os timestamps sao cascading — etapas posteriores preenchem as anteriores automaticamente:
 - `todo`/`backlog` → define `inboxAt`
@@ -192,6 +241,24 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - A resposta do forecast inclui `breakdown` para `inbox` (`todo`), `backlog`,
   `inboxAndBacklog` e `inProgress`; cada recorte soma estimativa restante e faixa
   P25-P75. O kanban exibe esses totais nos cabecalhos e no popover geral.
+
+### Aba Review da tarefa (o que a IA fez)
+- `GET /:id/git/task-review?since=&until=` responde numa chamada tudo que a
+  revisao precisa: branch atual, commits da janela (cada um com os arquivos que
+  tocou, via um unico `git log --numstat`), o agregado por arquivo e a contagem
+  do que ficou sem commit na working tree
+- A janela vai de `inProgressAt` ate `doneAt` + 15min (a folga cobre o agente que
+  faz commit logo depois de marcar done). Tarefa sem `inProgressAt` nao mostra a
+  aba — nao ha janela para revisar
+- O diff de um commit so e buscado quando o usuario expande (`useCommitDiff`, que
+  ja cacheia por hash). Nunca carregar todos os diffs de uma vez
+- Se o repo nao existir ou o git falhar, a rota devolve `available: false` e a aba
+  mostra um aviso — nunca 500
+- `DiffView.tsx` (`DiffBlock`, `parseDiffByFile`, `DiffFileEntry`) e a fonte unica
+  de renderizacao de diff, compartilhada com o `CommitDetailDialog`
+- "Needs changes" chama `POST /:id/tasks/:tid/note` — anexa uma secao datada ao
+  prompt (mesmo formato do `log_task_progress` do MCP, via
+  `taskStore.appendPromptSection`) e move a task de volta para in_progress
 
 ### Feed de atividade no Dashboard (o que os agentes fizeram)
 - `lib/activityFeed.ts` deriva a linha do tempo das ultimas 24h a partir da
@@ -220,7 +287,10 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `detectSubRepos()` em projectDiscovery.ts escaneia 1 nivel de profundidade
 - `subRepos` armazena caminhos relativos dos sub-repos encontrados
 - Todas rotas git aceitam parametro opcional `subrepo` (query para GET, body para POST)
-- GitPanel mostra tabs para selecionar sub-repo quando ha mais de um
+- O seletor de repo no Source Control e um **dropdown com filtro**
+  (`RepoSelector` em GitPanel.tsx) — uma fila de tabs era ilegivel num painel de
+  280px com 12 sub-repos. A escolha e lembrada por projeto em
+  `shipyard:git-repo:{projectId}` e restaurada ao voltar pro projeto
 - Query keys incluem `subrepo`: `['git-status', projectId, subrepo]`
 
 ### MCP (servidor de ferramentas para agentes)
@@ -259,6 +329,18 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `projectDiscovery`: refresh de git a cada 15s usa `gitService` (instancia
   compartilhada por repo = fila serializada). `status.current` ja da o branch —
   nao chamar `git.branch()`. Remote URL e sub-repos sao cacheados
+- `gitService`: **`fetch` nunca bloqueia uma rota**. Ele fala com a rede (um
+  remote lento ou um prompt de credencial travava `git/status` por dezenas de
+  segundos — medido em 80s num sub-repo), roda numa instancia SimpleGit propria
+  (fila separada da de leitura), com `GIT_TERMINAL_PROMPT=0` e dedupe por repo.
+  A rota de status dispara com `void` e o poll de 5s pega o novo ahead/behind
+- `gitService.getStatus`: cache de 2,5s por repo + dedupe de chamadas em voo —
+  o painel (5s), o refresh de projetos (15s) e o task review pediam o mesmo
+  `git status` e enfileiravam no mesmo repo. **Toda mutacao chama
+  `invalidateStatus`** (senao a UI mostra estado velho depois de um stage)
+- `lib/prefetch.ts`: passar o mouse numa aba/linha de projeto ja busca tasks e
+  git status daquele projeto (cooldown de 10s). As chaves tem que espelhar
+  `useTasks`/`useGitStatus` — chave diferente enche cache que ninguem le
 - `logService`: escritas em disco sao bufferizadas (flush 200ms / 64 linhas)
 - Componentes de lista (`TaskItem`, `SortableTaskItem`, `TaskRow`) sao `React.memo` —
   o structural sharing do react-query mantem `task` estavel entre polls
@@ -290,19 +372,90 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Renderer WebGL com fallback automatico para DOM (`attachRenderer`)
 
 ### Indicador de "esperando resposta" no terminal Claude
-- `startOutputWatcher` (terminalService.ts) observa a saida das sessoes Claude
-  (`claude`, `claude-yolo`, `ai-resolve`, `ai-manage`) e classifica em
-  `busy` / `awaiting-input` / `idle`. So **observa**: nunca escreve no PTY, nunca
-  toca na fila de escrita nem no flag `injecting` — escrever ali corromperia um
-  paste em andamento
-- Reaproveita `PROMPT_RE` (prompt ocioso) do injetor e acrescenta um padrao de
-  decisao (`Do you want`, opcoes numeradas, `(y/n)`), sempre depois de ~1.2s de
-  silencio. Qualquer input do usuario volta o estado para `busy`
+- `startOutputWatcher` (terminalService.ts) roda em **toda** sessao e classifica
+  em `busy` / `awaiting-input` / `idle` / `finished`. So **observa**: nunca
+  escreve no PTY, nunca toca na fila de escrita nem no flag `injecting` —
+  escrever ali corromperia um paste em andamento
+- **Quem decide que ha Claude ali e a tela, nao o tipo da sessao**: o usuario
+  abre um shell e digita `claude`. `CLAUDE_SCREEN_RE` procura as marcas do CLI
+  (`bypass permissions`, `? for shortcuts`, `esc to interrupt`, banner) e o
+  watcher fica **mudo** ate uma delas aparecer — terminal comum nunca pisca.
+  Depois que apareceu (`sawClaude`), a sessao continua sendo Claude
+- `finished` e o `idle` que interessa: o CLI voltou ao prompt vazio **depois de
+  receber trabalho**. Quem separa os dois e `session.working`, ligado pela
+  injecao de prompt e por qualquer input do usuario que contenha Enter, e
+  desligado ao anunciar. Sem ele, o prompt ocioso que um CLI recem-aberto mostra
+  seria lido como "terminou" antes de qualquer pedido. O anuncio e unico: o
+  proximo so vem com trabalho novo atras
+- A classificacao roda sobre a saida **limpa** (`cleanTerminalOutput`) e so
+  sobre as ultimas 15 linhas — a tela como esta agora. Duas armadilhas medidas
+  em sessao real: ancorar no fim da saida crua nunca casa (um redraw de TUI
+  termina em movimento de cursor, nao no prompt), e um `esc to interrupt` de
+  um frame antigo, ainda no buffer, responderia pela execucao que ja acabou
+- `IDLE_PROMPT_RE` e a caixa de input vazia (`❯` sozinho, ou com o placeholder
+  `Try "..."`); `RUNNING_RE` (`esc to interrupt`) tem precedencia, porque o CLI
+  mantem a caixa vazia na tela **enquanto trabalha**. Decisao (`Do you want`,
+  opcoes numeradas, `(y/n)`) vem antes das duas. Qualquer input do usuario volta
+  o estado para `busy`
 - O watcher so comeca depois que a injecao de prompt termina (`onInjected`) —
   durante a espera o CLI mostra prompt ocioso e daria falso `idle`
+- Digitar `claude` e dar Enter conta como input e ligaria `working`, entao o
+  reconhecimento da tela **zera `working`**: subir o CLI nao e trabalho, e o
+  primeiro prompt que ele desenha nao pode virar "terminou"
 - Transicoes viram frame WS `{ type: 'state', state }`; o estado atual e
-  reenviado quando um socket conecta. No client vira `awaitingInput` no
-  `GlobalTab` (transitorio: resetado na validacao de sessoes no mount)
+  reenviado quando um socket conecta. No client viram `awaitingInput` e
+  `finished` no `GlobalTab` (transitorios: resetados na validacao de sessoes no
+  mount). A aba visivel nunca recebe flag — quem esta olhando ja viu — e voltar
+  a `busy` limpa os dois
+- Na aba: `MessageCircleQuestion` ambar para pergunta, `CheckCircle2` verde para
+  terminado (mesmo check da aba de task encerrada — para o usuario e a mesma
+  noticia). O ponto no icone do painel fechado fica ambar quando ha pergunta e
+  verde quando a unica novidade e um agente que terminou: pergunta bloqueia,
+  fim de execucao so informa
+
+### Abas do terminal: nome, ordem e split
+- O nome de uma aba nao e uma string so: o server guarda `projectName`,
+  `typeLabel`, `taskTitle`/`taskNumber`, `customTitle` e `summary` na sessao, e
+  `describeTab()` (TerminalPanel) escolhe nessa ordem —
+  **customTitle > task > summary da IA > tipo**. O `title` antigo
+  (`[Projeto] Shell`) so serve de fallback para sessao velha
+- Aba de task abre com o numero: `#12 Projeto · Titulo`. O truncamento come o
+  fim do rotulo, nunca o numero
+- Sessao aberta para uma task recebe titulo e numero da task **no server**
+  (`POST /api/terminal/sessions` le a task) — sobrevive a refresh sem o client
+  carregar nada
+- Aba sem task ganha um rotulo escrito pela IA a partir da saida do proprio
+  terminal (`terminalSummary.ts` + `startSummaryWatcher`). Regras que nao podem
+  cair: so tipos `shell`/`dev`/`claude`/`claude-yolo` (aba de Claude tambem —
+  "Claude" diz tao pouco quanto "Shell" quando ha tres abertas), so depois de
+  3s de silencio e 120 chars novos,
+  no maximo uma chamada a cada 45s por sessao, **uma chamada por vez no
+  processo inteiro** (fila em terminalSummary) e a sessao sai do watcher depois
+  de 2 falhas. Desliga em Settings > AI (`terminalAiTitles`)
+- `cleanTerminalOutput` transforma `ESC[nC` (mover para a direita) em n
+  espacos: a TUI do Claude Code desenha **todo** espaco assim, e descartar a
+  sequencia gruda a tela inteira numa palavra so (`fixlinterrors`) — era isso
+  que estragava o rotulo escrito pela IA
+- `cleanTerminalOutput` existe porque o ConPTY **move o cursor** em vez de
+  escrever `
+`: sem transformar `ESC[linha;colH` em quebra de linha, um
+  `git status` inteiro vira uma linha so. E o `
+` do CRLF tem que sair antes
+  do split de redraw, senao o texto da linha some com ele
+- Renomear: duplo clique na aba ou "Rename tab" no menu. Campo vazio devolve a
+  aba ao nome automatico. O nome vai pro server (sobrevive a refresh)
+- O tooltip da aba e o `title` nativo, como nas abas de projeto: um Tooltip do
+  Radix em volta do trigger **engole o clique direito** que abre o menu
+- Abas dividem a largura (`basis-0 flex-1`), truncam e sao reordenaveis por
+  drag (mesmo gesto das abas de projeto)
+- A aba aberta tem que ser achada num relance numa fila de oito: fundo aceso,
+  `font-medium` e uma regua neutra de 2px no topo (`before:`). Neutra de
+  proposito — cor ali brigaria com o numero do pane no split
+- Fechar uma aba leva o workspace para o projeto da aba vizinha
+  (`followTabProject`) — antes o terminal trocava e o projeto ficava para tras
+- No split, a cor vive **so** no numero do pane (1 azul / 2 verde) e na regua
+  do topo do pane focado. Nada de anel colorido em volta da aba: ao lado das
+  abas de projeto, neutras, aquilo virava ruido
 
 ### Atalhos globais e comportamento das abas
 - `useGlobalShortcuts` (chamado em `LayoutInner`) e a casa dos atalhos que valem
@@ -335,16 +488,61 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   `shipyard:skipPermissions` entre todos os pontos e padroniza os toasts.
   Nao duplicar essa logica por componente
 
-### AI Backend (CLI-first, padronizado)
+### AI Backend (multi-provider, CLI-first)
 - `aiBackend.ts` e o UNICO ponto de entrada para features de IA server-side
   (chat, commit message, analyze-task, bulk-organize, manage-tasks)
-- Prioridade fixa: **1)** token OAuth do Claude CLI (`~/.claude/.credentials.json`,
-  usa assinatura — chamada direta a API com `Authorization: Bearer` +
-  `anthropic-beta: oauth-2025-04-20`, NUNCA `x-api-key`) → **2)** subprocess
-  `claude -p` → **3)** API key configurada no Shipyard
-- NUNCA ler `process.env.ANTHROPIC_API_KEY` — pertence a outras ferramentas
-- `generateText()` para one-shot, `streamText()` para chat SSE
-- Novas features de IA DEVEM usar aiBackend, nao chamar Anthropic direto
+- Tres provedores: **claude**, **openai**, **gemini**. O usuario escolhe o
+  preferido em Settings > AI (`preferredProvider`); a cadeia e
+  `[preferido, ...demais na ordem de AI_PROVIDERS]`. Se o preferido nao tem
+  backend usavel (ou falha), o proximo assume — features nunca dependem de um so
+- Dentro de cada provedor a ordem e sempre **CLI primeiro** (roda na assinatura,
+  custo zero por token), API key como fallback pago:
+  - claude: token OAuth (`~/.claude/.credentials.json`, `Authorization: Bearer` +
+    `anthropic-beta: oauth-2025-04-20`, NUNCA `x-api-key`) → `claude -p` → key
+  - openai: `codex exec --json` → key (`api.openai.com/v1/chat/completions`)
+  - gemini: `gemini -p` → key (`generativelanguage.googleapis.com`, header
+    `x-goog-api-key` — nunca a key na URL)
+- 429 nao aborta a cadeia: fica guardado e so e relancado se **nenhum** provedor
+  responder. `options.provider` forca um provedor e desliga o fallback
+- NUNCA ler API key de env var (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`,
+  `GEMINI_API_KEY`) — pertencem a outras ferramentas
+- `generateText()` para one-shot, `streamText()` para chat SSE. Novas features de
+  IA DEVEM usar aiBackend, nunca chamar um provedor direto
+- Modelos: `FAST_MODELS` (one-shot) e `CHAT_MODELS` (chat / default ao salvar
+  key) em `aiConfigStore.ts`. O modelo salvo so vale para o caminho da API key —
+  CLI usa o modelo da conta
+- OpenAI: modelos `gpt-5*`/`o*` exigem `max_completion_tokens`; os demais,
+  `max_tokens`. `isReasoningModel()` decide
+
+### Credenciais de IA (`ai-config.json`)
+- `aiConfigStore.ts` guarda `{ preferredProvider, providers[p] = { apiKey, model,
+  maxTokens } }` cifrado com AES-256-GCM (`data/.claude-key`), cache em memoria +
+  escrita serializada e atomica (tmp + rename), como os outros stores JSON
+- Migracao automatica do `claude.json` antigo na primeira leitura (mesma chave de
+  cifra, entao o ciphertext e reaproveitado). O arquivo legado so e apagado
+  quando o usuario remove a key do Claude — senao ela ressuscitaria no proximo
+  boot frio
+- `claudeService.ts` virou so o cliente Anthropic; as credenciais vivem no store
+
+### Deteccao de CLIs (`cliDetect.ts` / `cliRunner.ts`)
+- `detectCli(bin)` resolve **como** lancar o CLI e cacheia por 60s, devolvendo
+  `{ command, prefixArgs }`
+- **Windows**: npm instala CLI como shim `.cmd` e o Node se recusa a spawnar
+  `.cmd` sem shell; passar pelo shell estragaria prompt multilinha. Entao o shim
+  e lido e o entry JS que ele aponta e chamado direto (`node <entry>`), o que
+  mantem os argumentos verbatim. Sem isso, `codex` e `gemini` ficam invisiveis
+- `runCli`/`streamCli` centralizam spawn, timeout por inatividade, hard timeout,
+  stdin e cwd. `claudeCliService` tambem passa por eles
+- Prompt do codex vai por **stdin** (`codex exec ... -`); `--skip-git-repo-check`
+  cai fora automaticamente se a versao instalada nao conhecer a flag
+
+### Parsing de resposta estruturada (`aiJson.ts`)
+- `parseJsonResponse()` e compartilhado por todas as rotas de IA. Cada provedor
+  erra diferente: Claude poe prosa antes, OpenAI cerca em ```json, Gemini as
+  vezes abre com `<thinking>`. A funcao vai do estrito ao tolerante (parse direto
+  → tira fences → tira bloco de raciocinio → extracao por profundidade de chaves
+  → conserta virgula sobrando e chave sem aspas)
+- Rota de IA nova DEVE usar essa funcao, nao um `JSON.parse` proprio
 
 ### Medidor de uso da assinatura
 - `claudeUsage.ts` le `GET https://api.anthropic.com/api/oauth/usage` com o token
@@ -428,9 +626,16 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 
 ### Stores JSON (concorrencia)
 - `taskStore.ts` e `syncStore.ts` serializam toda mutacao com mutex (promise chain)
-  e gravam atomicamente (tmp + rename). Leitura corrompida usa ultima copia boa
-  em memoria + backup `.corrupt-*.bak` — nunca retorna store vazio sobre dados existentes
-- Novos stores JSON DEVEM seguir esse padrao (read-modify-write sem lock corrompe dados)
+  e gravam pelo `writeJsonAtomic` de `atomicJson.ts` (tmp + rename). Leitura
+  corrompida usa ultima copia boa em memoria + backup `.corrupt-*.bak` — nunca
+  retorna store vazio sobre dados existentes
+- **Escrever direto por cima do arquivo trunca antes de gravar**: se o processo
+  morre nessa janela, o que fica no disco e meio JSON e a leitura seguinte
+  falha. Quanto maior o arquivo, maior a janela — um `tasks/*.json` de 1,3 MB
+  gerou sozinho 855 `.corrupt-*.bak` (1,4 GB) antes de o taskStore passar a
+  usar tmp + rename. `settingsStore` e `mcpAuth` tinham o mesmo furo
+- Novos stores JSON DEVEM seguir esse padrao (read-modify-write sem lock corrompe
+  dados; escrita nao atomica corrompe arquivo)
 
 ### Electron
 - Server roda como child process via spawn (`ELECTRON_RUN_AS_NODE=1`)
@@ -445,6 +650,69 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Data path: `SHIPYARD_DATA_DIR` env var → AppData em prod, ./data em dev
 - Centralizado em `server/src/services/dataDir.ts`
 - asar desabilitado, afterPack reinstala deps via npm (pnpm symlinks nao sobrevivem)
+- O main process so tem uma dep de runtime, `electron-updater`. O afterPack a
+  instala num manifest descartavel e copia para `resources/app/node_modules`:
+  `npm install` contra o `package.json` da raiz resolve a arvore de dev inteira
+  (electron-builder junto) e estoura o timeout
+
+### Atualizacao automatica (app desktop)
+- `electron-updater` com provider GitHub (`publish` em electron-builder.yml).
+  O build escreve `latest*.yml` + `.blockmap`; o workflow de release sobe os
+  dois junto dos instaladores. Sem eles o app instalado nao ve versao nova
+- O workflow cria a release como **draft**, e o updater ignora draft:
+  **publicar o draft e o que libera a atualizacao** para quem ja tem o app
+- Confere no boot e a cada 4h, baixa em segundo plano. O Shipyard vive na
+  bandeja e quase nunca fecha, entao "instalar ao sair" nao basta: o renderer
+  mostra um toast persistente (`useAppUpdate`) e a bandeja ganha
+  "Restart to update"
+- macOS atualiza pelo `.zip` (Squirrel.Mac), nao pelo dmg, e exige app
+  assinado. Linux so pelo AppImage; o `.deb` nao se atualiza sozinho
+- So vale no app empacotado (`app.isPackaged`). Quem roda do codigo-fonte
+  atualiza com `git pull`
+
+### Shipyard Cloud (sync entre maquinas — servico pago)
+- Servico hospedado em repositorio **privado** (`C:\Code\shipyard-cloud`,
+  Railway: workspace Amachains, projeto Personal Projects, servico
+  `shipyard-cloud` + `Postgres-bqxs`). Aqui fica so o cliente, desligado ate o
+  usuario entrar em Settings > Cloud sync. `DEFAULT_CLOUD_URL` aponta para o
+  servico; `SHIPYARD_CLOUD_URL` e o campo "Server" trocam
+- **Criptografia ponta a ponta**: a senha nunca sai da maquina. scrypt → HKDF
+  gera `authKey` (o servidor so confere isso) e `kek`, que embrulha uma chave
+  de dados aleatoria. O servidor guarda a chave embrulhada e blobs AES-GCM
+  (com a chave do registro como AAD). Sem reset de senha: perdeu, perdeu a
+  copia na nuvem — as maquinas continuam com os dados
+- Modelo: cada coisa e um registro com chave (`task/{p}/{id}`,
+  `milestone/{p}/{id}`, `project/{id}`, `settings`, `ai`, `deploy`,
+  `integration/{provider}`, `integration/{provider}/{p}/{milestone}`). O
+  servidor numera cada escrita (`rev` por conta) e a maquina puxa "o que mudou
+  depois do rev N"
+- **Os stores nao avisam o que mudou**: `cloudSync.ts` observa a data dir
+  (chokidar), le tudo por `collectLocal()` e compara hash com o ultimo estado
+  combinado com o servidor (`synced`). Hash diferente vira `pending` com a hora
+  em que foi notado; chave que sumiu vira tombstone. Por isso delete fisico no
+  taskStore continua valendo
+- Conflito: vence a mudanca mais recente, por registro. O servidor responde
+  `stale` com o registro vencedor e a maquina aplica na hora
+- **Varredura antes do pull, sempre**: edicao local que o watcher ainda nao
+  notou nao tem relogio, e um registro puxado nessa janela a sobrescreveria sem
+  disputa (bug medido no teste de duas maquinas)
+- **Dado sincronizado tem que ser igual em toda maquina**. Caminho, worktree,
+  `lastSync*` e `updatedAt` da integracao ficam fora — se entrassem, cada
+  maquina veria o valor da outra como mudanca e devolveria para sempre. Pelo
+  mesmo motivo o hash gravado apos um pull e o do que ficou no disco, nao o do
+  que veio pela rede (os stores normalizam na entrada)
+- Primeira conexao de uma maquina que ja tem dados (`joined: false`): puxa
+  tudo antes, a nuvem vence, exceto task/milestone com `updatedAt` local mais
+  novo. So depois sobe o que a nuvem nao tinha
+- Projeto que chega de outra maquina e procurado pelo nome da pasta ao lado dos
+  projetos que esta maquina ja tem (e um nivel dentro dos pais). Nao achou:
+  entra em `missingProjects`, as tasks ficam gravadas e aparecem quando a pasta
+  for adicionada
+- Gatilhos: watcher (debounce 1,5s), eventos SSE do servidor (outra maquina
+  escreveu) e poll de 60s. Tudo passa pela mesma fila (`run`)
+- Plano: `free` (padrao; `TRIAL_DAYS` no servidor da teste), `trial`, `pro`.
+  Plano inativo recusa push com 402 e o pull continua — nada fica refem.
+  Cobranca ainda e manual: `POST /v1/admin/plan` com o `ADMIN_TOKEN` do servico
 
 ### Sync — milestone-scoped (Google Sheets, Trello, ClickUp)
 Toda integracao de tasks e por **(projectId, providerId, milestoneId)**. Cada milestone tem
@@ -503,10 +771,115 @@ Shipyard so le):
 **Migracao v2 → v3**: integracoes Trello/ClickUp pre-existentes sao descartadas (creds
 globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 
+### Indicador de deploy (Railway)
+- Responde uma pergunta so: **o ultimo build subiu?** `deployService.getStatus`
+  dobra os estados do Railway em quatro — `success` / `failed` / `building` /
+  `idle` — e a UI nunca inventa um quinto
+- `railwayService.ts` **so le** (`deployments(first: 1)` e a lista de projetos).
+  Nao redeploy, nao rollback — nada que mexa em producao a partir daqui
+- O input do GraphQL vai inline (`input: { projectId: $projectId, ... }`) para
+  nao depender do nome do tipo de input do Railway: tipo renomeado do outro lado
+  derruba a query inteira
+- **A unidade e o link, nao o projeto nem o checkout**: uma pasta de cliente
+  guarda uma duzia de repositorios, e um mesmo repositorio sobe varias vezes —
+  um servico por cidade num marketplace, por exemplo. `deploy-config.json` v3
+  guarda `projects[projectId]` como **lista** de links; cada um tem `id`
+  (`provider:railwayProjectId:serviceId:environmentId`, via `linkId()`) e
+  `subrepo?` como rotulo do checkout. Salvar o mesmo alvo duas vezes e upsert,
+  nao duplicata. As migracoes do v1 (link solto) e do v2 (mapa por scope)
+  entram na lista sozinhas — ninguem reconecta
+- Token da conta fica cifrado em `deploy-config.json` (mesma chave
+  `.claude-key` do ai-config) e **nunca volta pro client**
+- Cache por projeto no server: 60s parado, 15s enquanto ha build rodando, 30s
+  depois de erro. Falha de rede vira `error` no payload — o badge diz que nao
+  sabe, nunca mostra verde por engano
+- Projeto sem link **nao desenha nada** (`configured: false`). O Dashboard usa
+  `GET /api/deploy/status` (uma chamada para todos) — um `useDeployStatus` por
+  card abriria uma dezena de requests por minuto
+- Onde aparece: badge na toolbar do Workspace, que fala por **todos** os
+  deploys do projeto (o pior estado vence — uma falha nao pode se esconder
+  atras de quatro verdes — e o popover lista um por um), badge do repo
+  selecionado no Source Control (`DeployScopeBadge`, que tambem agrega quando o
+  checkout tem mais de um deploy) e um icone no card do Dashboard. Configuracao
+  do token em Settings > AI & Integrations; vinculo manual em
+  Project settings > Launch, onde a lista de servicos fica aberta para marcar
+  varios seguidos
+- Cada linha do popover diz o que o checkout ainda segura: `N uncommitted`,
+  `N to push`, falta de upstream e branch local diferente da que o deploy
+  constroi (`PendingGit` em DeployBadge.tsx). Usa `useGitStatus` com a mesma
+  chave do Source Control e so monta com o popover aberto — nao ha poll de git
+  por badge fechado
+- **Vinculo automatico pelo repositorio**: os dois lados ja sabem de qual repo
+  do GitHub constroem — o Shipyard pelo `git remote`, o Railway pelo
+  `source.repo` do servico. `deployService.findMatches/autoLink` cruzam os dois
+  e o `POST /deploy/providers/railway` ja vincula tudo no mesmo clique. So o
+  caso ambiguo (um repo, varios servicos) volta como pergunta — e la a escolha
+  nao e exclusiva: cada servico e um toggle, `linkedServiceIds` marca os ja
+  vigiados e "Watch all" pega a linha inteira. O autolink continua vinculando
+  so o caso 1:1, para nao arrastar staging junto sem ninguem pedir
+- `repoKey()` normaliza `https://github.com/Owner/Repo.git` e
+  `git@github.com:Owner/Repo` para `owner/repo`. Remote que nao e GitHub nao casa
+- Projeto multi-repo entra tambem pelos **sub-repositorios**: `projectRepos` le o
+  remote de cada sub-repo (cacheado por sessao) — sao justamente os projetos que
+  nao tem remote proprio na raiz
+- A query com `serviceInstances { source { repo } }` tem fallback: se o Railway
+  renomear esses campos, `listProjects` cai na query simples, `sourceAvailable`
+  vem `false` e a UI avisa que o vinculo tera de ser manual — nunca quebra
+- **Projeto chega a uma conta por dois caminhos** e `listProjects` pergunta os
+  dois, unindo por id: `me.projects` (pessoal) e
+  `me.workspaces[].team.projects` (workspace/time). So o primeiro deixaria de
+  fora quem trabalha dentro de um time
+- `me { name email }` e query de **account token**; um token de workspace nao
+  tem conta pessoal atras e o Railway recusa o campo. Por isso `connect()` nao
+  trata essa recusa como veredito: ele salva o token e tenta listar os projetos,
+  so removendo o token se isso tambem falhar
+
 ### Milestones
 - "General" e virtual (nao armazenado) — tasks sem milestoneId pertencem a ele
 - Deletar milestone move tasks para "General"
 - Milestone ativo em localStorage: `shipyard:milestone:{projectId}`
+
+### Migracao entre maquinas (`scripts/workspace-*.mjs`)
+- O par export/import move a **configuracao**, nunca as pastas de codigo:
+  repositorio com remote e clonado do lado de la, repositorio sem remote
+  nenhum viaja como `git bundle` (historico inteiro num arquivo, sem
+  `node_modules`). Copiar working tree seria mais pesado e brigaria com o `.git`
+- O bundle leva tres coisas que o git nao leva: a data dir do Shipyard, os
+  `.env` **ignorados pelo git** (`git check-ignore` decide — `.env.example` ja
+  esta no repo e nao entra) e o `manifest.json` dizendo de onde clonar cada um
+- **A unidade e o checkout, nao o projeto**: uma pasta de cliente sem `.git`
+  na raiz guarda uma duzia de repositorios. O export varre 1 nivel atras de
+  `.git` (mesmo criterio de `detectSubRepos`) e trata cada um como repo proprio
+- O id do projeto e `slugify(nome da pasta)`, entao o import preserva o nome
+  exatamente e re-enraiza o resto com `--root`. Caminho diferente nao quebra o
+  vinculo com as tasks; nome de pasta diferente quebra
+- O import **reescreve** os caminhos absolutos de `projects.json` e
+  `settings.json` e move a data dir anterior para `.bak-<timestamp>` antes de
+  escrever. Rodar de novo e seguro: checkout que ja existe fica como esta
+- `.claude-key` viaja junto com os JSON cifrados — sem ela, Trello/ClickUp e
+  Railway sobem ilegiveis do outro lado. Por isso o bundle tem segredo dentro:
+  `--no-secrets` corta, e `shipyard-workspace*` esta no `.gitignore`
+- O export descarta o que e local da maquina: `server.log`,
+  `terminal-clipboard/`, `worktrees/`, `agent-prompts/` e os `.corrupt-*.bak`
+- Zip: o `tar` do Git Bash e MSYS e nao escreve zip. No Windows o arquivo passa
+  por `Compress-Archive`/`Expand-Archive`; fora dele, `tar -czf`
+- `--only a,b,c` exporta so esses projetos (por nome de pasta). A data dir vai
+  **inteira** mesmo assim: o arquivo de tasks de um projeto que ficou de fora
+  nao custa nada e perde-lo custaria
+- O export escreve `PROMPT.md` dentro do bundle: o briefing pronto para colar
+  no agente da outra maquina, ja com os numeros reais, o remote do Shipyard, a
+  raiz de origem e o que ficou sem push. Texto condicional — sem repo em bundle
+  nao aparece aviso de bundle
+- **O bundle e autossuficiente**: `workspace-import.mjs` viaja dentro dele. A
+  outra maquina pode clonar um Shipyard mais velho que o script, e ai o bundle
+  chegaria sem porta de entrada
+- Por isso o import **nao adivinha** a data dir a partir de onde o arquivo
+  esta: `--data-dir` manda, senao `SHIPYARD_DATA_DIR`, senao a `data/` do repo
+  — e so quando ha um `package.json` um nivel acima. Sem nenhum dos tres ele
+  recusa em vez de escrever no lugar errado
+- Com `--zip` o bundle e montado em `tmpdir()` e so o arquivo pronto vai para o
+  destino: o OneDrive abre cada arquivo novo do Desktop para upload e o
+  `Compress-Archive` morre com "arquivo em uso"
 
 ## Regras para Contribuicao
 

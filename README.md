@@ -6,7 +6,7 @@
 
 <p align="center">
   <strong>A local-first command center for software projects.</strong><br />
-  Projects, tasks, Git, terminals, files, and AI workflows in one focused workspace.
+  Projects, tasks, Git, terminals, files, and coding agents in one focused workspace.
 </p>
 
 <p align="center">
@@ -35,32 +35,37 @@ Development work is spread across editors, terminal windows, Git clients, task b
 
 - **Local-first** — the dashboard and API run on your machine; project and task data stays in local JSON files.
 - **Portfolio view** — see every project, active task, branch, and working tree from one place.
-- **Fast project switching** — keep multiple workspaces open with responsive tabs and an overflow menu.
-- **Built for AI-assisted development** — launch Claude Code with project/task context or expose Shipyard through MCP.
+- **Fast project switching** — keep many workspaces open; project tabs share the available width and stay visible.
+- **Built for coding agents** — hand a task to Claude Code, Codex, Aider, Gemini CLI, OpenCode, Cursor CLI, or your own CLI, each in its own Git worktree if you want, then review what it changed.
 - **No database required** — installation, backup, inspection, and recovery remain straightforward.
-- **Cross-platform** — desktop installers for Windows, macOS, and Linux, plus browser-based development mode.
+- **Cross-platform** — desktop installers for Windows, macOS, and Linux with automatic updates, plus browser-based development mode.
 
 ## Highlights
 
 | Area | What Shipyard provides |
 |---|---|
-| Dashboard | Project health, Git state, detected stack, task counts, favorites, and work-in-progress overview |
-| Tasks | Milestone-scoped Kanban boards, priorities, technical prompts, timestamps, bulk actions, and global task view |
-| Git | Status, diffs, history, branches, stage/unstage, commit, pull, push, and multi-repository projects |
-| Terminals | Integrated xterm sessions, split panes, native launchers, dev servers, and Claude Code sessions |
+| Dashboard | Project health, Git state, detected stack, task counts, favorites, deploy status, and a 24-hour feed of what agents started, noted, and finished |
+| Tasks | Milestone-scoped Kanban boards, priorities, effort points, time forecasts, subtasks, technical prompts, search, and a global task view |
+| Agents | Run a task with any registered coding CLI, add a one-off instruction, optionally isolate it in a per-task Git worktree, and review its commits afterwards |
+| Git | Status, diffs, history, branches, stage/unstage, commit, pull, push, and projects with many nested repositories |
+| Terminals | Integrated xterm sessions, split panes, native launchers, dev servers, AI-written tab names, and an alert when an agent asks a question or finishes |
 | Files | Lazy file tree, previews, editing, filename search, and content search |
-| AI | CLI-first Claude integration, task analysis, contextual chat, commit messages, and multi-task management |
-| MCP | OAuth-protected tools for projects, milestones, tasks, Git status, and sync operations |
+| AI | Claude, OpenAI, and Gemini with automatic fallback; subscription CLIs first, API keys as a paid fallback |
+| MCP | OAuth-protected server with 29 tools for projects, milestones, tasks, Git, Trello attachments, and sync |
 | Sync | Milestone-scoped Google Sheets, Trello, and ClickUp integrations |
-| Desktop | Electron wrapper, native shortcuts, persistent local data, and platform installers |
+| Deploys | Read-only Railway status per service, linked automatically by GitHub repository |
+| Cloud sync | Optional end-to-end encrypted sync of projects, tasks, and settings between your machines |
+| Desktop | Electron app with tray, native shortcuts, automatic updates, and platform installers |
 
 ### A terminal designed for AI workflows
 
-The integrated terminal includes WebGL rendering, output batching, safe bracketed paste, reconnect handling, split panes, and session persistence. Clipboard images can be pasted with `Ctrl+V`: Shipyard stores the image temporarily on your machine and inserts its path into the Claude Code prompt.
+The integrated terminal includes WebGL rendering, output batching, safe bracketed paste, reconnect handling, split panes, and session persistence. Clipboard images can be pasted with `Ctrl+V`: Shipyard stores the image temporarily on your machine and inserts its path into the agent's prompt.
+
+Shipyard reads each terminal's screen. When Claude Code waits for an answer, the tab shows an amber question mark; when it finishes a job, a green check. Tabs opened for a task carry its number and title, and other tabs get a short name written by AI from their output (optional).
 
 ### Minimal, scalable interface
 
-Primary actions stay visible; secondary actions live in contextual menus. Project tabs adapt to the available width instead of introducing horizontal page scrolling, and the active project always remains accessible.
+Primary actions stay visible; secondary actions live in contextual menus. Project tabs share the available width instead of scrolling sideways, so every open project stays one click away.
 
 ## Download
 
@@ -72,6 +77,8 @@ Use the latest CI-built installers from the [Releases page](https://github.com/d
 | macOS Apple Silicon | `Shipyard-<version>-arm64.dmg` |
 | macOS Intel | `Shipyard-<version>-x64.dmg` |
 | Linux x64 | `Shipyard-<version>.AppImage` or `Shipyard-<version>.deb` |
+
+Installed apps check for new releases at startup and every four hours, download them in the background, and offer a restart (macOS updates require a signed build; on Linux only the AppImage updates itself).
 
 Release builds support Windows Authenticode signing and macOS Developer ID signing/notarization. Maintainers must configure the repository secrets described in [Release signing](#release-signing); unsigned local builds may still show the operating system's security warning.
 
@@ -121,26 +128,37 @@ Add existing folders or scan a parent directory. Shipyard detects Git repositori
 
 Each project has a virtual **General** milestone and can define additional milestones. Tasks move through Inbox, In Progress, and Done while preserving cascading timestamps. The description captures the product outcome; the technical prompt captures implementation context for a developer or coding agent.
 
+Tasks can carry an effort size (1, 2, 3, 5, or 8). Shipyard uses your own history of finished tasks to forecast how long the open ones will take, and shows the totals on each Kanban column.
+
 ### Work with Git
 
-Inspect changes, review diffs, stage files, commit, synchronize with remotes, and browse history without leaving the workspace. Projects containing multiple independent repositories expose repository tabs and keep query state isolated per repository.
+Inspect changes, review diffs, stage files, commit, synchronize with remotes, and browse history without leaving the workspace. Projects that hold several independent repositories get a filterable repository picker, and Shipyard remembers the last one you chose.
 
-### Use Claude Code
+### Hand tasks to coding agents
 
-Shipyard is CLI-first. Server-side AI features prefer the existing Claude Code OAuth session, then the local Claude CLI, and finally a configured API key. You can:
+**Run with AI** opens the task in a terminal with a generated prompt: project context, the task, and the MCP tools the agent should use to report progress. Before it starts you can pick the agent and add a decision that overrides the task description for that run.
 
-- open Claude Code in a project terminal;
-- resolve one task with generated project context;
-- organize or update multiple tasks from natural language;
+- **Agents** — Claude Code, Codex CLI, Aider, Gemini CLI, OpenCode, and Cursor CLI are built in. Add your own command under **Settings**; argument templates accept `{cwd}`, `{task}`, and `{taskFile}`.
+- **Worktree per task** — optional. Each task gets its own branch and Git worktree, so several agents can work on one repository at once. Worktrees of tasks done for more than seven days are removed automatically, unless they hold uncommitted changes.
+- **Review** — the task's Review tab lists the commits and files changed between the moment it started and the moment it finished. Expand a commit to see its diff; **Needs changes** adds a dated note and sends the task back to In Progress.
+
+### Use AI features
+
+Shipyard supports Claude, OpenAI, and Gemini. You choose a preferred provider; if it fails, the next one takes over. Within each provider Shipyard uses your subscription CLI first (Claude Code, Codex, Gemini CLI) and a configured API key only as a paid fallback. You can:
+
+- chat with project context;
 - analyze tasks and generate implementation prompts;
-- generate commit messages from the current diff;
-- paste text or clipboard images into the integrated terminal.
+- organize or update several tasks from plain text;
+- size tasks by effort in bulk and review the suggestions before saving;
+- generate commit messages from the current diff.
+
+With a Claude subscription, a small ring in the sidebar shows how much of the five-hour usage window you have used.
 
 AI features are optional; project, task, Git, file, and terminal management work without them.
 
 ### Connect through MCP
 
-Shipyard includes a Model Context Protocol server with OAuth 2.1 and PKCE. Compatible agents can list projects and milestones, create or update tasks, inspect Git state, reorder work, and trigger configured sync providers. Connection instructions and consent controls are available under **Settings → MCP**.
+Shipyard includes a Model Context Protocol server with OAuth 2.1 and PKCE. Compatible agents can list projects and milestones, create, update, and bulk-edit tasks, log progress notes, inspect Git state, reorder work, read Trello comments and image attachments, and trigger configured sync providers. Connection instructions and consent controls are available under **Settings → MCP**.
 
 ### Synchronize milestones
 
@@ -152,23 +170,38 @@ Integrations are isolated by `(project, provider, milestone)`, so each milestone
 | Trello | Bidirectional | Board/list mapping, controlled card ordering, remote edit protection, retry handling |
 | ClickUp | Bidirectional | List mapping with project and milestone isolation |
 
-Credentials are configured once per provider; mappings and synchronization state remain local. Detailed setup guidance is built into Shipyard's **Help** and **Settings** pages.
+Trello comments and attachments are pulled into the task (read-only), so an agent can see the screenshot a client attached to the card. Credentials are configured once per provider; mappings and synchronization state remain local. Detailed setup guidance is built into Shipyard's **Help** and **Settings** pages.
+
+### Watch deploys
+
+Connect a Railway token under **Settings → AI & Integrations** and Shipyard links each project to the services built from the same GitHub repository. A badge answers one question — did the last build succeed? — and its popover lists what the checkout still holds: uncommitted files, commits to push, or a branch different from the one being deployed. Shipyard only reads from Railway; it never redeploys or rolls back.
+
+### Sync between machines
+
+**Shipyard Cloud** is an optional hosted service that keeps projects, tasks, milestones, and settings in step across your computers. It is off until you sign in under **Settings → Cloud sync**. Your password never leaves the machine: data is encrypted before upload, and the server stores only encrypted blobs. There is no password reset — if you lose it, you lose the cloud copy, while each machine keeps its data.
+
+To move a whole setup instead, `pnpm workspace:export` packs Shipyard's data, the Git remotes to clone, bundles of repositories with no remote, and ignored `.env` files; `workspace-import.mjs`, shipped inside the bundle, restores it on the other machine.
 
 ## Keyboard shortcuts
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+K` | Global project, task, and action search |
+| `Ctrl+K` | Search projects, tasks, and files |
 | `Ctrl+Shift+F` | Search file contents |
 | `Ctrl+Backtick` | Toggle the integrated terminal |
+| `?` | Show every shortcut |
+| `Ctrl+N` | New task in the active project (desktop app) |
+| `Ctrl+W` | Close the active editor or project tab (desktop app) |
+| `Ctrl+Enter` | Save the task dialog from any field |
+| `Ctrl+S` | Save the open file |
 | `Ctrl+V` | Paste text or a clipboard image into the terminal |
 | `Shift` + drag | Select terminal text while mouse tracking is active |
 
-On macOS, use `Cmd` for application shortcuts where applicable.
+Browsers reserve `Ctrl+N` and `Ctrl+W`, so those two work only in the desktop app. On macOS, use `Cmd` for application shortcuts where applicable.
 
 ## Data and privacy
 
-Shipyard does not require a Shipyard account or hosted database.
+Shipyard does not require an account or a hosted database. Shipyard Cloud is opt-in and end-to-end encrypted.
 
 In development mode, data is written under `data/`. Desktop builds store it in the operating system's application-data directory. The main files are plain JSON and can be backed up with normal filesystem tools.
 
@@ -178,25 +211,28 @@ data/
 ├── settings.json
 ├── tasks/
 │   └── <projectId>.json
+├── ai-config.json      # encrypted API keys
 ├── sync-config.json
+├── deploy-config.json  # encrypted Railway token
+├── cloud-sync.json     # encrypted Shipyard Cloud session
 ├── mcp-config.json
 ├── mcp-auth.json
 └── server.log
 ```
 
-Third-party features communicate only with the provider you configure, such as Anthropic, Google Apps Script, Trello, or ClickUp. Review those providers' privacy policies before enabling an integration.
+Third-party features communicate only with the provider you configure, such as Anthropic, OpenAI, Google, Trello, ClickUp, or Railway. Review those providers' privacy policies before enabling an integration.
 
 ## Architecture
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │ React + Vite client                                         │
-│ dashboard · tasks · Git · files · terminal · AI · settings │
+│ dashboard · tasks · Git · files · terminal · agents · AI   │
 └──────────────────────────────┬──────────────────────────────┘
                                │ REST / SSE / WebSocket
 ┌──────────────────────────────▼──────────────────────────────┐
 │ Fastify server                                              │
-│ routes · services · MCP · PTY · sync adapters · AI backend │
+│ routes · services · MCP · PTY · sync · AI · deploy · cloud │
 └───────────────┬──────────────────────────────┬──────────────┘
                 │                              │
        ┌────────▼────────┐            ┌────────▼────────┐
@@ -210,7 +246,7 @@ Third-party features communicate only with the provider you configure, such as A
 | Frontend | React 18, Vite, TypeScript, Tailwind CSS, shadcn/ui, React Query |
 | Backend | Fastify 5, TypeScript, Zod, simple-git |
 | Terminal | xterm.js, WebSocket, optional node-pty |
-| Desktop | Electron, electron-builder |
+| Desktop | Electron, electron-builder, electron-updater |
 | Persistence | Atomic JSON stores with in-process mutation locks |
 | Monorepo | pnpm workspaces |
 
@@ -220,6 +256,7 @@ Third-party features communicate only with the provider you configure, such as A
 client/src/       React application, components, hooks, and API client
 server/src/       Fastify routes and domain services
 electron/         Desktop process, preload bridge, and packaging hooks
+scripts/          Workspace export/import between machines
 assets/           Icons and README media
 data/             Local development data (generated and gitignored)
 .github/workflows Release automation for Windows, macOS, and Linux
@@ -252,7 +289,7 @@ UI changes should use the existing design tokens and shadcn/ui primitives. New t
 
 ## Release process
 
-Pushing a `v*` tag starts the GitHub Actions release workflow. It builds Windows, macOS Intel/Apple Silicon, AppImage, and Debian artifacts, then creates a draft GitHub release with generated notes and attached installers.
+Pushing a `v*` tag starts the GitHub Actions release workflow. It builds Windows, macOS Intel/Apple Silicon, AppImage, and Debian artifacts, then creates a draft GitHub release with generated notes, installers, and the `latest*.yml` update manifests. Installed apps ignore drafts: publishing the draft is what releases the update.
 
 ### Release signing
 

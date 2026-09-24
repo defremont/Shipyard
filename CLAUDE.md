@@ -6,8 +6,8 @@ Dashboard web local (localhost) para gerenciamento de projetos, tarefas, git, te
 
 ```bash
 pnpm dev          # client (5421) + server (5420)
-shipyard.cmd      # Windows: batch file na raiz
-./shipyard.sh     # Linux: server + browser
+devdash.cmd       # Windows: batch file na raiz
+./devdash.sh      # Linux: server + browser
 ```
 
 ## Stack
