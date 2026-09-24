@@ -401,7 +401,37 @@ function saveRepo(projectId: string, repo: string | undefined) {
  * working at a dozen repos in a 280px panel, so this is a dropdown with a
  * filter — typing three letters beats hunting through a scrolling strip.
  */
-function RepoSelector({ repos, value, onChange }: {
+/**
+ * What a repository still holds: files not committed and commits not pushed.
+ * Only mounted while the selector is open, and keyed like the Source Control
+ * query, so a closed selector polls nothing and an open one reuses the cache.
+ */
+function RepoPending({ projectId, subrepo }: { projectId: string; subrepo: string | undefined }) {
+  const { data: git } = useGitStatus(projectId, subrepo)
+  if (!git) return null
+  const uncommitted = (git.files || []).length as number
+  const ahead = (git.ahead || 0) as number
+  if (uncommitted === 0 && ahead === 0) return null
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1.5 text-[10px] tabular-nums text-warning">
+      {uncommitted > 0 && (
+        <span className="inline-flex items-center gap-0.5" title={`${uncommitted} uncommitted`}>
+          <GitCommit className="h-2.5 w-2.5" />
+          {uncommitted}
+        </span>
+      )}
+      {ahead > 0 && (
+        <span className="inline-flex items-center gap-0.5" title={`${ahead} to push`}>
+          <ArrowUp className="h-2.5 w-2.5" />
+          {ahead}
+        </span>
+      )}
+    </span>
+  )
+}
+
+function RepoSelector({ projectId, repos, value, onChange }: {
+  projectId: string
   repos: { key: string | undefined; label: string }[]
   value: string | undefined
   onChange: (key: string | undefined) => void
@@ -462,6 +492,7 @@ function RepoSelector({ repos, value, onChange }: {
             >
               {repo.key === value ? <Check className="h-3 w-3 shrink-0" /> : <span className="w-3 shrink-0" />}
               <span className="truncate">{repo.label}</span>
+              <RepoPending projectId={projectId} subrepo={repo.key} />
             </button>
           ))}
           {filtered.length === 0 && (
@@ -507,7 +538,7 @@ export function GitPanel({ projectId, subRepos, isGitRepo, onOpenInEditor, onOpe
 
   return (
     <div className="space-y-2">
-      <RepoSelector repos={repoTabs} value={activeRepo} onChange={selectRepo} />
+      <RepoSelector projectId={projectId} repos={repoTabs} value={activeRepo} onChange={selectRepo} />
 
       {/* Active repo panel */}
       <SingleRepoPanel

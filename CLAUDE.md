@@ -288,6 +288,10 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   (`RepoSelector` em GitPanel.tsx) — uma fila de tabs era ilegivel num painel de
   280px com 12 sub-repos. A escolha e lembrada por projeto em
   `shipyard:git-repo:{projectId}` e restaurada ao voltar pro projeto
+- Cada linha do seletor mostra o que o repo ainda segura (`RepoPending`:
+  arquivos sem commit e commits sem push, em `warning`; repo limpo nao mostra
+  nada). So monta com o dropdown aberto e usa a chave do `useGitStatus` — o
+  seletor fechado nao faz poll de 12 repos
 - Query keys incluem `subrepo`: `['git-status', projectId, subrepo]`
 
 ### MCP (servidor de ferramentas para agentes)
