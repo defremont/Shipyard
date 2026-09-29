@@ -669,6 +669,11 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   bandeja e quase nunca fecha, entao "instalar ao sair" nao basta: o renderer
   mostra um toast persistente (`useAppUpdate`) e a bandeja ganha
   "Restart to update"
+- A bandeja tem "Check for updates" para nao depender do ciclo de 4h. O item
+  mostra o andamento no proprio menu (`Checking…`, `Downloading vX — N%`) e,
+  so quando o clique foi manual, avisa "up to date" ou o erro num dialogo — o
+  ciclo automatico continua silencioso. O menu e trocado com
+  `refreshTrayMenu()`; recriar o `Tray` faria o icone piscar
 - macOS atualiza pelo `.zip` (Squirrel.Mac), nao pelo dmg, e exige app
   assinado. Linux so pelo AppImage; o `.deb` nao se atualiza sozinho
 - So vale no app empacotado (`app.isPackaged`). Quem roda do codigo-fonte

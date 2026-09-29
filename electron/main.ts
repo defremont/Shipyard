@@ -420,21 +420,91 @@ function createApplicationMenu() {
 const UPDATE_CHECK_MS = 4 * 60 * 60 * 1000;
 let updateReady: { version: string } | null = null;
 
+/**
+ * What the tray says about updates. The 4h cycle runs silently; a check the
+ * user asked for from the tray answers even when there is nothing new, since
+ * silence there would look like the click did nothing.
+ */
+type UpdateActivity =
+  | { kind: 'idle' }
+  | { kind: 'checking' }
+  | { kind: 'downloading'; version: string; percent: number };
+let updateActivity: UpdateActivity = { kind: 'idle' };
+let manualCheck = false;
+
+function setUpdateActivity(next: UpdateActivity) {
+  updateActivity = next;
+  refreshTrayMenu();
+}
+
+function updatesEnabled() {
+  return !isDev && app.isPackaged;
+}
+
+function checkForUpdates(manual: boolean) {
+  if (updateActivity.kind !== 'idle' || updateReady) return;
+  manualCheck = manual;
+  autoUpdater.checkForUpdates().catch(err => console.error('[Updater]', err?.message || err));
+}
+
 function setupAutoUpdates() {
-  if (isDev || !app.isPackaged) return;
+  if (!updatesEnabled()) return;
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('checking-for-update', () => setUpdateActivity({ kind: 'checking' }));
+  autoUpdater.on('update-available', (info) => {
+    setUpdateActivity({ kind: 'downloading', version: info.version, percent: 0 });
+  });
+  autoUpdater.on('download-progress', (progress) => {
+    if (updateActivity.kind !== 'downloading') return;
+    // Rebuilding the menu on every chunk is wasted work; every 5% is enough.
+    const percent = Math.floor(progress.percent / 5) * 5;
+    if (percent !== updateActivity.percent) setUpdateActivity({ ...updateActivity, percent });
+  });
+  autoUpdater.on('update-not-available', () => {
+    setUpdateActivity({ kind: 'idle' });
+    if (manualCheck) {
+      void dialog.showMessageBox({
+        type: 'info',
+        message: 'Shipyard is up to date',
+        detail: `You have the latest version, v${app.getVersion()}.`,
+      });
+    }
+    manualCheck = false;
+  });
   autoUpdater.on('update-downloaded', (info) => {
     updateReady = { version: info.version };
+    manualCheck = false;
     mainWindow?.webContents.send('update-ready', updateReady);
-    createTray();
+    setUpdateActivity({ kind: 'idle' });
   });
   autoUpdater.on('error', (err) => {
     console.error('[Updater]', err?.message || err);
+    setUpdateActivity({ kind: 'idle' });
+    if (manualCheck) dialog.showErrorBox('Could not check for updates', err?.message || String(err));
+    manualCheck = false;
   });
-  const check = () => autoUpdater.checkForUpdates().catch(err => console.error('[Updater]', err?.message || err));
-  check();
-  setInterval(check, UPDATE_CHECK_MS);
+  checkForUpdates(false);
+  setInterval(() => checkForUpdates(false), UPDATE_CHECK_MS);
+}
+
+/** Tray entry for updates: a live status while it works, the action otherwise. */
+function updateMenuItems(): MenuItemConstructorOptions[] {
+  if (!updatesEnabled()) return [];
+  if (updateReady) {
+    return [
+      { label: `Restart to update to v${updateReady.version}`, click: () => installUpdate() },
+      { type: 'separator' },
+    ];
+  }
+  const label =
+    updateActivity.kind === 'checking' ? 'Checking for updates…'
+    : updateActivity.kind === 'downloading' ? `Downloading v${updateActivity.version} — ${updateActivity.percent}%`
+    : 'Check for updates';
+  return [
+    { label, enabled: updateActivity.kind === 'idle', click: () => checkForUpdates(true) },
+    { type: 'separator' },
+  ];
 }
 
 function installUpdate() {
@@ -457,12 +527,20 @@ function createTray() {
   tray?.destroy();
   tray = new Tray(icon);
   tray.setToolTip('Shipyard');
+  refreshTrayMenu();
+
+  tray.on('double-click', () => {
+    mainWindow?.show();
+    mainWindow?.focus();
+  });
+}
+
+/** Swaps the menu in place — recreating the Tray would make the icon blink. */
+function refreshTrayMenu() {
+  if (!tray) return;
 
   const contextMenu = Menu.buildFromTemplate([
-    ...(updateReady ? [
-      { label: `Restart to update to v${updateReady.version}`, click: () => installUpdate() },
-      { type: 'separator' as const },
-    ] : []),
+    ...updateMenuItems(),
     {
       label: 'Show Shipyard',
       click: () => {
@@ -481,11 +559,6 @@ function createTray() {
   ]);
 
   tray.setContextMenu(contextMenu);
-
-  tray.on('double-click', () => {
-    mainWindow?.show();
-    mainWindow?.focus();
-  });
 }
 
 // ── App lifecycle ──────────────────────────────────────────────────
