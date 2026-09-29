@@ -797,7 +797,14 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 - Complemento de demanda ja entregue (`parentTaskId`) vira `— Note` na task
   existente (formato do feed de atividade) e reabre a task se estava done
 - Task criada entra em `todo`, com `effortSource: 'manual'` (passou por revisao
-  humana) e chama `triggerAutoSync`
+  humana) e `effortConfidence: 'low'` (a triagem nao ve o codigo), e chama
+  `triggerAutoSync`
+- **Catalogo**: o inbox nao ve codigo; o Shipyard manda cada projeto com
+  `techStack`, `notes` e as tasks abertas ou concluidas ha ate 30 dias (ate 120
+  por projeto). Montado no maximo a cada 5 min (le todos os arquivos de tasks)
+  e enviado via `POST /api/shipyard/catalog` so quando o hash difere do
+  `catalogHash` que o sync devolve. E com ele que a IA do inbox liga um pedido a
+  task #N que ja existe (vira nota nela) em vez de duplicar
 - Token cifrado com `.claude-key`, nunca volta ao client. Card em
   Settings > AI & Integrations (`InboxSettingsCard`)
 

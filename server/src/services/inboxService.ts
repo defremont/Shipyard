@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir, rename } from 'fs/promises';
 import { join } from 'path';
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto';
 import { DATA_DIR } from './dataDir.js';
 import * as taskStore from './taskStore.js';
 import { getProjects } from './projectDiscovery.js';
@@ -176,6 +176,55 @@ async function call<T>(c: InboxConfig, path: string, body: unknown): Promise<T> 
 
 const EFFORTS = [1, 2, 3, 5, 8] as const;
 
+// ── Catalog ───────────────────────────────────────────────────────────────
+//
+// The inbox never sees code. What it gets from here is the next best thing:
+// each project's stack and notes, and the tasks that already exist, so its AI
+// can tie a client's message to task #N instead of opening a duplicate, and
+// pick the project when a chat has none. Built at most every 5 minutes (it
+// reads every tasks file) and sent only when its hash differs from the one the
+// inbox reports.
+
+const CATALOG_TTL_MS = 5 * 60_000;
+const CATALOG_TASKS_PER_PROJECT = 120;
+const RECENT_DONE_MS = 30 * 86_400_000;
+
+interface CatalogPayload {
+  hash: string;
+  projects: {
+    id: string;
+    name: string;
+    techStack: string[];
+    notes: string;
+    tasks: { id: string; number?: number; title: string; status: string }[];
+  }[];
+}
+
+let catalogMemo: { at: number; value: CatalogPayload } | null = null;
+
+async function buildCatalog(projects: Awaited<ReturnType<typeof getProjects>>): Promise<CatalogPayload> {
+  if (catalogMemo && Date.now() - catalogMemo.at < CATALOG_TTL_MS) return catalogMemo.value;
+  const out: CatalogPayload['projects'] = [];
+  for (const p of projects) {
+    const tasks = await taskStore.getTasks(p.id).catch(() => []);
+    const relevant = tasks
+      .filter(t => t.status !== 'done' || (t.doneAt && Date.now() - new Date(t.doneAt).getTime() < RECENT_DONE_MS))
+      .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''))
+      .slice(0, CATALOG_TASKS_PER_PROJECT)
+      .map(t => ({ id: t.id, number: t.number, title: t.title, status: t.status }));
+    out.push({
+      id: p.id,
+      name: p.name,
+      techStack: p.techStack || [],
+      notes: (p.notes || '').slice(0, 600),
+      tasks: relevant,
+    });
+  }
+  const hash = createHash('sha1').update(JSON.stringify(out)).digest('hex');
+  catalogMemo = { at: Date.now(), value: { hash, projects: out } };
+  return catalogMemo.value;
+}
+
 async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ taskId: string; taskNumber?: number }> {
   if (!knownProjects.has(d.projectId)) throw new Error(`project "${d.projectId}" is not in this Shipyard`);
 
@@ -204,7 +253,8 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
     status: 'todo',
     ...(d.milestoneId && d.milestoneId !== 'default' ? { milestoneId: d.milestoneId } : {}),
     // Reviewed by a person before it got here.
-    ...(effort ? { effort, effortSource: 'manual' as const } : {}),
+    // Reviewed by a person, but estimated without seeing the code.
+    ...(effort ? { effort, effortSource: 'manual' as const, effortConfidence: 'low' as const } : {}),
   });
   return { taskId: task.id, taskNumber: task.number };
 }
@@ -251,10 +301,18 @@ async function runSync(): Promise<{ created: number }> {
       }
     }
 
-    const { demands } = await call<{ demands: InboxDemand[] }>(c, '/api/shipyard/sync', {
+    const { demands, catalogHash } = await call<{ demands: InboxDemand[]; catalogHash?: string | null }>(c, '/api/shipyard/sync', {
       projects: payloadProjects,
       tasks: statusChanges,
     });
+
+    // The inbox reports the catalog it holds; send ours only when it differs.
+    const catalog = await buildCatalog(projects);
+    if (catalogHash !== catalog.hash) {
+      await call(c, '/api/shipyard/catalog', catalog).catch(err =>
+        log.warn('server', 'WhatsApp inbox catalog not sent', err.message),
+      );
+    }
 
     const known = new Set(projects.map(p => p.id));
     const results: { demandId: string; taskId?: string; taskNumber?: number; error?: string }[] = [];
