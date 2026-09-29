@@ -146,6 +146,16 @@ export interface AutoLinkResult {
   report: MatchReport
 }
 
+/** WhatsApp inbox connection. The token stays on the server. */
+export interface InboxStatus {
+  configured: boolean
+  url: string | null
+  lastSyncAt: string | null
+  lastError: string | null
+  lastCreated: number
+  imported: number
+}
+
 export interface DeployLinkInput {
   projectId: string
   projectName?: string
@@ -595,6 +605,17 @@ export const api = {
         : ''
     return request(`/projects/${projectId}/deploy${query}`, { method: 'DELETE' })
   },
+
+  // WhatsApp inbox
+  getInboxStatus: () => request<InboxStatus>('/inbox'),
+  configureInbox: (url: string, token: string) =>
+    request<InboxStatus & { created: number }>('/inbox', {
+      method: 'PUT',
+      body: JSON.stringify({ url, token }),
+      timeout: 40_000,
+    }),
+  disconnectInbox: () => request<InboxStatus>('/inbox', { method: 'DELETE' }),
+  syncInbox: () => request<InboxStatus & { created: number }>('/inbox/sync', { method: 'POST', timeout: 40_000 }),
 
   // Settings
   getSettings: () => request<AppSettings>('/settings'),

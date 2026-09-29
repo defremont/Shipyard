@@ -11,6 +11,7 @@ import { TerminalTitleSettingsCard } from '@/components/ai/TerminalTitleSettings
 import { RailwaySettingsCard } from '@/components/deploy/RailwaySettingsCard'
 import { McpSettingsCard } from '@/components/mcp/McpSettingsCard'
 import { CloudSettingsCard } from '@/components/cloud/CloudSettingsCard'
+import { InboxSettingsCard } from '@/components/inbox/InboxSettingsCard'
 import { FolderPlus, Plus, FolderOpen, Check, Loader2, GitBranch, X, FolderSearch, Download, Upload, Volume2, VolumeX, Sparkles, Server, Cloud, Database } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useProjects } from '@/hooks/useProjects'
@@ -432,6 +433,7 @@ export function Settings() {
               <WorktreeSettingsCard />
               <TerminalTitleSettingsCard />
               <RailwaySettingsCard />
+              <InboxSettingsCard />
               <McpSettingsCard />
               <SyncSettingsCard projects={projects || []} />
             </>

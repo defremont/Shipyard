@@ -47,6 +47,7 @@ data/           # Persistencia (auto-criado)
   sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
   deploy-config.json,              # token Railway (cifrado) + link por projeto
   cloud-sync.json,                 # Shipyard Cloud: sessao cifrada + cursor/hashes do sync
+  inbox-config.json,               # WhatsApp inbox: URL + token (cifrado) + demandas ja entregues
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
 
 electron/       # main.ts, preload.ts (desktop wrapper)
@@ -137,6 +138,7 @@ interface Project {
     no DELETE, `?link=` remove um deploy, `?subrepo=` os daquele checkout e
     nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
+**WhatsApp inbox**: GET/PUT/DELETE /api/inbox (`{ url, token }`; o PUT ja testa com um sync), POST /api/inbox/sync
 **Shipyard Cloud**: GET /api/cloud/status, POST /api/cloud/signup|login|logout|sync
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
@@ -772,6 +774,27 @@ Shipyard so le):
 
 **Migracao v2 → v3**: integracoes Trello/ClickUp pre-existentes sao descartadas (creds
 globais sao mantidas) — usuarios reconectam cada milestone manualmente.
+
+### WhatsApp inbox (demandas de clientes → tarefas)
+- Servico proprio em `C:\Code\whatsapp-inbox` (Railway, projeto Personal Projects,
+  servico `whatsapp-inbox` + `Postgres-hBRV` + volume `/data`), ao lado do
+  `Evolution API`. Ele recebe o webhook do WhatsApp, grava so as conversas
+  vigiadas, transcreve/descreve midia com Gemini, agrupa em demandas e segura
+  **tudo** para revisao numa area web com senha. Tem `CLAUDE.md` proprio
+- O Shipyard roda local e nao recebe webhook, entao **ele pergunta**:
+  `inboxService.ts` faz `POST {url}/api/shipyard/sync` a cada 60s mandando a
+  lista de projetos (+ milestones ativos) e o status das tasks que ja criou, e
+  recebe as demandas aprovadas. Depois cria as tasks e manda `/api/shipyard/ack`
+- Do outro lado a demanda levada fica `claimed` e so vira `sent` com o ack (sem
+  ack, volta a `approved` em 10 min). Aqui `imported` (demandId → task) e
+  gravado **antes** do ack: um ack perdido reenvia a demanda, e ela so e
+  re-confirmada, nunca criada duas vezes
+- Complemento de demanda ja entregue (`parentTaskId`) vira `— Note` na task
+  existente (formato do feed de atividade) e reabre a task se estava done
+- Task criada entra em `todo`, com `effortSource: 'manual'` (passou por revisao
+  humana) e chama `triggerAutoSync`
+- Token cifrado com `.claude-key`, nunca volta ao client. Card em
+  Settings > AI & Integrations (`InboxSettingsCard`)
 
 ### Indicador de deploy (Railway)
 - Responde uma pergunta so: **o ultimo build subiu?** `deployService.getStatus`
