@@ -10,8 +10,9 @@ import * as log from './logService.js';
 /**
  * WhatsApp inbox: a hosted service (`C:\Code\whatsapp-inbox`, Railway) reads the
  * messages of chosen clients, turns them into demands and holds them for review.
- * Shipyard runs on this machine and cannot take a webhook, so it asks: every
- * minute it sends its project list (so the web area knows where each client
+ * Shipyard runs on this machine and cannot take a webhook, so it asks: it keeps
+ * a live channel open (SSE) and syncs the moment a demand is approved, and every
+ * minute, as a fallback, it sends its project list (so the web area knows where each client
  * lands) and the status of the tasks it created (so the record shows what got
  * done), and takes the demands that were approved.
  *
@@ -126,6 +127,7 @@ export async function getStatus() {
     lastError: c.lastError ?? null,
     lastCreated: c.lastCreated ?? 0,
     imported: Object.keys(c.imported).length,
+    live: liveConnected,
   };
 }
 
@@ -137,6 +139,7 @@ export async function configure(url: string, token: string): Promise<void> {
     c.token = token.trim();
     c.lastError = null;
   });
+  restartListen();
 }
 
 export async function disconnect(): Promise<void> {
@@ -146,6 +149,7 @@ export async function disconnect(): Promise<void> {
     c.token = '';
     c.lastError = null;
   });
+  restartListen();
 }
 
 // ── Sync ─────────────────────────────────────────────────────────────────
@@ -225,7 +229,7 @@ async function buildCatalog(projects: Awaited<ReturnType<typeof getProjects>>): 
   return catalogMemo.value;
 }
 
-async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ taskId: string; taskNumber?: number }> {
+async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ taskId: string; taskNumber?: number; asNote?: boolean }> {
   if (!knownProjects.has(d.projectId)) throw new Error(`project "${d.projectId}" is not in this Shipyard`);
 
   if (d.parentTaskId) {
@@ -240,7 +244,7 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
         prompt: taskStore.appendPromptSection(parent.prompt, `— Note ${ts}`, note),
         ...(parent.status === 'done' ? { status: 'todo' as const } : {}),
       });
-      return { taskId: parent.id, taskNumber: task?.number };
+      return { taskId: parent.id, taskNumber: task?.number, asNote: true };
     }
   }
 
@@ -260,9 +264,21 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
 }
 
 let inFlight: Promise<{ created: number }> | null = null;
+/** A wake-up that arrived mid-sync: that sync may have missed it, run again. */
+let rerun = false;
 
 export function syncNow(): Promise<{ created: number }> {
-  if (!inFlight) inFlight = runSync().finally(() => { inFlight = null; });
+  if (inFlight) {
+    rerun = true;
+    return inFlight;
+  }
+  inFlight = runSync().finally(() => {
+    inFlight = null;
+    if (rerun) {
+      rerun = false;
+      syncNow().catch(() => {});
+    }
+  });
   return inFlight;
 }
 
@@ -315,7 +331,7 @@ async function runSync(): Promise<{ created: number }> {
     }
 
     const known = new Set(projects.map(p => p.id));
-    const results: { demandId: string; taskId?: string; taskNumber?: number; error?: string }[] = [];
+    const results: { demandId: string; taskId?: string; taskNumber?: number; asNote?: boolean; error?: string }[] = [];
     const newlyImported: Record<string, ImportedRef> = {};
     const touched = new Set<string>();
     let created = 0;
@@ -327,9 +343,9 @@ async function runSync(): Promise<{ created: number }> {
         continue;
       }
       try {
-        const { taskId, taskNumber } = await deliver(d, known);
+        const { taskId, taskNumber, asNote } = await deliver(d, known);
         newlyImported[d.id] = { projectId: d.projectId, taskId, reported: 'todo' };
-        results.push({ demandId: d.id, taskId, taskNumber });
+        results.push({ demandId: d.id, taskId, taskNumber, asNote });
         touched.add(d.projectId);
         created++;
         log.info('tasks', `WhatsApp demand → "${d.title}"`, undefined, d.projectId);
@@ -360,15 +376,89 @@ async function runSync(): Promise<{ created: number }> {
   }
 }
 
+// ── Live channel ──────────────────────────────────────────────────────────
+//
+// GET /api/shipyard/events on the inbox: an `approved` event means "sync now",
+// so an approved demand lands here in seconds instead of up to a minute. The
+// poll above stays as the fallback. Silence past IDLE_MS (the inbox pings every
+// 25 s) counts as a dead connection; reconnects back off up to a minute, which
+// also covers an inbox that does not have the channel yet.
+
+const IDLE_MS = 70_000;
+let liveConnected = false;
+let liveCtrl: AbortController | null = null;
+let liveRetry = 0;
+let liveTimer: NodeJS.Timeout | null = null;
+let liveStarted = false;
+
+function tick(): void {
+  syncNow().catch(() => {
+    // Already recorded in lastError; the settings card shows it.
+  });
+}
+
+function scheduleListen(ms: number): void {
+  if (liveTimer) clearTimeout(liveTimer);
+  liveTimer = setTimeout(() => {
+    liveTimer = null;
+    void listen();
+  }, ms);
+}
+
+function restartListen(): void {
+  if (!liveStarted) return;
+  liveCtrl?.abort();
+  liveRetry = 0;
+  scheduleListen(500);
+}
+
+async function listen(): Promise<void> {
+  const c = await load();
+  if (!c.url || !c.token) return scheduleListen(POLL_MS);
+  const ctrl = new AbortController();
+  liveCtrl = ctrl;
+  let idle: NodeJS.Timeout | null = null;
+  const arm = () => {
+    if (idle) clearTimeout(idle);
+    idle = setTimeout(() => ctrl.abort(), IDLE_MS);
+  };
+  try {
+    arm();
+    const res = await fetch(`${c.url}/api/shipyard/events`, {
+      headers: { Authorization: `Bearer ${c.token}`, Accept: 'text/event-stream' },
+      signal: ctrl.signal,
+    });
+    if (!res.ok || !res.body) throw new Error(`Inbox live channel answered ${res.status}`);
+    liveConnected = true;
+    liveRetry = 0;
+    const decoder = new TextDecoder();
+    let buf = '';
+    for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
+      arm();
+      buf += decoder.decode(chunk, { stream: true }).replace(/\r\n/g, '\n');
+      let end: number;
+      while ((end = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, end);
+        buf = buf.slice(end + 2);
+        if (/^event: approved$/m.test(block)) tick();
+      }
+    }
+  } catch {
+    // Closed, timed out or refused: retry below.
+  } finally {
+    if (idle) clearTimeout(idle);
+    liveConnected = false;
+    if (liveCtrl === ctrl) liveCtrl = null;
+  }
+  scheduleListen(Math.min(POLL_MS, 2_000 * 2 ** liveRetry++));
+}
+
 let timer: NodeJS.Timeout | null = null;
 
 export function startInboxSync(): void {
   if (timer) return;
-  const tick = () => {
-    syncNow().catch(() => {
-      // Already recorded in lastError; the settings card shows it.
-    });
-  };
   timer = setInterval(tick, POLL_MS);
   setTimeout(tick, 5_000);
+  liveStarted = true;
+  scheduleListen(3_000);
 }

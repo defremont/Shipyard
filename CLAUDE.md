@@ -790,6 +790,13 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   `inboxService.ts` faz `POST {url}/api/shipyard/sync` a cada 60s mandando a
   lista de projetos (+ milestones ativos) e o status das tasks que ja criou, e
   recebe as demandas aprovadas. Depois cria as tasks e manda `/api/shipyard/ack`
+- **Canal ao vivo**: alem do ciclo de 60s, fica aberto `GET
+  {url}/api/shipyard/events` (SSE, mesmo Bearer). Evento `approved` = sincroniza
+  agora, entao a demanda aprovada chega em segundos. Silencio de 70s (o inbox
+  pinga a cada 25s) derruba e reconecta com espera ate 60s; `configure` e
+  `disconnect` reabrem. Aviso que chega no meio de um sync marca `rerun`
+- Complemento entregue como nota volta no ack com `asNote: true`; o inbox
+  mostra "nota na tarefa #N" em vez de "tarefa #N"
 - Do outro lado a demanda levada fica `claimed` e so vira `sent` com o ack (sem
   ack, volta a `approved` em 10 min). Aqui `imported` (demandId → task) e
   gravado **antes** do ack: um ack perdido reenvia a demanda, e ela so e
