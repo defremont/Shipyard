@@ -23,6 +23,7 @@ import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
 import { useTerminalStatus } from '@/hooks/useTerminal'
+import { useLayoutMode } from '@/hooks/useLayoutMode'
 import { DeployBadge } from '@/components/deploy/DeployBadge'
 import { toast } from 'sonner'
 
@@ -45,6 +46,9 @@ export function Workspace() {
   const setWorkspaceMode = useCallback((mode: 'tasks' | 'editor') => {
     _setWorkspaceMode(mode)
     if (projectId) localStorage.setItem(`shipyard:workspace-mode:${projectId}`, mode)
+    // Asking for Tasks or Editor means wanting to see it: in focus layout the
+    // terminal gives the space back (TerminalPanel listens).
+    window.dispatchEvent(new CustomEvent('shipyard:focus-workspace'))
   }, [projectId])
 
   useEffect(() => {
@@ -116,6 +120,10 @@ export function Workspace() {
     openFolder.mutate(projectId, { onSuccess: () => toast.success('Opened folder') })
   }, [projectId, openFolder])
 
+  // Focus layout: an open terminal has the work area. Only the toolbar stays,
+  // with neither mode lit — clicking one brings the workspace back.
+  const { terminalFull } = useLayoutMode()
+
   if (!project) {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
@@ -125,7 +133,7 @@ export function Workspace() {
   }
 
   return (
-    <div className="flex-1 overflow-hidden flex flex-col">
+    <div className={cn('overflow-hidden flex flex-col', !terminalFull && 'flex-1')}>
       {/* ── Project toolbar ── */}
       <div className="h-10 px-4 flex items-center gap-2 border-b shrink-0 bg-card/30">
         {/* Identity */}
@@ -158,7 +166,7 @@ export function Workspace() {
               onClick={() => setWorkspaceMode('tasks')}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 h-6 rounded text-[11px] font-medium transition-colors',
-                workspaceMode === 'tasks'
+                workspaceMode === 'tasks' && !terminalFull
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               )}
@@ -170,7 +178,7 @@ export function Workspace() {
               onClick={() => setWorkspaceMode('editor')}
               className={cn(
                 'flex items-center gap-1.5 px-2.5 h-6 rounded text-[11px] font-medium transition-colors',
-                workspaceMode === 'editor'
+                workspaceMode === 'editor' && !terminalFull
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               )}
@@ -267,7 +275,7 @@ export function Workspace() {
       </div>
 
       {/* ── Main content ── */}
-      <div className="flex-1 overflow-hidden flex min-h-0">
+      <div className={cn('flex-1 overflow-hidden min-h-0', terminalFull ? 'hidden' : 'flex')}>
         <div className={cn(
           'flex-1 min-w-0 flex flex-col',
           workspaceMode === 'tasks' && 'overflow-y-auto px-3 py-2 scrollbar-dark'

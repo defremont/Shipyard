@@ -1,5 +1,7 @@
 import { useRef, useState } from 'react'
 import { useActivity } from '@/hooks/useActivity'
+import { useLayoutMode } from '@/hooks/useLayoutMode'
+import { cn } from '@/lib/utils'
 import { ProjectsView } from './views/ProjectsView'
 import { ExplorerView } from './views/ExplorerView'
 import { SearchView } from './views/SearchView'
@@ -29,6 +31,7 @@ const titles: Record<string, string> = {
 
 export function SidePanel() {
   const { activity, panelOpen } = useActivity()
+  const { chatFull } = useLayoutMode()
   const [width, setWidth] = useState<number>(loadWidth)
   const panelRef = useRef<HTMLDivElement>(null)
 
@@ -57,6 +60,9 @@ export function SidePanel() {
 
   if (!panelOpen) return null
 
+  // Expanded chat: the panel takes the room of the main column (Layout hides it).
+  const full = chatFull && activity === 'claude'
+
   let content: React.ReactNode = null
   switch (activity) {
     case 'projects': content = <ProjectsView />; break
@@ -67,7 +73,11 @@ export function SidePanel() {
   }
 
   return (
-    <div ref={panelRef} className="flex h-full shrink-0 relative" style={{ width }}>
+    <div
+      ref={panelRef}
+      className={cn('flex h-full relative', full ? 'flex-1 min-w-0' : 'shrink-0')}
+      style={full ? undefined : { width }}
+    >
       <div className="flex-1 min-w-0 flex flex-col border-r bg-card/20 overflow-hidden">
         {/* Header (Claude view manages its own header) */}
         {activity !== 'claude' && (
@@ -82,10 +92,12 @@ export function SidePanel() {
         </div>
       </div>
       {/* Resize handle */}
-      <div
-        className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-primary/40 active:bg-primary/60 z-10"
-        onMouseDown={startDrag}
-      />
+      {!full && (
+        <div
+          className="absolute top-0 right-0 h-full w-1 cursor-col-resize hover:bg-primary/40 active:bg-primary/60 z-10"
+          onMouseDown={startDrag}
+        />
+      )}
     </div>
   )
 }

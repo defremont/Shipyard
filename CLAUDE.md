@@ -183,6 +183,28 @@ interface Project {
   `/help`) e restaura a preferencia ao voltar — ver `FULL_PAGE_ROUTES` em
   `useActivity.tsx`
 
+### Layout de paineis (foco vs split)
+- `hooks/useLayoutMode.ts` e a fonte unica: `mode` (`focus` | `split`, em
+  `shipyard:layout-mode`, default `focus`), `terminalFull` e `chatFull`
+- **focus**: terminal aberto dentro de um projeto ocupa toda a area de trabalho;
+  o Workspace encolhe ate a toolbar (`terminalFull` esconde o conteudo com
+  `hidden`, sem desmontar board/editor). Clicar em Tasks/Editor emite
+  `shipyard:focus-workspace` e o TerminalPanel fecha. As abas de sessao
+  continuam listadas com o painel fechado — clicar numa abre o terminal cheio
+- **split**: comportamento antigo — terminal embaixo, altura em
+  `shipyard:terminal-height`. Arrastar a borda de um terminal cheio troca para
+  split no primeiro movimento; o botao na barra do terminal alterna os modos
+- Quem decide "cheio" e o TerminalPanel (`isVisible && focus && rota
+  /project/`) e ele publica `terminalFull`; fora de um projeto (Dashboard,
+  Settings) o terminal usa a altura do split para nao cobrir a pagina
+- Em focus, trocar para um projeto sem terminal fecha o painel, e a recuperacao
+  de sessoes no boot nao o reabre — "aberto" ali significa cobrir o workspace
+- Chat: o botao no cabecalho da ClaudeView liga `chatFull` — o SidePanel vira
+  `flex-1`, o `<main>` some e o ChatPanel (`expanded`) preenche a altura com
+  coluna de leitura (`max-w-3xl`, `text-sm`). Nao e persistido e zera quando a
+  view desmonta. Com `<main>` oculto os terminais recebem `isActive=false`:
+  um fit contra caixa de tamanho zero encolheria o PTY
+
 ### Tarefas: description vs prompt
 - **description**: O QUE fazer, visao usuario/produto, sem referencias a codigo
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao

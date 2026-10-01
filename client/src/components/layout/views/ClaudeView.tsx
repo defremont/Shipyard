@@ -1,5 +1,7 @@
-import { useState, lazy, Suspense } from 'react'
-import { Sparkles, Terminal, Settings, Check, AlertTriangle } from 'lucide-react'
+import { useState, useEffect, lazy, Suspense } from 'react'
+import { Sparkles, Terminal, Settings, Check, AlertTriangle, Maximize2, Minimize2 } from 'lucide-react'
+import { layoutStore, useLayoutMode } from '@/hooks/useLayoutMode'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useTabs } from '@/hooks/useTabs'
@@ -19,6 +21,9 @@ export function ClaudeView() {
   const project = projects?.find(p => p.id === activeTabId)
   const { data: status } = useClaudeStatus()
   const [configOpen, setConfigOpen] = useState(false)
+  const { chatFull } = useLayoutMode()
+  // Leaving the view (another activity, panel closed) gives the window back.
+  useEffect(() => () => layoutStore.setChatFull(false), [])
 
   const cli = !!status?.cliAvailable
   const api = !!status?.configured
@@ -61,13 +66,28 @@ export function ClaudeView() {
             </Badge>
           )}
         </div>
-        <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setConfigOpen(true)} title="Settings">
-          <Settings className="h-3.5 w-3.5" />
-        </Button>
+        <div className="flex items-center shrink-0">
+          {/* Long answers need room: the chat takes the whole window */}
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => layoutStore.setChatFull(!chatFull)}
+            title={chatFull ? 'Back to side panel' : 'Expand chat'}
+          >
+            {chatFull ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
+          </Button>
+          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setConfigOpen(true)} title="Settings">
+            <Settings className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
 
       {/* Body */}
-      <div className="flex-1 overflow-y-auto scrollbar-dark px-3 py-3 space-y-3 min-h-0">
+      <div className={cn(
+        'flex-1 px-3 py-3 min-h-0',
+        chatFull ? 'flex flex-col gap-3' : 'overflow-y-auto scrollbar-dark space-y-3'
+      )}>
         {!ready && (
           <div className="rounded-md border border-warning/30 bg-warning/5 p-3 text-xs text-muted-foreground space-y-2">
             <div className="flex items-center gap-1.5 text-warning font-medium">
@@ -84,16 +104,18 @@ export function ClaudeView() {
 
         {project ? (
           <>
-            <TerminalLauncher
-              projectId={project.id}
-              projectPath={project.path}
-              projectName={project.name}
-            />
+            {!chatFull && (
+              <TerminalLauncher
+                projectId={project.id}
+                projectPath={project.path}
+                projectName={project.name}
+              />
+            )}
 
             {ready && (
-              <div className="border-t pt-3">
+              <div className={chatFull ? 'flex-1 min-h-0' : 'border-t pt-3'}>
                 <Suspense fallback={null}>
-                  <ChatPanel projectId={project.id} />
+                  <ChatPanel projectId={project.id} expanded={chatFull} />
                 </Suspense>
               </div>
             )}

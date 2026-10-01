@@ -1,5 +1,6 @@
-import { useState, useRef, useCallback, useEffect, memo, lazy, Suspense } from 'react'
-import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2, MessageCircleQuestion, Pencil } from 'lucide-react'
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, memo, lazy, Suspense } from 'react'
+import { useLocation } from 'react-router-dom'
+import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2, MessageCircleQuestion, Pencil, Maximize2, Rows2 } from 'lucide-react'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
@@ -14,6 +15,7 @@ import {
 import { useLaunchTerminal } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
 import { useAiSessions } from '@/hooks/useAiSessions'
+import { layoutStore, useLayoutMode } from '@/hooks/useLayoutMode'
 import { api } from '@/lib/api'
 // xterm + its addons are ~300kB and TerminalPanel is mounted by Layout on
 // every page, so load the terminal only once a session actually exists.
@@ -316,7 +318,31 @@ export function TerminalPanel() {
     return localStorage.getItem(PANEL_VISIBLE_KEY) === 'true'
   })
 
+  // Focus layout: an open terminal takes the whole work area. Only inside a
+  // project — the dashboard and the full-page routes keep the split height.
+  const { mode: layoutMode, chatFull } = useLayoutMode()
+  const focusMode = layoutMode === 'focus'
+  const onWorkspace = useLocation().pathname.startsWith('/project/')
+  const isFull = !!status?.available && isVisible && focusMode && onWorkspace
+  const isFullRef = useRef(isFull)
+  isFullRef.current = isFull
+
+  useLayoutEffect(() => {
+    layoutStore.setTerminalFull(isFull)
+    return () => layoutStore.setTerminalFull(false)
+  }, [isFull])
+
+  // Tasks/Editor was clicked: in focus layout the terminal steps aside.
+  useEffect(() => {
+    const handler = () => {
+      if (layoutStore.get().mode === 'focus') setIsVisible(false)
+    }
+    window.addEventListener('shipyard:focus-workspace', handler)
+    return () => window.removeEventListener('shipyard:focus-workspace', handler)
+  }, [])
+
   const panelRef = useRef<HTMLDivElement>(null)
+  const contentRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const dragStartY = useRef(0)
   const dragStartHeight = useRef(0)
@@ -465,8 +491,9 @@ export function TerminalPanel() {
         if (prev && serverIds.has(prev)) return prev
         return null
       })
-      // If recovered sessions exist, show the panel
-      if (sessions.length > 0) {
+      // If recovered sessions exist, show the panel. Not in focus layout:
+      // there "show" means covering the workspace, so the saved state stands.
+      if (sessions.length > 0 && layoutStore.get().mode !== 'focus') {
         setIsVisible(true)
       }
     }).catch(() => {})
@@ -477,11 +504,21 @@ export function TerminalPanel() {
     e.preventDefault()
     isDragging.current = true
     dragStartY.current = e.clientY
-    dragStartHeight.current = panelHeight
+    // Dragging a full-size terminal is how a manual split starts: the first
+    // move switches the layout to split, from the height it has right now.
+    let leaveFull = isFullRef.current
+    dragStartHeight.current = leaveFull && contentRef.current
+      ? contentRef.current.offsetHeight
+      : panelHeight
 
     const handleDragMove = (e: MouseEvent) => {
       if (!isDragging.current) return
       const diff = dragStartY.current - e.clientY
+      if (leaveFull) {
+        if (diff === 0) return
+        leaveFull = false
+        layoutStore.setMode('split')
+      }
       const maxH = window.innerHeight * MAX_HEIGHT_RATIO
       const newHeight = Math.min(maxH, Math.max(MIN_HEIGHT, dragStartHeight.current + diff))
       setPanelHeight(newHeight)
@@ -813,6 +850,8 @@ export function TerminalPanel() {
         : t
     ))
     followTabProject(sessionId)
+    // Focus layout lists the tabs while the panel is closed; a click opens it.
+    setIsVisible(true)
 
     if (splitSessionIdRef.current) {
       // In split mode
@@ -848,6 +887,10 @@ export function TerminalPanel() {
     const match = tabsRef.current.find(t => t.projectId === activeProjectId && !t.exited)
     if (match) {
       setActiveTabId(match.sessionId)
+    } else if (layoutStore.get().mode === 'focus') {
+      // Nothing of this project to show: a full-size terminal of another
+      // project would hide the workspace the user just asked for.
+      setIsVisible(false)
     }
   }, [activeProjectId])
 
@@ -882,7 +925,13 @@ export function TerminalPanel() {
   const someFinished = tabs.some(t => t.finished)
 
   return (
-    <div ref={panelRef} className="relative shrink-0 border-t bg-[#0a0a0f]">
+    <div
+      ref={panelRef}
+      className={cn(
+        'relative border-t bg-[#0a0a0f]',
+        isFull ? 'flex min-h-0 flex-1 flex-col' : 'shrink-0'
+      )}
+    >
       {/* Drag handle */}
       {isVisible && (
         <div
@@ -892,7 +941,7 @@ export function TerminalPanel() {
       )}
 
       {/* Tab bar — always visible */}
-      <div className="flex items-center gap-0.5 px-2 h-8 bg-card/80 border-b border-border/50 select-none">
+      <div className="flex shrink-0 items-center gap-0.5 px-2 h-8 bg-card/80 border-b border-border/50 select-none">
         <Tooltip>
           <TooltipTrigger asChild>
             <button
@@ -925,8 +974,9 @@ export function TerminalPanel() {
         </Tooltip>
 
         {/* Session tabs — they share the width, truncate and can be dragged
-            into a new order, like the project tab strip. */}
-        {isVisible && (
+            into a new order, like the project tab strip. Focus layout keeps
+            them listed while the panel is closed: clicking one opens it. */}
+        {(isVisible || (focusMode && onWorkspace && tabs.length > 0)) && (
           <div className="ml-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
             {tabs.map(tab => {
               const paneIndex: 0 | 1 | null = activeTabId === tab.sessionId
@@ -997,6 +1047,20 @@ export function TerminalPanel() {
         {/* Right actions */}
         {isVisible && tabs.length > 0 && (
           <div className="flex items-center gap-0.5 ml-auto shrink-0">
+            {/* Layout: full-size on click, or a manual split with the workspace */}
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  onClick={() => layoutStore.setMode(focusMode ? 'split' : 'focus')}
+                  className="p-1 transition-colors rounded-sm text-muted-foreground hover:text-foreground hover:bg-background/30"
+                >
+                  {focusMode ? <Rows2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {focusMode ? 'Split with the workspace (or drag the top edge)' : 'Full-size panels'}
+              </TooltipContent>
+            </Tooltip>
             {/* Split toggle */}
             <Tooltip>
               <TooltipTrigger asChild>
@@ -1055,7 +1119,11 @@ export function TerminalPanel() {
 
       {/* Terminal content area */}
       {isVisible && (
-        <div style={{ height: panelHeight }} className="relative">
+        <div
+          ref={contentRef}
+          style={isFull ? undefined : { height: panelHeight }}
+          className={cn('relative', isFull && 'min-h-0 flex-1')}
+        >
           {/* Split divider */}
           {isSplit && (
             <div className="absolute top-0 left-1/2 -translate-x-px w-px h-full bg-border/60 z-10" />
@@ -1075,7 +1143,7 @@ export function TerminalPanel() {
                 key={tab.sessionId}
                 className={cn(
                   isShown ? 'flex flex-col' : 'hidden',
-                  !isSplit && 'h-full',
+                  !isSplit && (isFull ? 'absolute inset-0' : 'h-full'),
                   isSplit && isShown && 'absolute top-0',
                 )}
                 style={isSplit && isShown ? {
@@ -1123,7 +1191,9 @@ export function TerminalPanel() {
                   <Suspense fallback={null}>
                     <IntegratedTerminal
                       sessionId={tab.sessionId}
-                      isActive={isShown}
+                      // Full-size chat hides the whole main column; a fit
+                      // against a zero-size box would shrink the PTY.
+                      isActive={isShown && !chatFull}
                       onExit={handleTabExit}
                       onStateChange={handleTabState}
                     />

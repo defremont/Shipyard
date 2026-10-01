@@ -12,9 +12,12 @@ import rehypeRaw from 'rehype-raw'
 
 interface ChatPanelProps {
   projectId: string
+  /** The chat has the whole window: fill the height and use a reading-size
+   *  column instead of the 256px box that fits the side panel. */
+  expanded?: boolean
 }
 
-export function ChatPanel({ projectId }: ChatPanelProps) {
+export function ChatPanel({ projectId, expanded = false }: ChatPanelProps) {
   const { data: status } = useClaudeStatus()
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -106,14 +109,16 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
     )
   }
 
+  const collapsed = isCollapsed && !expanded
+
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between">
+    <div className={expanded ? 'flex h-full flex-col gap-2' : 'space-y-2'}>
+      <div className="flex shrink-0 items-center justify-between">
         <button
           onClick={() => setIsCollapsed(!isCollapsed)}
           className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground transition-colors"
         >
-          {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           <Sparkles className="h-3.5 w-3.5" />
           Claude AI
         </button>
@@ -131,10 +136,17 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
         </div>
       </div>
 
-      {!isCollapsed && (
-        <div className="border rounded-lg overflow-hidden bg-background">
+      {!collapsed && (
+        <div className={cn(
+          'border rounded-lg overflow-hidden bg-background',
+          expanded && 'flex min-h-0 flex-1 flex-col'
+        )}>
           {/* Messages */}
-          <div className="max-h-64 overflow-y-auto p-2 space-y-2 scrollbar-dark">
+          <div className={cn(
+            'overflow-y-auto scrollbar-dark',
+            expanded ? 'min-h-0 flex-1 p-4' : 'max-h-64 p-2'
+          )}>
+          <div className={cn('space-y-2', expanded && 'mx-auto max-w-3xl space-y-3')}>
             {messages.length === 0 && (
               <p className="text-xs text-muted-foreground text-center py-4">
                 Ask anything about this project...
@@ -142,13 +154,19 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
             )}
             {messages.map((msg, i) => (
               <div key={i} className={cn(
-                'text-xs rounded-lg px-2.5 py-1.5 max-w-[95%]',
+                'rounded-lg max-w-[95%]',
+                expanded ? 'text-sm leading-relaxed px-3.5 py-2.5' : 'text-xs px-2.5 py-1.5',
                 msg.role === 'user'
                   ? 'bg-primary/10 ml-auto text-foreground'
                   : 'bg-muted/50 text-foreground'
               )}>
                 {msg.role === 'assistant' ? (
-                  <div className="prose prose-xs prose-invert max-w-none [&_p]:mb-1 [&_p]:mt-0 [&_pre]:text-[10px] [&_code]:text-[10px] [&_li]:my-0">
+                  <div className={cn(
+                    'prose prose-invert max-w-none [&_p]:mt-0 [&_li]:my-0',
+                    expanded
+                      ? 'prose-sm [&_p]:mb-2 [&_pre]:text-xs [&_code]:text-xs'
+                      : 'prose-xs [&_p]:mb-1 [&_pre]:text-[10px] [&_code]:text-[10px]'
+                  )}>
                     <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a> }}>
                       {msg.content || (isStreaming && i === messages.length - 1 ? '...' : '')}
                     </Markdown>
@@ -160,16 +178,17 @@ export function ChatPanel({ projectId }: ChatPanelProps) {
             ))}
             <div ref={messagesEndRef} />
           </div>
+          </div>
 
           {/* Input */}
-          <div className="border-t p-2 flex gap-1.5">
+          <div className={cn('border-t p-2 flex gap-1.5', expanded && 'shrink-0')}>
             <Textarea
               ref={textareaRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder="Ask Claude..."
-              className="min-h-[32px] max-h-20 text-xs resize-none"
+              className={cn('min-h-[32px] resize-none', expanded ? 'max-h-40 text-sm' : 'max-h-20 text-xs')}
               rows={1}
               disabled={isStreaming}
             />
