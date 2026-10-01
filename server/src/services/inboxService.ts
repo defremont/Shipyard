@@ -8,7 +8,7 @@ import { triggerAutoSync } from './sync/syncEngine.js';
 import * as log from './logService.js';
 
 /**
- * WhatsApp inbox: a hosted service (`C:\Code\whatsapp-inbox`, Railway) reads the
+ * WhatsApp inbox: a hosted service (`C:\Code\dcoder\whatsapp-inbox`, Railway) reads the
  * messages of chosen clients, turns them into demands and holds them for review.
  * Shipyard runs on this machine and cannot take a webhook, so it asks: it keeps
  * a live channel open (SSE) and syncs the moment a demand is approved, and every

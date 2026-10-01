@@ -781,7 +781,7 @@ Shipyard so le):
 globais sao mantidas) — usuarios reconectam cada milestone manualmente.
 
 ### WhatsApp inbox (demandas de clientes → tarefas)
-- Servico proprio em `C:\Code\whatsapp-inbox` (Railway, projeto Personal Projects,
+- Servico proprio em `C:\Code\dcoder\whatsapp-inbox` (Railway, projeto Personal Projects,
   servico `whatsapp-inbox` + `Postgres-hBRV` + volume `/data`), ao lado do
   `Evolution API`. Ele recebe o webhook do WhatsApp, grava so as conversas
   vigiadas, transcreve/descreve midia com Gemini, agrupa em demandas e segura
