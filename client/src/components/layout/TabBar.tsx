@@ -8,10 +8,21 @@ import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
 import { useQueryClient } from '@tanstack/react-query'
 import { prefetchProject } from '@/lib/prefetch'
 import { ContextMenuItem, ContextMenuSeparator } from '@/components/ui/context-menu'
+import { useTerminalTabs, worstStatus, type SessionStatus, type TerminalTabInfo } from '@/hooks/useTerminalTabs'
+import { SessionStatusIcon } from '@/components/terminals/SessionStatusIcon'
 
-const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDragging, isDragOver, onSwitch, onHover, onClose, onCloseOthers, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
+const STATUS_TEXT: Partial<Record<SessionStatus, string>> = {
+  question: 'an agent is waiting for an answer',
+  finished: 'an agent has finished',
+  busy: 'agents working',
+}
+
+const ProjectTab = memo(function ProjectTab({ tabId, project, status, sessionCount, isActive, isDragging, isDragOver, onSwitch, onHover, onClose, onCloseOthers, onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop }: {
   tabId: string
   project?: Project
+  /** The most urgent thing any terminal of this project has to say. */
+  status: SessionStatus
+  sessionCount: number
   isActive: boolean
   isDragging: boolean
   isDragOver: boolean
@@ -46,7 +57,7 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        'group relative flex h-7 min-w-0 max-w-[160px] basis-0 flex-1 items-center overflow-hidden transition-colors cursor-grab active:cursor-grabbing',
+        'app-no-drag group relative flex h-7 min-w-0 max-w-[160px] basis-0 flex-1 items-center overflow-hidden transition-colors cursor-grab active:cursor-grabbing',
         isActive
           ? 'bg-background text-foreground shadow-sm ring-1 ring-border/80'
           : 'text-muted-foreground hover:bg-background/60 hover:text-foreground',
@@ -57,9 +68,17 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
       <button
         className="flex h-full min-w-0 flex-1 items-center px-2 text-left text-[11px] font-medium leading-none"
         onClick={onSwitch}
-        title={`${label} — ${project?.path || tabId}`}
+        title={[
+          `${label} — ${project?.path || tabId}`,
+          sessionCount > 0 && `${sessionCount} terminal${sessionCount === 1 ? '' : 's'}${STATUS_TEXT[status] ? ` · ${STATUS_TEXT[status]}` : ''}`,
+        ].filter(Boolean).join('\n')}
       >
+        {/* What this project's agents are doing, without opening it */}
+        {status !== 'none' && status !== 'exited' && <SessionStatusIcon status={status} className="mr-1.5" />}
         <span className="min-w-0 truncate">{label}</span>
+        {sessionCount > 1 && (
+          <span className="ml-1.5 shrink-0 text-[9px] tabular-nums text-muted-foreground/60">{sessionCount}</span>
+        )}
       </button>
       <span className="ml-auto flex h-full shrink-0 items-center gap-0.5 pr-1">
         {hasLocalChanges && (
@@ -113,8 +132,22 @@ const ProjectTab = memo(function ProjectTab({ tabId, project, isActive, isDraggi
   )
 })
 
-export function TabBar() {
+/**
+ * The project tabs. `embedded` draws them inside the desktop title bar (one
+ * row for window, menus and projects) instead of in a bar of their own.
+ */
+export function TabBar({ embedded = false }: { embedded?: boolean }) {
   const { tabs, activeTabId, switchTab, closeTab, closeOtherTabs, reorderTabs } = useTabs()
+  const sessions = useTerminalTabs()
+  const sessionsByProject = useMemo(() => {
+    const map = new Map<string, TerminalTabInfo[]>()
+    for (const session of sessions) {
+      const list = map.get(session.projectId)
+      if (list) list.push(session)
+      else map.set(session.projectId, [session])
+    }
+    return map
+  }, [sessions])
   const { data: projects } = useProjects()
   const location = useLocation()
   const navigate = useNavigate()
@@ -129,12 +162,17 @@ export function TabBar() {
   const isHome = ['/', '/tasks', '/settings', '/help', '/logs'].includes(location.pathname)
 
   return (
-    <div className="flex h-9 shrink-0 items-center gap-1 overflow-hidden border-b bg-card/70 px-1 backdrop-blur-sm">
+    <div className={cn(
+      'flex items-center gap-1 overflow-hidden',
+      embedded
+        ? 'h-full min-w-0 flex-1'
+        : 'h-9 shrink-0 border-b bg-card/70 px-1 backdrop-blur-sm'
+    )}>
       <button
         aria-label="Home"
         title="Home"
         className={cn(
-          'flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors',
+          'app-no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded transition-colors',
           isHome
             ? 'bg-background text-foreground shadow-sm ring-1 ring-border/80'
             : 'text-muted-foreground hover:bg-background/60 hover:text-foreground'
@@ -150,6 +188,8 @@ export function TabBar() {
             key={tab.id}
             tabId={tab.id}
             project={projectById.get(tab.id)}
+            status={worstStatus(sessionsByProject.get(tab.id) || [])}
+            sessionCount={sessionsByProject.get(tab.id)?.length || 0}
             isActive={tab.id === activeTabId}
             isDragging={draggingId === tab.id}
             isDragOver={dragOverId === tab.id && draggingId !== tab.id}

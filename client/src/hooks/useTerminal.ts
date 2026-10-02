@@ -22,16 +22,17 @@ export function useTerminalSessions(projectId?: string) {
 
 /**
  * Every live session, polled while the terminal panel has tabs. This is how a
- * tab picks up a label written after it was opened — the AI summary of a shell,
- * or a rename done elsewhere. The route reads an in-memory map, so it is cheap.
+ * tab learns its label and what its CLI is doing while its terminal is not
+ * mounted (the socket only exists for a mounted terminal). The route reads an
+ * in-memory map, so it is cheap.
  */
 export function useLiveTerminalSessions(enabled: boolean) {
   return useQuery({
     queryKey: ['terminal', 'sessions', 'all'],
     queryFn: () => api.getTerminalSessions(),
     enabled,
-    refetchInterval: 10_000,
-    staleTime: 5_000,
+    refetchInterval: 3_000,
+    staleTime: 2_000,
   })
 }
 

@@ -10,6 +10,7 @@ import {
   writeToSession,
   resizeSession,
   setStateListener,
+  setLabelListener,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
 import * as taskStore from '../services/taskStore.js';
@@ -147,6 +148,7 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         typeLabel: session?.typeLabel,
         taskTitle: session?.taskTitle,
         taskNumber: session?.taskNumber,
+        state: session?.state,
       };
     }
   );
@@ -267,6 +269,13 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         socket.send(JSON.stringify({ type: 'state', state: currentState }));
       }
 
+      // The tab label is written after the tab exists (the topic Claude Code
+      // gives its terminal, or the AI summary of a shell). Pushing it here
+      // puts it on the tab at once instead of at the next poll.
+      setLabelListener(sessionId, summary => {
+        if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'label', summary: summary ?? null }));
+      });
+
       const cleanup = () => {
         if (flushTimer) clearTimeout(flushTimer);
         onData.dispose();
@@ -276,6 +285,7 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         // still ours, or a reconnect would silently lose state updates.
         if (activeConnections.get(sessionId)?.socket === socket) {
           setStateListener(sessionId, undefined);
+          setLabelListener(sessionId, undefined);
         }
       };
 

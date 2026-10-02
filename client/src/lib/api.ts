@@ -58,8 +58,11 @@ export interface TerminalSessionInfo {
   taskNumber?: number
   /** Name the user typed for the tab — wins over everything else. */
   customTitle?: string
-  /** AI-written label for a shell, from its own output. */
+  /** What the tab is about: the topic Claude Code gives its terminal, or an
+   *  AI-written label for a shell. */
   summary?: string
+  /** What a Claude session is doing right now. */
+  state?: 'busy' | 'awaiting-input' | 'idle' | 'finished'
 }
 
 export interface AppSettings {

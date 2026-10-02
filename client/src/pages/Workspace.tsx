@@ -5,7 +5,7 @@ import { useProjects, useUpdateProject, useLaunchTerminal, useOpenFolder } from 
 import { Badge } from '@/components/ui/badge'
 import {
   GitBranch, Star, ExternalLink, Link2, Settings, Code2, LayoutList,
-  Play, Monitor, FolderOpen, Sparkles, MoreHorizontal,
+  Play, Monitor, FolderOpen, Sparkles, MoreHorizontal, PanelLeft,
 } from 'lucide-react'
 // CodeMirror and its language modes only matter once the user opens a file.
 const EditorPanel = lazy(() =>
@@ -23,7 +23,8 @@ import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
 import { useTerminalStatus } from '@/hooks/useTerminal'
-import { useLayoutMode } from '@/hooks/useLayoutMode'
+import { layoutStore, useLayoutMode } from '@/hooks/useLayoutMode'
+import { TaskRail } from '@/components/tasks/TaskRail'
 import { DeployBadge } from '@/components/deploy/DeployBadge'
 import { toast } from 'sonner'
 
@@ -122,7 +123,7 @@ export function Workspace() {
 
   // Focus layout: an open terminal has the work area. Only the toolbar stays,
   // with neither mode lit — clicking one brings the workspace back.
-  const { terminalFull } = useLayoutMode()
+  const { terminalFull, taskRail } = useLayoutMode()
 
   if (!project) {
     return (
@@ -134,50 +135,55 @@ export function Workspace() {
 
   return (
     <div className={cn('overflow-hidden flex flex-col', !terminalFull && 'flex-1')}>
-      {/* ── Project toolbar ── */}
-      <div className="h-10 px-4 flex items-center gap-2 border-b shrink-0 bg-card/30">
-        {/* Identity */}
-        <button
-          onClick={() => updateProject.mutate({ id: project.id, favorite: !project.favorite })}
-          className="shrink-0"
-        >
-          <Star className={cn(
-            'h-3.5 w-3.5 transition-colors',
-            project.favorite ? 'fill-warning text-warning' : 'text-muted-foreground/20 hover:text-warning'
-          )} />
-        </button>
-        <span className="text-[13px] font-medium text-foreground shrink-0">{project.name}</span>
+      {/* ── Project toolbar ──
+          One row for the project and its sessions: the task rail toggle, the
+          session tabs (TerminalPanel draws them into the slot), the two full
+          views and the project state. The project name is not repeated here —
+          the project tab already says it. */}
+      <div className="flex h-9 shrink-0 items-center gap-1.5 border-b bg-card/30 px-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={() => layoutStore.setTaskRail(!taskRail)}
+              aria-pressed={taskRail}
+              className={cn(
+                'flex h-6 shrink-0 items-center gap-1.5 rounded px-2 text-[11px] font-medium transition-colors',
+                taskRail
+                  ? 'bg-background text-foreground shadow-sm ring-1 ring-border/80'
+                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
+              )}
+            >
+              <PanelLeft className="h-3 w-3" />
+              Tasks
+            </button>
+          </TooltipTrigger>
+          <TooltipContent>Task list beside the terminal and the editor</TooltipContent>
+        </Tooltip>
 
-        {project.isGitRepo && project.gitBranch && (
-          <Badge variant="outline" className="text-[10px] gap-1 font-mono h-5">
-            <GitBranch className="h-2.5 w-2.5" />
-            {project.gitBranch}
-            {project.gitDirty && ' *'}
-          </Badge>
-        )}
+        <div className="h-4 w-px shrink-0 bg-border" />
 
-        {/* Nothing is drawn when the project has no deploy linked */}
-        <DeployBadge projectId={project.id} />
+        {/* Session tabs land here */}
+        <div ref={layoutStore.setTabSlot} className="flex min-w-0 flex-1 items-center" />
 
-        {/* Mode toggle */}
-        <div className="flex items-center ml-auto shrink-0">
-          <div className="flex items-center h-7 rounded-md border bg-muted/30 p-0.5">
+        {/* Full views */}
+        <div className="flex shrink-0 items-center">
+          <div className="flex h-7 items-center rounded-md border bg-muted/30 p-0.5">
             <button
               onClick={() => setWorkspaceMode('tasks')}
               className={cn(
-                'flex items-center gap-1.5 px-2.5 h-6 rounded text-[11px] font-medium transition-colors',
+                'flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors',
                 workspaceMode === 'tasks' && !terminalFull
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
               <LayoutList className="h-3 w-3" />
-              Tasks
+              Board
             </button>
             <button
               onClick={() => setWorkspaceMode('editor')}
               className={cn(
-                'flex items-center gap-1.5 px-2.5 h-6 rounded text-[11px] font-medium transition-colors',
+                'flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors',
                 workspaceMode === 'editor' && !terminalFull
                   ? 'bg-background text-foreground shadow-sm'
                   : 'text-muted-foreground hover:text-foreground'
@@ -189,10 +195,21 @@ export function Workspace() {
           </div>
         </div>
 
+        {project.isGitRepo && project.gitBranch && (
+          <Badge variant="outline" className="hidden h-5 shrink-0 gap-1 font-mono text-[10px] min-[1100px]:inline-flex">
+            <GitBranch className="h-2.5 w-2.5" />
+            {project.gitBranch}
+            {project.gitDirty && ' *'}
+          </Badge>
+        )}
+
+        {/* Nothing is drawn when the project has no deploy linked */}
+        <DeployBadge projectId={project.id} />
+
         {/* Claude is the core workflow — one click, no popover in the way.
             Right-click offers the YOLO variant and the rest of the project
             actions. */}
-        <div className="flex items-center gap-0.5 shrink-0 ml-2">
+        <div className="flex shrink-0 items-center gap-0.5">
           {/* Both triggers clone their child, so each needs a real DOM node to
               attach to — the span is what the context menu binds to. */}
           <ProjectContextMenu project={project} onOpenSettings={() => openSettings()}>
@@ -201,20 +218,15 @@ export function Workspace() {
                 <TooltipTrigger asChild>
                   <button
                     onClick={() => launchClaude(project)}
-                    className={cn(
-                      'p-1.5 rounded-md hover:bg-accent transition-colors relative',
-                      skipPermissions
-                        ? 'text-warning/90 hover:text-warning'
-                        : 'text-muted-foreground/40 hover:text-primary',
-                    )}
+                    className="flex h-7 items-center gap-1.5 rounded-md border px-2.5 text-[11px] font-medium text-foreground transition-colors hover:bg-accent"
                   >
-                    <Sparkles className="h-3.5 w-3.5" />
-                    {skipPermissions && (
-                      <span className="absolute -top-0.5 -right-0.5 text-[8px] font-bold text-warning leading-none">Y</span>
-                    )}
+                    <Sparkles className="h-3 w-3 text-muted-foreground" />
+                    {skipPermissions ? 'Claude YOLO' : 'Claude'}
                   </button>
                 </TooltipTrigger>
-                <TooltipContent>{skipPermissions ? 'Claude Code (YOLO)' : 'Claude Code'}</TooltipContent>
+                <TooltipContent>
+                  {skipPermissions ? 'Open Claude Code, skipping permissions' : 'Open Claude Code'} · right-click for more
+                </TooltipContent>
               </Tooltip>
             </span>
           </ProjectContextMenu>
@@ -234,6 +246,10 @@ export function Workspace() {
             >
               Skip permissions (YOLO)
             </DropdownMenuCheckboxItem>
+            <DropdownMenuItem onClick={() => updateProject.mutate({ id: project.id, favorite: !project.favorite })}>
+              <Star className={cn(project.favorite && 'fill-warning text-warning')} />
+              {project.favorite ? 'Remove from favorites' : 'Add to favorites'}
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => handleLaunch('dev', 'Dev Server')}>
               <Play />
@@ -276,6 +292,9 @@ export function Workspace() {
 
       {/* ── Main content ── */}
       <div className={cn('flex-1 overflow-hidden min-h-0', terminalFull ? 'hidden' : 'flex')}>
+        {/* The board is the task list at full size, so the rail only joins
+            the editor here (Layout puts it beside the terminal). */}
+        {taskRail && workspaceMode === 'editor' && !terminalFull && <TaskRail projectId={project.id} />}
         <div className={cn(
           'flex-1 min-w-0 flex flex-col',
           workspaceMode === 'tasks' && 'overflow-y-auto px-3 py-2 scrollbar-dark'

@@ -57,8 +57,15 @@ export interface TerminalSession {
   taskNumber?: number;
   /** Name the user typed for this tab. Wins over every other label. */
   customTitle?: string;
-  /** Short AI-written label for a plain shell, from its own output */
+  /** What the tab is about when no task names it: the topic Claude Code puts
+   *  in the terminal title, or an AI-written label for a plain shell */
   summary?: string;
+  /** Claude Code is naming this terminal itself — the AI summary stands down */
+  titled?: boolean;
+  /** Prompt injection is still under way: the screen is not classified yet */
+  watchHold?: boolean;
+  /** Set by the WS layer — called when `summary` changes */
+  onLabelChange?: (summary: string | undefined) => void;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -214,7 +221,11 @@ export async function createSession(
   // soon as someone types `claude` in it, and the watcher stays silent until
   // the screen says so.
   if (prompt && injectPrompt) {
-    injectPromptWhenReady(id, prompt, () => startOutputWatcher(id, { working: true }));
+    // The watcher is attached from the start so it sees the title the CLI
+    // writes as soon as the prompt lands; it only starts judging the screen
+    // once the injection is over.
+    startOutputWatcher(id, { hold: true });
+    injectPromptWhenReady(id, prompt, () => releaseOutputWatcher(id));
   } else {
     startOutputWatcher(id);
   }
@@ -246,11 +257,13 @@ export function killSession(id: string): boolean {
   return true;
 }
 
-export function listSessions(projectId?: string): Omit<TerminalSession, 'pty' | 'onStateChange'>[] {
-  const list: Omit<TerminalSession, 'pty' | 'onStateChange'>[] = [];
+type SessionInfo = Omit<TerminalSession, 'pty' | 'onStateChange' | 'onLabelChange'>;
+
+export function listSessions(projectId?: string): SessionInfo[] {
+  const list: SessionInfo[] = [];
   for (const session of sessions.values()) {
     if (!projectId || session.projectId === projectId) {
-      const { pty, onStateChange, ...rest } = session;
+      const { pty, onStateChange, onLabelChange, ...rest } = session;
       list.push(rest);
     }
   }
@@ -284,11 +297,11 @@ function applyPendingResize(id: string): void {
   try { session.pty.resize(pending.cols, pending.rows); } catch {}
 }
 
-export function listAiSessions(): Omit<TerminalSession, 'pty' | 'onStateChange'>[] {
-  const list: Omit<TerminalSession, 'pty' | 'onStateChange'>[] = [];
+export function listAiSessions(): SessionInfo[] {
+  const list: SessionInfo[] = [];
   for (const session of sessions.values()) {
     if (session.taskId) {
-      const { pty, onStateChange, ...rest } = session;
+      const { pty, onStateChange, onLabelChange, ...rest } = session;
       list.push(rest);
     }
   }
@@ -615,7 +628,12 @@ const DECISION_RE = /Do you want|❯\s*\d[.)]|\(y\/n\)/i;
 // prompt character and nothing else, or the greyed-out suggestion the CLI
 // shows in an empty box. Anchoring on the end of the raw output cannot work —
 // a TUI redraw ends in cursor moves, never in the prompt.
-const IDLE_PROMPT_RE = /^[│|]?\s*[>❯]\s*(?:│\s*)?(?:Try\s*".*)?$/;
+//
+// The rule drawn above the box is as wide as the terminal, so the terminal
+// wraps it without a line break and the prompt arrives glued to its end
+// ("────────❯ Try …"). The leading run of rule characters allows for that;
+// without it a freshly opened CLI was never seen as idle.
+const IDLE_PROMPT_RE = /^[│|─━\s]*[>❯]\s*(?:│\s*)?(?:Try\s*".*)?$/;
 
 // How far back to read the screen. The box sits above the status line, the
 // hint line and whatever warning the CLI decided to print today, so a short
@@ -649,6 +667,50 @@ function setSessionState(id: string, state: TerminalState): void {
   try { session.onStateChange?.(state); } catch {}
 }
 
+function setSessionSummary(id: string, summary: string): void {
+  const session = sessions.get(id);
+  if (!session || session.summary === summary) return;
+  session.summary = summary;
+  try { session.onLabelChange?.(summary); } catch {}
+}
+
+// ── What Claude Code says about itself ─────────────────────────────────
+//
+// The CLI keeps the terminal title up to date (OSC 0): a glyph and then either
+// its own name or the topic of the conversation — "✳ Claude Code" at rest,
+// "◐ Nomes das abas do terminal" while it works. That is a better source than
+// anything read off the screen: it arrives a second after the first prompt, in
+// the user's language, costs no AI call, and the glyph says whether a run is
+// in flight.
+
+const OSC_TITLE_RE = /\x1b\][02];([^\x07\x1b]*)(?:\x07|\x1b\\)/g;
+const CLAUDE_TITLE_NAME = 'Claude Code';
+const TITLE_REST_GLYPH = '✳';
+const TITLE_MAX_LENGTH = 60;
+
+/** Split a title into its leading glyph and the text after it. */
+function parseTitle(title: string): { glyph: string; text: string } | null {
+  const match = title.trim().match(/^([^\p{L}\p{N}\s])\s+(.+)$/u);
+  return match ? { glyph: match[1], text: match[2].trim() } : null;
+}
+
+// A question asked in plain prose leaves the CLI at an ordinary empty prompt,
+// with nothing a dialog regex could catch. The only trace is the text above
+// the box, so that is where to look.
+const RULE_LINE_RE = /^[─━│┃╭╮╰╯|\-_=\s]+$/;
+const QUESTION_LINES = 6;
+
+function asksSomething(screen: string[]): boolean {
+  let promptAt = -1;
+  for (let i = screen.length - 1; i >= 0; i--) {
+    if (IDLE_PROMPT_RE.test(screen[i])) { promptAt = i; break; }
+  }
+  const above = (promptAt === -1 ? screen : screen.slice(0, promptAt))
+    .filter(line => !RULE_LINE_RE.test(line))
+    .slice(-QUESTION_LINES);
+  return above.some(line => /[?？]$/.test(line));
+}
+
 /**
  * Watch a session's output and say what Claude is doing in it: busy,
  * awaiting-input, idle, or finished. Strictly read-only — it never writes to
@@ -658,8 +720,17 @@ function setSessionState(id: string, state: TerminalState): void {
  * It runs on every session, because a shell becomes a Claude session the
  * moment someone types `claude` in it, and stays silent until the screen says
  * Claude is there.
+ *
+ * `awaiting-input` and `finished` are sticky: only the user answering (real
+ * input) or a new run takes them away. Output alone does not — a TUI repaints
+ * while it sits idle, and treating that as "busy again" dropped the flag
+ * before anyone had seen it.
  */
 const watchers = new Map<string, { timer: NodeJS.Timeout; dispose: () => void }>();
+
+const WATCH_BUSY_CHECK = 2_000;
+const DECISION_FRAME_LINES = 4;
+const RUNNING_TAIL_LINES = 6;
 
 function stopOutputWatcher(id: string): void {
   const watcher = watchers.get(id);
@@ -669,34 +740,106 @@ function stopOutputWatcher(id: string): void {
   try { watcher.dispose(); } catch {}
 }
 
-function startOutputWatcher(sessionId: string, options?: { working?: boolean }): void {
+/** The injected prompt has landed: from here on the screen is judged. */
+function releaseOutputWatcher(id: string): void {
+  const session = sessions.get(id);
+  if (!session) return;
+  session.watchHold = false;
+  session.working = true;
+  setSessionState(id, 'busy');
+}
+
+function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): void {
   const session = sessions.get(sessionId);
   if (!session || session.watching) return;
   session.watching = true;
-  // An injected prompt is work already under way; a bare CLI is not, and its
-  // first idle prompt only means it finished booting.
-  if (options?.working) session.working = true;
+  if (options?.hold) session.watchHold = true;
 
   let tail = '';
+  let titleCarry = '';
   let lastOutputTime = Date.now();
+  let lastBusyCheck = 0;
   let sawOutput = false;
   let sawClaude = false;
+
+  /** The CLI has just shown itself. Typing `claude` and pressing Enter counts
+   *  as input, but booting is not work, so the first prompt it draws must not
+   *  be announced as a finished run. */
+  const markClaude = () => {
+    if (sawClaude) return;
+    sawClaude = true;
+    const current = sessions.get(sessionId);
+    if (!current) return;
+    if (!current.watchHold) current.working = false;
+    // A shell someone typed `claude` into has no state yet.
+    if (!current.state) setSessionState(sessionId, 'busy');
+  };
+
+  const readTitles = (data: string) => {
+    // A title can be cut by a chunk boundary, so the unfinished part waits
+    // for the next chunk.
+    const text = titleCarry + data;
+    const open = text.lastIndexOf('\x1b]');
+    titleCarry = open !== -1 && !/\x07|\x1b\\/.test(text.slice(open + 2)) ? text.slice(open, open + 512) : '';
+
+    for (const match of text.matchAll(OSC_TITLE_RE)) {
+      const title = parseTitle(match[1]);
+      if (!title) continue;
+      const current = sessions.get(sessionId);
+      if (!current) return;
+      // Only a terminal that has introduced itself as Claude Code is trusted
+      // from then on — any program may put a symbol in front of its title.
+      if (title.text === CLAUDE_TITLE_NAME) current.titled = true;
+      if (!current.titled) continue;
+      markClaude();
+
+      if (title.text !== CLAUDE_TITLE_NAME) {
+        const label = title.text.length > TITLE_MAX_LENGTH
+          ? title.text.slice(0, TITLE_MAX_LENGTH - 1) + '…'
+          : title.text;
+        setSessionSummary(sessionId, label);
+      }
+      // Any glyph but the resting one is the spinner: a run is in flight.
+      if (title.glyph !== TITLE_REST_GLYPH && !current.watchHold) {
+        current.working = true;
+        setSessionState(sessionId, 'busy');
+      }
+    }
+  };
 
   const disposable = session.pty.onData((data: string) => {
     lastOutputTime = Date.now();
     sawOutput = true;
     tail += data;
     if (tail.length > 8_000) tail = tail.slice(-4_000);
-    if (sawClaude) setSessionState(sessionId, 'busy');
+    if (titleCarry || data.includes('\x1b]')) readTitles(data);
   });
 
   const timer = setInterval(() => {
-    if (!sessions.has(sessionId)) {
+    const current = sessions.get(sessionId);
+    if (!current) {
       stopOutputWatcher(sessionId);
       return;
     }
     if (!sawOutput) return;
-    if (Date.now() - lastOutputTime < WATCH_SETTLE_TIME) return;
+    // During the wait for prompt injection the CLI shows an idle prompt that
+    // would read as a false 'idle'.
+    if (current.watchHold) return;
+
+    const now = Date.now();
+    if (now - lastOutputTime < WATCH_SETTLE_TIME) {
+      // Output that never settles is a run in flight (the spinner redraws ten
+      // times a second), so it has to be recognised without waiting for a
+      // pause that will not come.
+      if (sawClaude && current.state !== 'busy' && now - lastBusyCheck >= WATCH_BUSY_CHECK) {
+        lastBusyCheck = now;
+        if (lastLines(cleanTerminalOutput(tail)).slice(-RUNNING_TAIL_LINES).some(line => RUNNING_RE.test(line))) {
+          current.working = true;
+          setSessionState(sessionId, 'busy');
+        }
+      }
+      return;
+    }
 
     // Output has settled — decide what the CLI is showing, then start a fresh
     // buffer. Keeping the old text would let one answered permission dialog
@@ -708,39 +851,48 @@ function startOutputWatcher(sessionId: string, options?: { working?: boolean }):
     // Once the CLI has shown itself, the session is a Claude session until it
     // dies — a later frame that draws only the spinner still belongs to it.
     if (!sawClaude && !looksLikeClaude(clean)) return;
-    if (!sawClaude) {
-      // The CLI has just appeared on screen. Typing `claude` and pressing
-      // Enter counts as input, but booting is not work, so the first prompt
-      // it draws must not be announced as a finished run.
-      sawClaude = true;
-      const current = sessions.get(sessionId);
-      if (current) current.working = false;
-    }
+    markClaude();
 
     // Read the screen as it stands, not the whole buffer: one settled chunk
     // holds every frame drawn since the last one, so an "esc to interrupt"
     // from a run that has already ended would answer for the run that has.
     const screen = lastLines(clean);
-    const text = screen.join('\n');
 
-    if (DECISION_RE.test(text)) {
+    // One settled chunk holds every frame drawn since the last one — a short
+    // run fits in it whole, "esc to interrupt" and the final prompt alike. So
+    // what counts is which mark was drawn last, not which marks are present.
+    const lastIndex = (test: (line: string) => boolean) => {
+      for (let i = screen.length - 1; i >= 0; i--) if (test(screen[i])) return i;
+      return -1;
+    };
+    const decisionAt = lastIndex(line => DECISION_RE.test(line));
+    const runningAt = lastIndex(line => RUNNING_RE.test(line));
+    const idleAt = lastIndex(line => IDLE_PROMPT_RE.test(line));
+
+    // A dialog redraws the input area around itself, so a prompt a few lines
+    // after it belongs to the same frame, not to a later one.
+    if (decisionAt !== -1 && decisionAt > runningAt && idleAt <= decisionAt + DECISION_FRAME_LINES) {
+      current.working = false;
       setSessionState(sessionId, 'awaiting-input');
       return;
     }
-    if (RUNNING_RE.test(text)) {
+    if (runningAt > idleAt) {
+      current.working = true;
       setSessionState(sessionId, 'busy');
       return;
     }
-    if (!screen.some(line => IDLE_PROMPT_RE.test(line))) return;
+    if (idleAt === -1) return;
 
     // Back at an empty prompt: a run just ended, or the CLI was never given
     // anything to do. Only the first is worth telling the user about, and it
-    // is announced once — the next one needs new work behind it.
-    const current = sessions.get(sessionId);
-    if (current?.working) {
+    // is announced once — the next one needs new work behind it. A run that
+    // ended on a question is waiting for an answer, not merely done.
+    if (current.working) {
       current.working = false;
-      setSessionState(sessionId, 'finished');
-    } else {
+      setSessionState(sessionId, asksSomething(screen) ? 'awaiting-input' : 'finished');
+    } else if (current.state === 'busy' || !current.state) {
+      // Never downgrade a flag that is still waiting to be seen: an idle
+      // repaint of the same screen is not news.
       setSessionState(sessionId, 'idle');
     }
   }, WATCH_TICK);
@@ -815,7 +967,9 @@ function startSummaryWatcher(sessionId: string): void {
     }
     // A hand-typed name is the user's, and the setting can be turned off
     // while sessions are open.
-    if (running || current.customTitle || !aiTitlesEnabled()) return;
+    // Claude Code names its own terminal (see readTitles); asking the AI on
+    // top of that only produced labels like "Claude Code session started".
+    if (running || current.customTitle || current.titled || !aiTitlesEnabled()) return;
 
     const now = Date.now();
     if (freshChars < SUMMARY_MIN_CHARS) return;
@@ -831,7 +985,7 @@ function startSummaryWatcher(sessionId: string): void {
         failures = 0;
         if (!label) return;
         const live = sessions.get(sessionId);
-        if (live && !live.customTitle) live.summary = label;
+        if (live && !live.customTitle && !live.titled) setSessionSummary(sessionId, label);
       })
       .catch(() => {
         failures += 1;
@@ -854,8 +1008,23 @@ function startSummaryWatcher(sessionId: string): void {
 function noteSessionInput(id: string, data?: string): void {
   const session = sessions.get(id);
   if (!session?.state) return;
+  // xterm answers the CLI's own queries (focus in/out, cursor position,
+  // device attributes, mouse reports) on the input channel. Nobody typed
+  // those, and counting them as an answer cleared the flag unseen.
+  if (data !== undefined && isTerminalReport(data)) return;
   if (data === undefined || /[\r\n]/.test(data)) session.working = true;
   if (session.state !== 'busy') setSessionState(id, 'busy');
+}
+
+const TERMINAL_REPORT_RE = /\x1b\[[IO]|\x1b\[[?>]?[\d;]*[Rcn]|\x1b\[<[\d;]+[Mm]|\x1b\[M[\s\S]{3}|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1bP[^\x1b]*\x1b\\/g;
+
+function isTerminalReport(data: string): boolean {
+  return data.includes('\x1b') && data.replace(TERMINAL_REPORT_RE, '') === '';
+}
+
+export function setLabelListener(id: string, listener: ((summary: string | undefined) => void) | undefined): void {
+  const session = sessions.get(id);
+  if (session) session.onLabelChange = listener;
 }
 
 export function setStateListener(id: string, listener: ((state: TerminalState) => void) | undefined): TerminalState | null {

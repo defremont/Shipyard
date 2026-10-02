@@ -1,6 +1,12 @@
-import { useState, useRef, useCallback, useEffect, useLayoutEffect, memo, lazy, Suspense } from 'react'
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, memo, lazy, Suspense } from 'react'
+import { createPortal } from 'react-dom'
 import { useLocation } from 'react-router-dom'
-import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, CheckCircle2, Columns2, MessageCircleQuestion, Pencil, Maximize2, Rows2 } from 'lucide-react'
+import { Plus, X, ChevronDown, ChevronUp, Terminal, Trash2, ExternalLink, Sparkles, XCircle, Columns2, Pencil, Maximize2, Rows2, Play, Monitor } from 'lucide-react'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { SessionStatusIcon } from './SessionStatusIcon'
+import { terminalTabsStore, type SessionStatus } from '@/hooks/useTerminalTabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
@@ -39,6 +45,8 @@ interface GlobalTab {
   /** Claude CLI came back to an empty prompt after working. Same transience:
    *  it is a moment, not a property of the session. */
   finished?: boolean
+  /** What the CLI is doing, as last reported by the server. Transient too. */
+  state?: TerminalState
   taskId?: string
   taskNumber?: number
   /** Label parts the server keeps for this session — see describeTab(). */
@@ -59,6 +67,19 @@ function labelFieldsOf(session: any): Partial<GlobalTab> {
     summary: session?.summary,
     ...(session?.taskNumber ? { taskNumber: session.taskNumber } : {}),
   }
+}
+
+/**
+ * One status per tab, shown by one icon. A question stays lit until it is
+ * answered — the tab being open does not make the CLI any less blocked — while
+ * "finished" is news and goes away once seen.
+ */
+function tabStatus(tab: GlobalTab): SessionStatus {
+  if (tab.exited) return tab.hasNotification ? 'finished' : 'exited'
+  if (tab.state === 'awaiting-input') return 'question'
+  if (tab.finished) return 'finished'
+  if (tab.state === 'busy') return 'busy'
+  return tab.state ? 'idle' : 'none'
 }
 
 /** The old one-string title, "[Project] Shell", split back into its halves. */
@@ -88,9 +109,11 @@ function describeTab(tab: GlobalTab): { number: string; project: string; detail:
   if (tab.customTitle) tooltip.push(tab.customTitle)
   if (taskLabel) tooltip.push(taskLabel)
   else if (tab.summary) tooltip.push(tab.summary)
+  const status = tabStatus(tab)
   if (tab.exited) tooltip.push('Process exited')
-  else if (tab.finished) tooltip.push('Finished — waiting at the prompt')
-  else if (tab.awaitingInput) tooltip.push('Waiting for an answer')
+  else if (status === 'question') tooltip.push('Waiting for an answer')
+  else if (status === 'finished') tooltip.push('Finished — waiting at the prompt')
+  else if (status === 'busy') tooltip.push('Working')
   return { number, project, detail, tooltip }
 }
 
@@ -140,6 +163,9 @@ interface TerminalTabProps {
   /** Which pane shows this tab (0 left, 1 right), or null when it is hidden. */
   paneIndex: 0 | 1 | null
   isSplit: boolean
+  /** False when the strip only lists the open project's sessions — the
+   *  project tab already says whose they are. */
+  showProject: boolean
   isDragging: boolean
   isDragOver: boolean
   isRenaming: boolean
@@ -160,7 +186,7 @@ interface TerminalTabProps {
 }
 
 const TerminalTab = memo(function TerminalTab({
-  tab, paneIndex, isSplit, isDragging, isDragOver, isRenaming,
+  tab, paneIndex, isSplit, showProject, isDragging, isDragOver, isRenaming,
   onClick, onClose, onCloseOthers, onCloseAll, onOpenExternal, onClearExited,
   onRenameStart, onRenameCommit, onRenameCancel,
   onDragStart, onDragEnd, onDragOver, onDragLeave, onDrop,
@@ -228,25 +254,10 @@ const TerminalTab = memo(function TerminalTab({
           {paneIndex + 1}
         </span>
       )}
-      {/* The agent is done: same check as an exited task tab, because to the
-          user it is the same news — the run ended while they were elsewhere. */}
-      {tab.finished && !tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
-      {tab.taskId && !tab.exited && !tab.finished && (
-        <Sparkles className="h-3 w-3 shrink-0 animate-pulse text-primary" />
-      )}
-      {tab.taskId && tab.exited && <CheckCircle2 className="h-3 w-3 shrink-0 text-success" />}
-      {tab.awaitingInput && !tab.exited && (
-        <MessageCircleQuestion className="h-3 w-3 shrink-0 text-warning animate-pulse" />
-      )}
-      {tab.hasNotification && (
-        <span className="relative flex h-2 w-2 shrink-0">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-warning opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-warning" />
-        </span>
-      )}
+      <SessionStatusIcon status={tabStatus(tab)} />
       <span className="min-w-0 flex-1 truncate text-left">
         {number && <span className="tabular-nums">{number} </span>}
-        {project && <span className="opacity-50">{project} · </span>}
+        {showProject && project && <span className="opacity-50">{project} · </span>}
         {detail}
       </span>
       <button
@@ -320,9 +331,20 @@ export function TerminalPanel() {
 
   // Focus layout: an open terminal takes the whole work area. Only inside a
   // project — the dashboard and the full-page routes keep the split height.
-  const { mode: layoutMode, chatFull } = useLayoutMode()
+  const { mode: layoutMode, chatFull, tabSlot } = useLayoutMode()
   const focusMode = layoutMode === 'focus'
   const onWorkspace = useLocation().pathname.startsWith('/project/')
+  // Inside a project the strip lists that project's sessions only. A global
+  // list made every tab repeat its project name, and clicking one changed the
+  // project underneath the user.
+  const scoped = onWorkspace && !!activeProjectId
+  const visibleTabs = useMemo(
+    () => (scoped ? tabs.filter(t => t.projectId === activeProjectId) : tabs),
+    [scoped, tabs, activeProjectId]
+  )
+  // Focus layout: the strip is drawn in the workspace toolbar, not in a bar
+  // of its own.
+  const portaled = !!tabSlot && focusMode && onWorkspace
   const isFull = !!status?.available && isVisible && focusMode && onWorkspace
   const isFullRef = useRef(isFull)
   isFullRef.current = isFull
@@ -361,6 +383,19 @@ export function TerminalPanel() {
   activeProjectIdRef.current = activeProjectId
   const isVisibleRef = useRef(isVisible)
   isVisibleRef.current = isVisible
+  const scopedRef = useRef(scoped)
+  scopedRef.current = scoped
+
+  // The rest of the app (project tabs, the task rail) reads session status
+  // from here.
+  useEffect(() => {
+    terminalTabsStore.set(tabs.map(tab => ({
+      sessionId: tab.sessionId,
+      projectId: tab.projectId,
+      taskId: tab.taskId,
+      status: tabStatus(tab),
+    })))
+  }, [tabs])
 
   // Persist panel state
   useEffect(() => {
@@ -414,8 +449,26 @@ export function TerminalPanel() {
     }
   }, [isVisible, activeTabId, splitSessionId])
 
-  // Labels are written server-side after the tab exists — the AI summary of a
-  // shell, or a rename. Poll while there are tabs and copy them onto the tabs.
+  /** A state the server reported for a session, turned into what the tab
+   *  shows. Called for socket frames and for the poll alike. */
+  const applyState = useCallback((tab: GlobalTab, state: TerminalState): GlobalTab => {
+    if (tab.state === state) return tab
+    const isVisibleToUser =
+      (activeTabIdRef.current === tab.sessionId || splitSessionIdRef.current === tab.sessionId) && isVisibleRef.current
+    return {
+      ...tab,
+      state,
+      awaitingInput: state === 'awaiting-input' && !isVisibleToUser,
+      // The tab the user is on never gets the "finished" flag: they can see
+      // the prompt for themselves. Going back to work clears it.
+      finished: state === 'finished' && !isVisibleToUser,
+    }
+  }, [])
+
+  // Labels and states are written server-side after the tab exists. The socket
+  // pushes both, but a terminal is only connected while it is mounted — with
+  // the panel closed (the board is in front) nothing would arrive, which is
+  // exactly when a flag matters. So the list is polled as well.
   const { data: liveSessions } = useLiveTerminalSessions(tabs.length > 0)
   useEffect(() => {
     const sessions = liveSessions?.sessions
@@ -427,15 +480,16 @@ export function TerminalPanel() {
         const session = byId.get(tab.sessionId)
         if (!session) return tab
         const fields = labelFieldsOf(session)
-        const same = (Object.keys(fields) as (keyof GlobalTab)[])
+        const sameLabel = (Object.keys(fields) as (keyof GlobalTab)[])
           .every(key => tab[key] === fields[key])
-        if (same) return tab
-        changed = true
-        return { ...tab, ...fields }
+        const labelled = sameLabel ? tab : { ...tab, ...fields }
+        const stated = session.state ? applyState(labelled, session.state) : labelled
+        if (stated !== tab) changed = true
+        return stated
       })
       return changed ? next : prev
     })
-  }, [liveSessions])
+  }, [liveSessions, applyState])
 
   // On mount: validate persisted tabs against server sessions (recovery from refresh)
   const initializedRef = useRef(false)
@@ -458,6 +512,7 @@ export function TerminalPanel() {
               hasNotification: false,
               awaitingInput: false,
               finished: false,
+              state: srv?.state,
               taskId: t.taskId || srv?.taskId, // Recover taskId
               ...labelFieldsOf(srv),
             })
@@ -473,6 +528,7 @@ export function TerminalPanel() {
               type: s.type,
               exited: false,
               hasNotification: false,
+              state: s.state,
               taskId: (s as any).taskId,
               ...labelFieldsOf(s),
             })
@@ -569,6 +625,7 @@ export function TerminalPanel() {
         type: session.type,
         exited: false,
         hasNotification: false,
+        state: session.state,
         taskId,
         taskNumber,
         ...labelFieldsOf(session),
@@ -602,7 +659,7 @@ export function TerminalPanel() {
   }, [status, createSession, aiSessions])
 
   const togglePanel = useCallback(() => {
-    if (!isVisible && tabs.length === 0) {
+    if (!isVisible && visibleTabs.length === 0) {
       if (activeProjectIdRef.current) {
         setIsVisible(true)
         handleNewTab('shell')
@@ -612,7 +669,7 @@ export function TerminalPanel() {
     } else {
       setIsVisible(prev => !prev)
     }
-  }, [isVisible, tabs.length, handleNewTab])
+  }, [isVisible, visibleTabs.length, handleNewTab])
 
   // Keyboard shortcut: Ctrl+` to toggle terminal (also via Electron menu action)
   useEffect(() => {
@@ -684,18 +741,25 @@ export function TerminalPanel() {
     }
 
     setTabs(prev => {
-      const index = prev.findIndex(t => t.sessionId === sessionId)
+      const closing = prev.find(t => t.sessionId === sessionId)
+      // Inside a project the strip only shows that project's sessions, so the
+      // tab that takes over has to come from the same strip.
+      const strip = scopedRef.current && closing
+        ? prev.filter(t => t.projectId === closing.projectId)
+        : prev
+      const index = strip.findIndex(t => t.sessionId === sessionId)
+      const rest = strip.filter(t => t.sessionId !== sessionId)
       const next = prev.filter(t => t.sessionId !== sessionId)
       if (!isSplitLeft && !isSplitRight && activeTabIdRef.current === sessionId) {
         // Adjacent tab, like the project and editor tab strips — jumping to
         // the last tab loses the user's place.
-        const neighbour = next[Math.min(Math.max(index, 0), next.length - 1)]
+        const neighbour = rest[Math.min(Math.max(index, 0), rest.length - 1)]
         setActiveTabId(neighbour ? neighbour.sessionId : null)
-        // The tab that takes over may belong to another project; the workspace
-        // follows it, so terminal and project never disagree.
+        // Outside a project the tab that takes over may belong to another
+        // one; the workspace follows it, so terminal and project never disagree.
         if (neighbour) followTabProject(neighbour.sessionId)
       }
-      if (next.length === 0) setIsVisible(false)
+      if (rest.length === 0) setIsVisible(false)
       return next
     })
   }, [killSession, aiSessions, followTabProject, renamingId])
@@ -724,15 +788,22 @@ export function TerminalPanel() {
     renameSession.mutate({ sessionId, title: clean || null })
   }, [renameSession])
 
+  /** Close every tab of the strip: the open project's inside a project, all
+   *  of them elsewhere. Another project's agents are never killed from here. */
   const handleCloseAll = useCallback(() => {
-    for (const tab of tabsRef.current) {
+    const projectId = scopedRef.current ? activeProjectIdRef.current : null
+    const closing = tabsRef.current.filter(t => !projectId || t.projectId === projectId)
+    const closingIds = new Set(closing.map(t => t.sessionId))
+    for (const tab of closing) {
       killSession.mutate(tab.sessionId)
       if (tab.taskId) aiSessions.unregisterBySession(tab.sessionId)
     }
-    setTabs([])
-    setActiveTabId(null)
-    setSplitSessionId(null)
-    setActivePaneIndex(0)
+    setTabs(prev => prev.filter(t => !closingIds.has(t.sessionId)))
+    if (activeTabIdRef.current && closingIds.has(activeTabIdRef.current)) setActiveTabId(null)
+    if (splitSessionIdRef.current && closingIds.has(splitSessionIdRef.current)) {
+      setSplitSessionId(null)
+      setActivePaneIndex(0)
+    }
     setIsVisible(false)
   }, [killSession, aiSessions])
 
@@ -824,18 +895,21 @@ export function TerminalPanel() {
   // question sits unanswered, or the finished run goes unnoticed, behind
   // another tab.
   const handleTabState = useCallback((sessionId: string, state: TerminalState) => {
-    const isVisibleToUser =
-      (activeTabIdRef.current === sessionId || splitSessionIdRef.current === sessionId) && isVisibleRef.current
-
     setTabs(prev => {
       const tab = prev.find(t => t.sessionId === sessionId)
       if (!tab) return prev
-      const awaiting = state === 'awaiting-input' && !isVisibleToUser
-      // Going back to work clears the flag; the tab the user is on never gets
-      // one, since they can see the prompt for themselves.
-      const finished = state === 'finished' && !isVisibleToUser
-      if (!!tab.awaitingInput === awaiting && !!tab.finished === finished) return prev
-      return prev.map(t => (t.sessionId === sessionId ? { ...t, awaitingInput: awaiting, finished } : t))
+      const next = applyState(tab, state)
+      return next === tab ? prev : prev.map(t => (t.sessionId === sessionId ? next : t))
+    })
+  }, [applyState])
+
+  // The server named the tab: the topic Claude Code gave its terminal, or the
+  // AI summary of a shell. It lands at once instead of at the next poll.
+  const handleTabLabel = useCallback((sessionId: string, summary: string | null) => {
+    setTabs(prev => {
+      const tab = prev.find(t => t.sessionId === sessionId)
+      if (!tab || (tab.summary ?? null) === summary) return prev
+      return prev.map(t => (t.sessionId === sessionId ? { ...t, summary: summary ?? undefined } : t))
     })
   }, [])
 
@@ -885,14 +959,23 @@ export function TerminalPanel() {
     }
     // Find a non-exited terminal for this project
     const match = tabsRef.current.find(t => t.projectId === activeProjectId && !t.exited)
-    if (match) {
-      setActiveTabId(match.sessionId)
-    } else if (layoutStore.get().mode === 'focus') {
-      // Nothing of this project to show: a full-size terminal of another
-      // project would hide the workspace the user just asked for.
-      setIsVisible(false)
-    }
+      || tabsRef.current.find(t => t.projectId === activeProjectId)
+    // The pane never shows another project's terminal: with nothing of this
+    // project to show it is empty, and in focus layout it gets out of the way
+    // of the workspace the user just asked for.
+    setActiveTabId(match ? match.sessionId : null)
+    if (!match && layoutStore.get().mode === 'focus') setIsVisible(false)
   }, [activeProjectId])
+
+  // The task rail asks for the terminal of a task.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const sessionId = (e as CustomEvent<{ sessionId?: string }>).detail?.sessionId
+      if (sessionId && tabsRef.current.some(t => t.sessionId === sessionId)) handleTerminalTabClick(sessionId)
+    }
+    window.addEventListener('shipyard:focus-terminal', handler)
+    return () => window.removeEventListener('shipyard:focus-terminal', handler)
+  }, [handleTerminalTabClick])
 
   // Open native terminal for the active terminal's project
   const handleOpenExternal = useCallback(() => {
@@ -921,14 +1004,131 @@ export function TerminalPanel() {
 
   // The dot on the closed panel: a question outranks a finished run, since one
   // is blocking and the other is just news.
-  const someAsking = tabs.some(t => t.hasNotification || t.awaitingInput)
-  const someFinished = tabs.some(t => t.finished)
+  const someAsking = visibleTabs.some(t => t.hasNotification || t.state === 'awaiting-input')
+  const someFinished = visibleTabs.some(t => t.finished)
+
+  const sessionTabs = visibleTabs.map(tab => {
+    const paneIndex: 0 | 1 | null = activeTabId === tab.sessionId
+      ? 0
+      : splitSessionId === tab.sessionId
+        ? 1
+        : null
+    return (
+      <TerminalTab
+        key={tab.sessionId}
+        tab={tab}
+        // With the panel closed no tab is "the open one".
+        paneIndex={isVisible ? paneIndex : null}
+        isSplit={isSplit}
+        showProject={!scoped}
+        isDragging={draggingId === tab.sessionId}
+        isDragOver={dragOverId === tab.sessionId && draggingId !== tab.sessionId}
+        isRenaming={renamingId === tab.sessionId}
+        onClick={() => handleTerminalTabClick(tab.sessionId)}
+        onClose={() => handleCloseTab(tab.sessionId)}
+        onCloseOthers={() => visibleTabs
+          .filter(t => t.sessionId !== tab.sessionId)
+          .forEach(t => handleCloseTab(t.sessionId))}
+        onCloseAll={handleCloseAll}
+        onOpenExternal={handleOpenExternal}
+        onClearExited={handleClearExited}
+        onRenameStart={() => setRenamingId(tab.sessionId)}
+        onRenameCommit={(title) => handleRename(tab.sessionId, title)}
+        onRenameCancel={() => setRenamingId(null)}
+        onDragStart={(event) => {
+          setDraggingId(tab.sessionId)
+          event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData('text/plain', tab.sessionId)
+        }}
+        onDragEnd={() => { setDraggingId(null); setDragOverId(null) }}
+        onDragOver={(event) => {
+          if (draggingId && draggingId !== tab.sessionId) {
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'move'
+            setDragOverId(tab.sessionId)
+          }
+        }}
+        onDragLeave={() => setDragOverId(prev => prev === tab.sessionId ? null : prev)}
+        onDrop={(event) => {
+          event.preventDefault()
+          const fromId = event.dataTransfer.getData('text/plain') || draggingId
+          if (fromId) reorderTabs(fromId, tab.sessionId)
+          setDraggingId(null)
+          setDragOverId(null)
+        }}
+      />
+    )
+  })
+
+  // One menu opens a session and holds the panel actions, so the toolbar row
+  // carries a single button instead of six.
+  const newMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          aria-label="New session"
+          title="New session"
+          className="shrink-0 rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground data-[state=open]:bg-accent data-[state=open]:text-foreground"
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuItem onClick={() => handleNewTab('claude-yolo')}>
+          <Sparkles />
+          Claude Code (YOLO)
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleNewTab('claude')}>
+          <Sparkles />
+          Claude Code
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleNewTab('shell')}>
+          <Monitor />
+          Shell
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => handleNewTab('dev')}>
+          <Play />
+          Dev server
+        </DropdownMenuItem>
+        {visibleTabs.length > 0 && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={handleToggleSplit}>
+              <Columns2 />
+              {isSplit ? 'Unsplit terminal' : 'Split terminal'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => layoutStore.setMode(focusMode ? 'split' : 'focus')}>
+              {focusMode ? <Rows2 /> : <Maximize2 />}
+              {focusMode ? 'Split with the workspace' : 'Full-size panels'}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleOpenExternal}>
+              <ExternalLink />
+              Open in native terminal
+            </DropdownMenuItem>
+            {visibleTabs.some(t => t.exited) && (
+              <DropdownMenuItem onClick={handleClearExited}>
+                <XCircle />
+                Clear exited terminals
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem onClick={handleCloseAll} className="text-destructive focus:text-destructive">
+              <Trash2 />
+              {scoped ? 'Kill this project\u2019s terminals' : 'Kill all terminals'}
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 
   return (
     <div
       ref={panelRef}
       className={cn(
-        'relative border-t bg-[#0a0a0f]',
+        'relative bg-[#0a0a0f]',
+        // Closed and with its tabs drawn in the toolbar, the panel has
+        // nothing of its own to show — not even a border.
+        portaled && !isVisible ? 'hidden' : 'border-t',
         isFull ? 'flex min-h-0 flex-1 flex-col' : 'shrink-0'
       )}
     >
@@ -940,7 +1140,16 @@ export function TerminalPanel() {
         />
       )}
 
-      {/* Tab bar — always visible */}
+      {portaled && tabSlot && createPortal(
+        <div className="flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden select-none">
+          {sessionTabs}
+          {newMenu}
+        </div>,
+        tabSlot
+      )}
+
+      {/* Tab bar of its own — outside a project, and in the split layout */}
+      {!portaled && (
       <div className="flex shrink-0 items-center gap-0.5 px-2 h-8 bg-card/80 border-b border-border/50 select-none">
         <Tooltip>
           <TooltipTrigger asChild>
@@ -953,10 +1162,6 @@ export function TerminalPanel() {
                 {(someAsking || someFinished) && (
                   <span className="absolute -top-1 -right-1 flex h-2 w-2">
                     <span className={cn(
-                      'animate-ping absolute inline-flex h-full w-full rounded-full opacity-75',
-                      someAsking ? 'bg-warning' : 'bg-success'
-                    )} />
-                    <span className={cn(
                       'relative inline-flex rounded-full h-2 w-2',
                       someAsking ? 'bg-warning' : 'bg-success'
                     )} />
@@ -964,8 +1169,8 @@ export function TerminalPanel() {
                 )}
               </span>
               <span className="font-medium">Terminal</span>
-              {tabs.length > 0 && (
-                <span className="text-[10px] text-muted-foreground/60">({tabs.length})</span>
+              {visibleTabs.length > 0 && (
+                <span className="text-[10px] text-muted-foreground/60">({visibleTabs.length})</span>
               )}
               {isVisible ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
             </button>
@@ -974,148 +1179,15 @@ export function TerminalPanel() {
         </Tooltip>
 
         {/* Session tabs — they share the width, truncate and can be dragged
-            into a new order, like the project tab strip. Focus layout keeps
-            them listed while the panel is closed: clicking one opens it. */}
-        {(isVisible || (focusMode && onWorkspace && tabs.length > 0)) && (
-          <div className="ml-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto">
-            {tabs.map(tab => {
-              const paneIndex: 0 | 1 | null = activeTabId === tab.sessionId
-                ? 0
-                : splitSessionId === tab.sessionId
-                  ? 1
-                  : null
-              return (
-                <TerminalTab
-                  key={tab.sessionId}
-                  tab={tab}
-                  paneIndex={paneIndex}
-                  isSplit={isSplit}
-                  isDragging={draggingId === tab.sessionId}
-                  isDragOver={dragOverId === tab.sessionId && draggingId !== tab.sessionId}
-                  isRenaming={renamingId === tab.sessionId}
-                  onClick={() => handleTerminalTabClick(tab.sessionId)}
-                  onClose={() => handleCloseTab(tab.sessionId)}
-                  onCloseOthers={() => tabsRef.current
-                    .filter(t => t.sessionId !== tab.sessionId)
-                    .forEach(t => handleCloseTab(t.sessionId))}
-                  onCloseAll={handleCloseAll}
-                  onOpenExternal={handleOpenExternal}
-                  onClearExited={handleClearExited}
-                  onRenameStart={() => setRenamingId(tab.sessionId)}
-                  onRenameCommit={(title) => handleRename(tab.sessionId, title)}
-                  onRenameCancel={() => setRenamingId(null)}
-                  onDragStart={(event) => {
-                    setDraggingId(tab.sessionId)
-                    event.dataTransfer.effectAllowed = 'move'
-                    event.dataTransfer.setData('text/plain', tab.sessionId)
-                  }}
-                  onDragEnd={() => { setDraggingId(null); setDragOverId(null) }}
-                  onDragOver={(event) => {
-                    if (draggingId && draggingId !== tab.sessionId) {
-                      event.preventDefault()
-                      event.dataTransfer.dropEffect = 'move'
-                      setDragOverId(tab.sessionId)
-                    }
-                  }}
-                  onDragLeave={() => setDragOverId(prev => prev === tab.sessionId ? null : prev)}
-                  onDrop={(event) => {
-                    event.preventDefault()
-                    const fromId = event.dataTransfer.getData('text/plain') || draggingId
-                    if (fromId) reorderTabs(fromId, tab.sessionId)
-                    setDraggingId(null)
-                    setDragOverId(null)
-                  }}
-                />
-              )
-            })}
-
-            {/* New tab button */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => handleNewTab('shell')}
-                  className="shrink-0 rounded-sm p-0.5 text-muted-foreground transition-colors hover:bg-background/30 hover:text-foreground"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">New terminal</TooltipContent>
-            </Tooltip>
-          </div>
-        )}
-
-        {/* Right actions */}
-        {isVisible && tabs.length > 0 && (
-          <div className="flex items-center gap-0.5 ml-auto shrink-0">
-            {/* Layout: full-size on click, or a manual split with the workspace */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={() => layoutStore.setMode(focusMode ? 'split' : 'focus')}
-                  className="p-1 transition-colors rounded-sm text-muted-foreground hover:text-foreground hover:bg-background/30"
-                >
-                  {focusMode ? <Rows2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {focusMode ? 'Split with the workspace (or drag the top edge)' : 'Full-size panels'}
-              </TooltipContent>
-            </Tooltip>
-            {/* Split toggle */}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleToggleSplit}
-                  className={cn(
-                    'p-1 transition-colors rounded-sm',
-                    isSplit
-                      ? 'text-primary bg-primary/10 hover:bg-primary/20'
-                      : 'text-muted-foreground hover:text-foreground hover:bg-background/30'
-                  )}
-                >
-                  <Columns2 className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">{isSplit ? 'Unsplit terminal' : 'Split terminal'}</TooltipContent>
-            </Tooltip>
-            {tabs.some(t => t.exited) && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    onClick={handleClearExited}
-                    className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-sm hover:bg-background/30"
-                  >
-                    <XCircle className="h-3 w-3" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="top">Clear exited terminals</TooltipContent>
-              </Tooltip>
-            )}
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleOpenExternal}
-                  className="p-1 text-muted-foreground hover:text-foreground transition-colors rounded-sm hover:bg-background/30"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">Open in native terminal</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button
-                  onClick={handleCloseAll}
-                  className="p-1 text-muted-foreground hover:text-destructive transition-colors rounded-sm hover:bg-background/30"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="top">Kill all terminals</TooltipContent>
-            </Tooltip>
+            into a new order, like the project tab strip. */}
+        {(isVisible || (onWorkspace && visibleTabs.length > 0)) && (
+          <div className="ml-1 flex min-w-0 flex-1 items-center gap-0.5 overflow-hidden">
+            {sessionTabs}
+            {newMenu}
           </div>
         )}
       </div>
+      )}
 
       {/* Terminal content area */}
       {isVisible && (
@@ -1196,13 +1268,14 @@ export function TerminalPanel() {
                       isActive={isShown && !chatFull}
                       onExit={handleTabExit}
                       onStateChange={handleTabState}
+                      onLabelChange={handleTabLabel}
                     />
                   </Suspense>
                 </div>
               </div>
             )
           })}
-          {tabs.length === 0 && (
+          {visibleTabs.length === 0 && (
             <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
               <button
                 onClick={() => handleNewTab('shell')}

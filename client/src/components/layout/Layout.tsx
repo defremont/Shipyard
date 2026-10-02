@@ -11,12 +11,14 @@ import { useLayoutMode } from '@/hooks/useLayoutMode'
 import { cn } from '@/lib/utils'
 import { EditorTabsProvider } from '@/hooks/useEditorTabsContext'
 import { TerminalPanel } from '@/components/terminals/TerminalPanel'
+import { TaskRail } from '@/components/tasks/TaskRail'
+import { useTabs } from '@/hooks/useTabs'
 import { useIntegrationAutoPull } from '@/hooks/useIntegrationAutoPull'
 import { useElectronMenu } from '@/hooks/useElectronMenu'
 import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts'
 import { ShortcutsOverlay } from './ShortcutsOverlay'
-import { AppTitleBar } from './AppTitleBar'
+import { AppTitleBar, isDesktopApp } from './AppTitleBar'
 
 function LayoutInner() {
   useIntegrationAutoPull()
@@ -27,7 +29,8 @@ function LayoutInner() {
   // instead of unmounting them — the board, the editor and the terminals keep
   // their state. With the terminal full-size the workspace shrinks to its
   // toolbar (Workspace hides its own content): Tasks/Editor stay one click away.
-  const { terminalFull, chatFull } = useLayoutMode()
+  const { terminalFull, chatFull, taskRail } = useLayoutMode()
+  const { activeTabId } = useTabs()
   const { activity, panelOpen } = useActivity()
   const chatOnly = chatFull && panelOpen && activity === 'claude'
   return (
@@ -37,11 +40,19 @@ function LayoutInner() {
         <ActivityBar />
         <SidePanel />
         <main className={cn('flex-1 flex flex-col overflow-hidden min-w-0', chatOnly && 'hidden')}>
-          <TabBar />
+          {/* In the desktop app the title bar carries the project tabs. */}
+          {!isDesktopApp() && <TabBar />}
           <div className={cn('flex flex-col overflow-hidden min-h-0', terminalFull ? 'shrink-0' : 'flex-1')}>
             <Outlet />
           </div>
-          <TerminalPanel />
+          {/* A full-size terminal shares its row with the task rail: tasks on
+              the left, the agents in the middle. */}
+          <div className={cn('flex min-w-0', terminalFull ? 'min-h-0 flex-1' : 'shrink-0')}>
+            {terminalFull && taskRail && activeTabId && <TaskRail projectId={activeTabId} />}
+            <div className="flex min-w-0 flex-1 flex-col">
+              <TerminalPanel />
+            </div>
+          </div>
         </main>
       </div>
       <GlobalSearch />

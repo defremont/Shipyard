@@ -12,14 +12,23 @@ interface LayoutState {
   /** The chat takes the whole window. Not persisted: a reload should never
    *  come back with the workspace hidden. */
   chatFull: boolean
+  /** The task list beside the terminal and the editor. The user's choice. */
+  taskRail: boolean
+  /** Where the workspace toolbar wants the session tabs drawn. TerminalPanel
+   *  portals its tab strip here, so project toolbar and terminal tabs share
+   *  one row instead of stacking two. */
+  tabSlot: HTMLElement | null
 }
 
 const MODE_KEY = 'shipyard:layout-mode'
+const TASK_RAIL_KEY = 'shipyard:task-rail'
 
 let state: LayoutState = {
   mode: localStorage.getItem(MODE_KEY) === 'split' ? 'split' : 'focus',
   terminalFull: false,
   chatFull: false,
+  taskRail: localStorage.getItem(TASK_RAIL_KEY) !== 'false',
+  tabSlot: null,
 }
 
 const listeners = new Set<() => void>()
@@ -44,6 +53,11 @@ export const layoutStore = {
   },
   setTerminalFull: (terminalFull: boolean) => update({ terminalFull }),
   setChatFull: (chatFull: boolean) => update({ chatFull }),
+  setTaskRail(taskRail: boolean) {
+    localStorage.setItem(TASK_RAIL_KEY, String(taskRail))
+    update({ taskRail })
+  },
+  setTabSlot: (tabSlot: HTMLElement | null) => update({ tabSlot }),
 }
 
 export function useLayoutMode(): LayoutState {

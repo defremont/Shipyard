@@ -183,6 +183,42 @@ interface Project {
   `/help`) e restaura a preferencia ao voltar — ver `FULL_PAGE_ROUTES` em
   `useActivity.tsx`
 
+### Layout A: duas barras, tarefas a esquerda, agentes no centro
+Decidido em 2026-10-02 a partir de uma gravacao de uso (68% do tempo num
+terminal, 5 trocas Tasks <-> Terminal em 2 min, 160px de barras empilhadas e o
+nome do cliente repetido 3 vezes). O que ja esta implementado:
+- **Duas barras, nao quatro.** No app desktop a barra de titulo carrega as abas
+  de projeto (`AppTitleBar` renderiza `<TabBar embedded />`; os menus File/Edit/
+  View/Help viram submenus do logo e a busca vira um icone). No navegador a
+  `TabBar` continua com barra propria. A segunda barra e a toolbar do Workspace
+- **A toolbar do Workspace hospeda as abas de sessao**: ela publica um slot
+  (`layoutStore.setTabSlot`) e o `TerminalPanel` desenha a fila la dentro com
+  `createPortal` (so em layout focus, dentro de um projeto). Fora disso
+  (Dashboard, split) o painel continua com a barra propria. O nome do projeto
+  **nao** aparece na toolbar — a aba do projeto ja diz
+- **Abas de sessao sao do projeto aberto** (`scoped` no TerminalPanel): dentro
+  de `/project/` a fila lista so as sessoes daquele projeto, sem prefixo. Os
+  terminais dos outros continuam montados e rodando, so nao aparecem. O pane
+  nunca mostra terminal de outro projeto; "Close all"/"Kill" agem so na fila
+  visivel. Fora de um projeto a fila e global e o prefixo volta
+- **A aba do projeto mostra o que os agentes dele fazem**: `useTerminalTabs`
+  (store externo publicado pelo TerminalPanel) + `worstStatus` — pergunta >
+  terminou > rodando > parado — e a contagem quando ha mais de uma sessao
+- **Um icone por estado, em todo lugar**: `SessionStatusIcon` (aba de sessao,
+  aba de projeto, linha da task). Nao desenhar estado de sessao de outro jeito
+- **`TaskRail`** (300px, `layoutStore.taskRail`, `shipyard:task-rail`, default
+  ligado): lista In Progress / Inbox / Backlog / Done ao lado do terminal cheio
+  (montada pelo Layout) e do editor (montada pelo Workspace). Nao aparece ao
+  lado do board — seria a mesma lista duas vezes. Task com sessao viva mostra o
+  estado do agente e o clique leva ao terminal dela (`shipyard:focus-terminal`);
+  sem sessao, abre o TaskViewer. "Run" usa o mesmo `AiResolveHost` da paleta
+- O "+" da fila e um menu: abre Claude (YOLO ou nao), shell e dev, e guarda as
+  acoes do painel (split, nativo, limpar, matar) que antes eram seis botoes
+- **Ainda nao feito**: Git como etiqueta com painel sobreposto (o SidePanel
+  continua), modo Grade (um cartao por agente) e o atalho de "proximo agente
+  esperando". O simulado de referencia esta em
+  `~/Desktop/shipyard-novo-layout.html`
+
 ### Layout de paineis (foco vs split)
 - `hooks/useLayoutMode.ts` e a fonte unica: `mode` (`focus` | `split`, em
   `shipyard:layout-mode`, default `focus`), `terminalFull` e `chatFull`
@@ -402,55 +438,77 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   escreve no PTY, nunca toca na fila de escrita nem no flag `injecting` —
   escrever ali corromperia um paste em andamento
 - **Quem decide que ha Claude ali e a tela, nao o tipo da sessao**: o usuario
-  abre um shell e digita `claude`. `CLAUDE_SCREEN_RE` procura as marcas do CLI
-  (`bypass permissions`, `? for shortcuts`, `esc to interrupt`, banner) e o
-  watcher fica **mudo** ate uma delas aparecer — terminal comum nunca pisca.
-  Depois que apareceu (`sawClaude`), a sessao continua sendo Claude
+  abre um shell e digita `claude`. Duas fontes: o **titulo do terminal** (o CLI
+  escreve `OSC 0` com `✳ Claude Code`) e `CLAUDE_SCREEN_RE` (marcas na tela). O
+  watcher fica **mudo** ate uma delas aparecer — terminal comum nunca pisca
+- **O titulo tambem diz se ha execucao**: o glifo na frente e `✳` em repouso e
+  um spinner (`◐`, `◑`...) enquanto trabalha. Spinner = `busy` + `working`
 - `finished` e o `idle` que interessa: o CLI voltou ao prompt vazio **depois de
   receber trabalho**. Quem separa os dois e `session.working`, ligado pela
-  injecao de prompt e por qualquer input do usuario que contenha Enter, e
-  desligado ao anunciar. Sem ele, o prompt ocioso que um CLI recem-aberto mostra
-  seria lido como "terminou" antes de qualquer pedido. O anuncio e unico: o
-  proximo so vem com trabalho novo atras
+  injecao de prompt, pelo spinner do titulo e por input do usuario com Enter, e
+  desligado ao anunciar. O anuncio e unico: o proximo so vem com trabalho novo
+- **`awaiting-input` e `finished` sao pegajosos**: so input de verdade ou uma
+  execucao nova os tira. Saida sozinha **nao** volta para `busy` — o TUI
+  repinta parado, e tratar isso como "voltou a trabalhar" apagava o aviso antes
+  de alguem ver. Pelo mesmo motivo `noteSessionInput` ignora as respostas
+  automaticas do xterm (foco, posicao do cursor, device attributes, mouse):
+  ninguem digitou aquilo
+- **Pergunta em prosa conta como pergunta**: uma execucao que termina com `?`
+  nas ultimas linhas acima da caixa vira `awaiting-input`, nao `finished`
+  (`asksSomething`). Dialogo de permissao e opcoes numeradas continuam em
+  `DECISION_RE`
 - A classificacao roda sobre a saida **limpa** (`cleanTerminalOutput`) e so
-  sobre as ultimas 15 linhas — a tela como esta agora. Duas armadilhas medidas
-  em sessao real: ancorar no fim da saida crua nunca casa (um redraw de TUI
-  termina em movimento de cursor, nao no prompt), e um `esc to interrupt` de
-  um frame antigo, ainda no buffer, responderia pela execucao que ja acabou
-- `IDLE_PROMPT_RE` e a caixa de input vazia (`❯` sozinho, ou com o placeholder
-  `Try "..."`); `RUNNING_RE` (`esc to interrupt`) tem precedencia, porque o CLI
-  mantem a caixa vazia na tela **enquanto trabalha**. Decisao (`Do you want`,
-  opcoes numeradas, `(y/n)`) vem antes das duas. Qualquer input do usuario volta
-  o estado para `busy`
-- O watcher so comeca depois que a injecao de prompt termina (`onInjected`) —
-  durante a espera o CLI mostra prompt ocioso e daria falso `idle`
+  sobre as ultimas 15 linhas. **Vale a marca desenhada por ultimo, nao a
+  presenca**: um pedaco assentado guarda todos os frames desde o anterior, e
+  uma execucao curta cabe inteira nele (`esc to interrupt` e o prompt final
+  juntos). Testar so presenca prendia a sessao em `busy`
+- `IDLE_PROMPT_RE` aceita a regua colada na frente do prompt
+  (`────────❯ Try "..."`): a regua tem a largura do terminal, que quebra a
+  linha sozinho sem emitir quebra. Sem isso um CLI recem-aberto nunca era lido
+  como parado
+- Sessao com prompt injetado: o watcher e ligado **na criacao** com
+  `watchHold` (para ver o titulo que o CLI escreve assim que o prompt cai) e so
+  comeca a julgar a tela em `releaseOutputWatcher`, quando a injecao termina —
+  durante a espera o CLI mostra prompt ocioso e daria falso `idle`. Bug
+  antigo: o reconhecimento da tela zerava `working` tambem nessas sessoes, e
+  task rodada pelo "Run with AI" nunca avisava que tinha terminado
 - Digitar `claude` e dar Enter conta como input e ligaria `working`, entao o
-  reconhecimento da tela **zera `working`**: subir o CLI nao e trabalho, e o
-  primeiro prompt que ele desenha nao pode virar "terminou"
-- Transicoes viram frame WS `{ type: 'state', state }`; o estado atual e
-  reenviado quando um socket conecta. No client viram `awaitingInput` e
-  `finished` no `GlobalTab` (transitorios: resetados na validacao de sessoes no
-  mount). A aba visivel nunca recebe flag — quem esta olhando ja viu — e voltar
-  a `busy` limpa os dois
-- Na aba: `MessageCircleQuestion` ambar para pergunta, `CheckCircle2` verde para
-  terminado (mesmo check da aba de task encerrada — para o usuario e a mesma
-  noticia). O ponto no icone do painel fechado fica ambar quando ha pergunta e
-  verde quando a unica novidade e um agente que terminou: pergunta bloqueia,
-  fim de execucao so informa
+  reconhecimento do CLI **zera `working`** (fora de `watchHold`): subir o CLI
+  nao e trabalho
+- Transicoes viram frame WS `{ type: 'state', state }` e o estado atual e
+  reenviado quando um socket conecta. **O socket so existe com o terminal
+  montado** — com o painel fechado (board na frente) nada chegaria, que e
+  justamente quando o aviso importa. Por isso `GET /api/terminal/sessions`
+  devolve `state` e o TerminalPanel faz poll de 3s (`useLiveTerminalSessions`),
+  passando pelo mesmo `applyState` dos frames
+- No client: `state` no `GlobalTab` (o que o CLI faz) + `awaitingInput` /
+  `finished` (ainda nao visto). `tabStatus()` reduz a um `SessionStatus`.
+  Pergunta fica acesa ate ser respondida, mesmo na aba aberta; "terminou" some
+  quando a aba e vista
 
 ### Abas do terminal: nome, ordem e split
 - O nome de uma aba nao e uma string so: o server guarda `projectName`,
   `typeLabel`, `taskTitle`/`taskNumber`, `customTitle` e `summary` na sessao, e
   `describeTab()` (TerminalPanel) escolhe nessa ordem —
-  **customTitle > task > summary da IA > tipo**. O `title` antigo
+  **customTitle > task > summary > tipo**. O `title` antigo
   (`[Projeto] Shell`) so serve de fallback para sessao velha
-- Aba de task abre com o numero: `#12 Projeto · Titulo`. O truncamento come o
-  fim do rotulo, nunca o numero
+- Aba de task abre com o numero: `#12 Titulo` (com `Projeto ·` so fora de um
+  projeto, onde a fila e global). O truncamento come o fim do rotulo, nunca o
+  numero
+- **Aba de Claude sem task usa o titulo que o proprio Claude Code da ao
+  terminal** (`OSC 0`, lido em `readTitles`): o assunto da conversa, um segundo
+  depois do primeiro prompt, na lingua do usuario e sem chamada de IA. So vale
+  depois que o terminal se apresentou como `Claude Code` (`session.titled`) —
+  qualquer programa pode por um simbolo na frente do titulo. Com `titled` o
+  resumo por IA nao roda: ele so via o banner e escrevia "Claude Code session
+  started"
+- Rotulo novo vai por WS (`{ type: 'label', summary }`, `setLabelListener`) e
+  cai na aba na hora; o poll de sessoes cobre o terminal desmontado
 - Sessao aberta para uma task recebe titulo e numero da task **no server**
   (`POST /api/terminal/sessions` le a task) — sobrevive a refresh sem o client
   carregar nada
-- Aba sem task ganha um rotulo escrito pela IA a partir da saida do proprio
-  terminal (`terminalSummary.ts` + `startSummaryWatcher`). Regras que nao podem
+- Shell e dev sem task ganham um rotulo escrito pela IA a partir da saida do
+  proprio terminal (`terminalSummary.ts` + `startSummaryWatcher`). Regras que nao podem
   cair: so tipos `shell`/`dev`/`claude`/`claude-yolo` (aba de Claude tambem —
   "Claude" diz tao pouco quanto "Shell" quando ha tres abertas), so depois de
   3s de silencio e 120 chars novos,
