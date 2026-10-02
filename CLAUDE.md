@@ -156,9 +156,16 @@ interface Project {
 - Fonte: **Inter Variable** (`@fontsource-variable/inter`, importada em `main.tsx`;
   `fontFamily.sans` no tailwind config)
 - Tokens de cor em `client/src/index.css` (CSS vars) mapeados no tailwind config.
-  Alem dos padroes shadcn: `--success` (verde), `--warning` (ambar), `--sidebar`.
-  `--primary` e a cor de marca (azul) — usada para acoes primarias, foco, links,
-  estados ativos, features de IA/Claude e status inbox/todo
+  Alem dos padroes shadcn: `--success`, `--warning`, `--sidebar`.
+  **A paleta e neutra de proposito** (decisao de 2026-10-02: poucas cores, sem
+  cara de "design de IA"): cinzas frios, `--primary` e claro sobre escuro
+  (botao principal branco-acinzentado, nao azul), `--success` e um neutro claro
+  (nao verde), `--warning` e o unico tom quente (ambar apagado — "precisa de
+  voce" e in progress) e `--destructive` fica para erro e delete. Nao
+  reintroduzir matiz de marca nem verde/azul saturados
+- Movimento: classes `anim-rise`/`anim-slide`/`anim-grow`/`anim-fade` em
+  `index.css` (0,16–0,24s, sem bounce nem glow; respeitam
+  `prefers-reduced-motion`). Usar essas, nao inventar keyframes por componente
 - Semantica de cor: inbox/todo = `primary` · in_progress = `warning` ·
   done = `success` · urgent/erro/delete = `destructive`. **NUNCA** usar classes
   literais de paleta (`text-purple-500`, `bg-yellow-500`...) para semantica de
@@ -208,16 +215,29 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   aba de projeto, linha da task). Nao desenhar estado de sessao de outro jeito
 - **`TaskRail`** (300px, `layoutStore.taskRail`, `shipyard:task-rail`, default
   ligado): lista In Progress / Inbox / Backlog / Done ao lado do terminal cheio
-  (montada pelo Layout) e do editor (montada pelo Workspace). Nao aparece ao
-  lado do board — seria a mesma lista duas vezes. Task com sessao viva mostra o
+  (montada pelo Layout). Nao aparece ao lado do board (seria a mesma lista duas
+  vezes) nem do editor (la a coluna esquerda e a arvore de arquivos). Task com sessao viva mostra o
   estado do agente e o clique leva ao terminal dela (`shipyard:focus-terminal`);
   sem sessao, abre o TaskViewer. "Run" usa o mesmo `AiResolveHost` da paleta
 - O "+" da fila e um menu: abre Claude (YOLO ou nao), shell e dev, e guarda as
   acoes do painel (split, nativo, limpar, matar) que antes eram seis botoes
-- **Ainda nao feito**: Git como etiqueta com painel sobreposto (o SidePanel
-  continua), modo Grade (um cartao por agente) e o atalho de "proximo agente
-  esperando". O simulado de referencia esta em
-  `~/Desktop/shipyard-novo-layout.html`
+- **Nao existe mais ActivityBar.** A barra do topo (`AppTitleBar`, agora
+  tambem no navegador) leva busca, lista de projetos, chat, medidor de uso e o
+  menu de settings/logs/help. O `SidePanel` virou **gaveta sobreposta**
+  (absoluta, com fundo escurecido; fecha com Esc, clique fora ou no X) e
+  **sempre comeca fechada** — nao e mais coluna fixa nem volta sozinha depois
+  de um reload
+- **Git e uma etiqueta na toolbar** (branch + `N changed`/`clean`, a partir dos
+  campos `git*` do projeto, sem poll proprio) que abre a gaveta de Source
+  Control. Projeto multi-repo sem git na raiz mostra `N repos`
+- Vistas do centro: **Agents** (terminal cheio + TaskRail), **Board** (kanban)
+  e **Editor** (com a arvore de arquivos — `ExplorerView` — como coluna
+  esquerda propria). "Agents" emite `shipyard:show-terminal`; sem sessao no
+  projeto o painel mostra o estado vazio com "Open Claude YOLO"
+- **Ainda nao feito**: modo Grade (um cartao por agente) e o atalho de
+  "proximo agente esperando". O simulado de referencia esta em
+  `~/Desktop/shipyard-novo-layout.html` — a aparencia do app deve seguir a
+  dele
 
 ### Layout de paineis (foco vs split)
 - `hooks/useLayoutMode.ts` e a fonte unica: `mode` (`focus` | `split`, em
@@ -641,7 +661,7 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   Nesse caso serve a ultima leitura boa (`stale: true`) por ate 10min
 - Cache de 60s no server + `refetchInterval` de 60s no client. A janela de 5h
   anda devagar; nao vale poll mais agressivo
-- `ClaudeUsageBadge` no rodape da ActivityBar: anel = janela de 5h (a que trava a
+- `ClaudeUsageBadge` na barra do topo: anel = janela de 5h (a que trava a
   sessao de trabalho); popover abre o detalhe. Cor por severidade: <75% neutro,
   75-89% `warning`, >=90% `destructive`
 

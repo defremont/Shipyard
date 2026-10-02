@@ -21,10 +21,10 @@ interface IntegratedTerminalProps {
 }
 
 const TERMINAL_THEME = {
-  background: '#0a0a0f',
+  background: '#090b0e',
   foreground: '#e4e4e7',
   cursor: '#e4e4e7',
-  cursorAccent: '#0a0a0f',
+  cursorAccent: '#090b0e',
   selectionBackground: '#27272a',
   selectionForeground: '#e4e4e7',
   black: '#18181b',

@@ -17,7 +17,7 @@ export function SessionStatusIcon({ status, className }: { status: SessionStatus
     case 'busy':
       return (
         <span className={cn(size, 'flex items-center justify-center')} aria-label="Working">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-primary" />
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-muted-foreground" />
         </span>
       )
     case 'idle':

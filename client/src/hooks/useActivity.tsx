@@ -20,9 +20,10 @@ function loadActivity(): ActivityId {
   return 'projects'
 }
 
+// The panel is a drawer over the work area now: it opens when asked for and
+// never comes back on its own after a reload.
 function loadPanelOpen(): boolean {
-  const v = localStorage.getItem(STORAGE_PANEL)
-  return v === null ? true : v === 'true'
+  return false
 }
 
 const ActivityContext = createContext<ActivityContextValue | null>(null)

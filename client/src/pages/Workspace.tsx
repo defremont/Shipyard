@@ -2,10 +2,9 @@ import { useState, useCallback, useEffect, lazy, Suspense } from 'react'
 import { useParams } from 'react-router-dom'
 import { TaskBoard } from '@/components/tasks/TaskBoard'
 import { useProjects, useUpdateProject, useLaunchTerminal, useOpenFolder } from '@/hooks/useProjects'
-import { Badge } from '@/components/ui/badge'
 import {
   GitBranch, Star, ExternalLink, Link2, Settings, Code2, LayoutList,
-  Play, Monitor, FolderOpen, Sparkles, MoreHorizontal, PanelLeft,
+  Play, Monitor, FolderOpen, Sparkles, MoreHorizontal, PanelLeft, SquareTerminal,
 } from 'lucide-react'
 // CodeMirror and its language modes only matter once the user opens a file.
 const EditorPanel = lazy(() =>
@@ -24,7 +23,8 @@ import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
 import { useTerminalStatus } from '@/hooks/useTerminal'
 import { layoutStore, useLayoutMode } from '@/hooks/useLayoutMode'
-import { TaskRail } from '@/components/tasks/TaskRail'
+import { ExplorerView } from '@/components/layout/views/ExplorerView'
+import { useActivity } from '@/hooks/useActivity'
 import { DeployBadge } from '@/components/deploy/DeployBadge'
 import { toast } from 'sonner'
 
@@ -124,6 +124,8 @@ export function Workspace() {
   // Focus layout: an open terminal has the work area. Only the toolbar stays,
   // with neither mode lit — clicking one brings the workspace back.
   const { terminalFull, taskRail } = useLayoutMode()
+  const { activity, panelOpen, selectActivity } = useActivity()
+  const gitOpen = panelOpen && activity === 'git'
 
   if (!project) {
     return (
@@ -132,6 +134,9 @@ export function Workspace() {
       </div>
     )
   }
+
+  const hasGit = project.isGitRepo || (project.subRepos?.length ?? 0) > 0
+  const gitChanges = (project.gitStaged ?? 0) + (project.gitUnstaged ?? 0) + (project.gitUntracked ?? 0)
 
   return (
     <div className={cn('overflow-hidden flex flex-col', !terminalFull && 'flex-1')}>
@@ -157,7 +162,7 @@ export function Workspace() {
               Tasks
             </button>
           </TooltipTrigger>
-          <TooltipContent>Task list beside the terminal and the editor</TooltipContent>
+          <TooltipContent>Task list beside the agents</TooltipContent>
         </Tooltip>
 
         <div className="h-4 w-px shrink-0 bg-border" />
@@ -168,6 +173,18 @@ export function Workspace() {
         {/* Full views */}
         <div className="flex shrink-0 items-center">
           <div className="flex h-7 items-center rounded-md border bg-muted/30 p-0.5">
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('shipyard:show-terminal'))}
+              className={cn(
+                'flex h-6 items-center gap-1.5 rounded px-2.5 text-[11px] font-medium transition-colors',
+                terminalFull
+                  ? 'bg-background text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              <SquareTerminal className="h-3 w-3" />
+              Agents
+            </button>
             <button
               onClick={() => setWorkspaceMode('tasks')}
               className={cn(
@@ -195,12 +212,25 @@ export function Workspace() {
           </div>
         </div>
 
-        {project.isGitRepo && project.gitBranch && (
-          <Badge variant="outline" className="hidden h-5 shrink-0 gap-1 font-mono text-[10px] min-[1100px]:inline-flex">
-            <GitBranch className="h-2.5 w-2.5" />
-            {project.gitBranch}
-            {project.gitDirty && ' *'}
-          </Badge>
+        {/* Git is a chip, not a column: branch and what is uncommitted at a
+            glance, the whole panel one click away as a drawer. */}
+        {hasGit && (
+          <button
+            onClick={() => selectActivity('git')}
+            title="Source control"
+            className={cn(
+              'hidden h-7 shrink-0 items-center gap-1.5 rounded-md border px-2 text-[11px] transition-colors hover:bg-accent min-[1000px]:flex',
+              gitOpen ? 'bg-accent text-foreground' : 'text-muted-foreground'
+            )}
+          >
+            <GitBranch className="h-3 w-3" />
+            <span className="max-w-[120px] truncate font-mono text-[10px]">
+              {project.gitBranch || `${project.subRepos?.length ?? 0} repos`}
+            </span>
+            {project.isGitRepo && (gitChanges > 0
+              ? <span className="tabular-nums text-warning">{gitChanges} changed</span>
+              : <span className="text-muted-foreground/70">clean</span>)}
+          </button>
         )}
 
         {/* Nothing is drawn when the project has no deploy linked */}
@@ -292,9 +322,13 @@ export function Workspace() {
 
       {/* ── Main content ── */}
       <div className={cn('flex-1 overflow-hidden min-h-0', terminalFull ? 'hidden' : 'flex')}>
-        {/* The board is the task list at full size, so the rail only joins
-            the editor here (Layout puts it beside the terminal). */}
-        {taskRail && workspaceMode === 'editor' && !terminalFull && <TaskRail projectId={project.id} />}
+        {/* The editor brings its own left column: the file tree. (The task
+            rail belongs to the agents view — Layout puts it there.) */}
+        {workspaceMode === 'editor' && !terminalFull && (
+          <aside className="anim-slide flex w-[260px] shrink-0 flex-col overflow-hidden border-r bg-card/40">
+            <ExplorerView />
+          </aside>
+        )}
         <div className={cn(
           'flex-1 min-w-0 flex flex-col',
           workspaceMode === 'tasks' && 'overflow-y-auto px-3 py-2 scrollbar-dark'

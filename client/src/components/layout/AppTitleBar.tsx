@@ -3,8 +3,11 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ChevronDown, Search } from 'lucide-react'
+import { ChevronDown, FolderKanban, MessageSquare, Search, Settings } from 'lucide-react'
 import { TabBar } from './TabBar'
+import { useActivity } from '@/hooks/useActivity'
+import { ClaudeUsageBadge } from '@/components/claude/ClaudeUsageBadge'
+import { cn } from '@/lib/utils'
 
 /** True in the desktop app, where the title bar also carries the project tabs. */
 export function isDesktopApp(): boolean {
@@ -35,28 +38,34 @@ function MenuGroup({ label, children }: { label: string; children: React.ReactNo
 }
 
 /**
- * The desktop title bar. It is also the project tab strip: window, menus and
- * projects share one row, so the workspace starts one bar higher. The four
- * menus fold into the logo — they are reached a few times a day, the project
- * tabs every minute.
+ * The one bar at the top: window, menus, project tabs and the app-wide
+ * actions. In the desktop app it is also the title bar (drag region, room for
+ * the window buttons); in the browser it is the same row without those.
+ * There is no activity bar — search, chat, usage and settings live on the
+ * right of this row, and everything else opens from where it is used.
  */
 export function AppTitleBar() {
   const navigate = useNavigate()
+  const { activity, panelOpen, selectActivity } = useActivity()
   const electronAPI = (window as { electronAPI?: ElectronTitlebarAPI }).electronAPI
+  const desktop = !!electronAPI?.isElectron
 
-  if (!electronAPI?.isElectron) return null
-
-  const command = (value: TitlebarCommand) => electronAPI.sendTitlebarCommand?.(value)
+  const command = (value: TitlebarCommand) => electronAPI?.sendTitlebarCommand?.(value)
   const dispatch = (
     action: 'toggle-search' | 'toggle-file-search' | 'toggle-terminal'
       | 'toggle-shortcuts' | 'close-tab' | 'new-task-request'
   ) => {
     window.dispatchEvent(new CustomEvent(`shipyard:${action}`))
   }
-  const isMac = electronAPI.platform === 'darwin'
+  const isMac = electronAPI?.platform === 'darwin'
+  const iconButton = 'app-no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
 
   return (
-    <div className={`app-drag flex h-[35px] shrink-0 items-center gap-1 border-b bg-card/90 ${isMac ? 'pl-20 pr-2' : 'pl-1.5 pr-[140px]'}`}>
+    <div className={cn(
+      'app-drag flex h-[35px] shrink-0 items-center gap-1 border-b bg-card',
+      !desktop ? 'px-1.5' : isMac ? 'pl-20 pr-2' : 'pl-1.5 pr-[140px]'
+    )}>
+      {desktop && (
       <DropdownMenu>
         <DropdownMenuTrigger
           aria-label="Shipyard menu"
@@ -109,20 +118,44 @@ export function AppTitleBar() {
           </MenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
+      )}
 
       <TabBar embedded />
 
-      <button
-        className="app-no-drag flex h-7 w-7 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        onClick={() => dispatch('toggle-search')}
-        title="Global Search (Ctrl+K)"
-        aria-label="Global Search"
-      >
+      <button className={iconButton} onClick={() => dispatch('toggle-search')} title="Search (Ctrl+K)" aria-label="Search">
         <Search className="h-3.5 w-3.5" />
       </button>
-      {/* The tabs may fill the row; this strip always stays free to drag the
-          window by. */}
-      <div className="h-full w-10 shrink-0" />
+      <button
+        className={cn(iconButton, panelOpen && activity === 'projects' && 'bg-accent text-foreground')}
+        onClick={() => selectActivity('projects')}
+        title="Projects"
+        aria-label="Projects"
+      >
+        <FolderKanban className="h-3.5 w-3.5" />
+      </button>
+      <button
+        className={cn(iconButton, panelOpen && activity === 'claude' && 'bg-accent text-foreground')}
+        onClick={() => selectActivity('claude')}
+        title="Claude chat"
+        aria-label="Claude chat"
+      >
+        <MessageSquare className="h-3.5 w-3.5" />
+      </button>
+      <ClaudeUsageBadge />
+      <DropdownMenu>
+        <DropdownMenuTrigger className={cn(iconButton, 'focus:outline-none data-[state=open]:bg-accent')} title="Settings and help" aria-label="Settings and help">
+          <Settings className="h-3.5 w-3.5" />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          <DropdownMenuItem onClick={() => navigate('/settings')}>Settings</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => navigate('/logs')}>Logs</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => navigate('/help')}>Help</DropdownMenuItem>
+          <DropdownMenuItem onClick={() => dispatch('toggle-shortcuts')}>Keyboard shortcuts<Shortcut>?</Shortcut></DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {/* The tabs may fill the row; in the desktop app this strip always
+          stays free to drag the window by. */}
+      {desktop && <div className="h-full w-8 shrink-0" />}
     </div>
   )
 }

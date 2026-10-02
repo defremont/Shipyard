@@ -4,10 +4,10 @@
 
 /*
  * Design tokens — single source of truth for color.
- * Brand accent is blue (hsl 212). Semantic status colors:
- *   --primary  → brand / interactive / AI (Claude) / inbox
- *   --warning  → in progress / attention
- *   --success  → done / positive
+ * The dark theme is deliberately quiet: no brand hue. Semantic roles:
+ *   --primary  → interactive emphasis (light on dark) / inbox
+ *   --warning  → in progress / needs attention (the one warm tone)
+ *   --success  → done / positive (a light neutral, not green)
  *   --destructive → urgent / errors / delete
  * Components must use these tokens (or the tailwind mappings success/warning)
  * instead of literal palette classes like text-purple-500.
@@ -43,33 +43,36 @@
     --sidebar-border: 240 5.9% 90%;
   }
 
+  /* Dark is the only theme in use. The palette is neutral on purpose: greys
+     with a cool cast, one muted amber for "needs you", and red kept for
+     errors and deletes. Interactive emphasis is light-on-dark, not a hue. */
   .dark {
-    --background: 240 7% 4.5%;
-    --foreground: 240 6% 93%;
-    --card: 240 6% 6.5%;
-    --card-foreground: 240 6% 93%;
-    --popover: 240 6% 6%;
-    --popover-foreground: 240 6% 93%;
-    --primary: 212 95% 62%;
-    --primary-foreground: 220 60% 8%;
-    --secondary: 240 5% 13%;
-    --secondary-foreground: 240 6% 93%;
-    --muted: 240 5% 12%;
-    --muted-foreground: 240 5% 63%;
-    --accent: 240 5% 13%;
-    --accent-foreground: 240 6% 96%;
-    --destructive: 0 70% 58%;
+    --background: 216 26% 4%;
+    --foreground: 218 19% 92%;
+    --card: 214 21% 6.5%;
+    --card-foreground: 218 19% 92%;
+    --popover: 213 20% 8%;
+    --popover-foreground: 218 19% 92%;
+    --primary: 218 19% 92%;
+    --primary-foreground: 216 26% 6%;
+    --secondary: 213 20% 9%;
+    --secondary-foreground: 218 19% 92%;
+    --muted: 213 20% 9%;
+    --muted-foreground: 215 12% 59%;
+    --accent: 213 19% 11%;
+    --accent-foreground: 218 19% 95%;
+    --destructive: 0 55% 60%;
     --destructive-foreground: 0 0% 98%;
-    --success: 152 52% 50%;
-    --success-foreground: 160 60% 7%;
-    --warning: 38 92% 56%;
-    --warning-foreground: 30 70% 8%;
-    --border: 240 5% 14%;
-    --input: 240 5% 16%;
-    --ring: 212 95% 62%;
-    --sidebar: 240 6% 5.5%;
-    --sidebar-foreground: 240 6% 93%;
-    --sidebar-border: 240 5% 12%;
+    --success: 213 14% 72%;
+    --success-foreground: 216 26% 6%;
+    --warning: 40 50% 57%;
+    --warning-foreground: 36 60% 8%;
+    --border: 214 18% 15%;
+    --input: 213 18% 18%;
+    --ring: 214 14% 50%;
+    --sidebar: 214 21% 6.5%;
+    --sidebar-foreground: 218 19% 92%;
+    --sidebar-border: 214 18% 15%;
   }
 }
 
@@ -120,4 +123,19 @@
   .page-padding {
     @apply px-6 py-5;
   }
+}
+
+/* Motion — short and plain. Things arrive; nothing bounces or glows. */
+@keyframes sy-rise { from { opacity: 0; transform: translateY(4px); } }
+@keyframes sy-slide { from { opacity: 0; transform: translateX(-12px); } }
+@keyframes sy-grow { from { opacity: 0; max-width: 0; } }
+@keyframes sy-fade { from { opacity: 0; } }
+@layer utilities {
+  .anim-rise { animation: sy-rise 0.18s ease-out; }
+  .anim-slide { animation: sy-slide 0.2s ease-out; }
+  .anim-grow { animation: sy-grow 0.24s ease-out; }
+  .anim-fade { animation: sy-fade 0.16s ease-out; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .anim-rise, .anim-slide, .anim-grow, .anim-fade { animation: none; }
 }

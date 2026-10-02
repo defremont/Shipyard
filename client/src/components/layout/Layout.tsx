@@ -1,7 +1,5 @@
 import { Outlet } from 'react-router-dom'
-import { ActivityBar } from './ActivityBar'
 import { SidePanel } from './SidePanel'
-import { TabBar } from './TabBar'
 import { GlobalSearch } from './GlobalSearch'
 import { AiResolveHost } from '@/components/tasks/AiResolveHost'
 import { FileContentSearch } from './FileContentSearch'
@@ -18,7 +16,7 @@ import { useElectronMenu } from '@/hooks/useElectronMenu'
 import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts'
 import { ShortcutsOverlay } from './ShortcutsOverlay'
-import { AppTitleBar, isDesktopApp } from './AppTitleBar'
+import { AppTitleBar } from './AppTitleBar'
 
 function LayoutInner() {
   useIntegrationAutoPull()
@@ -36,19 +34,16 @@ function LayoutInner() {
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       <AppTitleBar />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        <ActivityBar />
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         <SidePanel />
         <main className={cn('flex-1 flex flex-col overflow-hidden min-w-0', chatOnly && 'hidden')}>
-          {/* In the desktop app the title bar carries the project tabs. */}
-          {!isDesktopApp() && <TabBar />}
           <div className={cn('flex flex-col overflow-hidden min-h-0', terminalFull ? 'shrink-0' : 'flex-1')}>
             <Outlet />
           </div>
           {/* A full-size terminal shares its row with the task rail: tasks on
               the left, the agents in the middle. */}
           <div className={cn('flex min-w-0', terminalFull ? 'min-h-0 flex-1' : 'shrink-0')}>
-            {terminalFull && taskRail && activeTabId && <TaskRail projectId={activeTabId} />}
+            {terminalFull && taskRail && activeTabId && <TaskRail key={activeTabId} projectId={activeTabId} />}
             <div className="flex min-w-0 flex-1 flex-col">
               <TerminalPanel />
             </div>

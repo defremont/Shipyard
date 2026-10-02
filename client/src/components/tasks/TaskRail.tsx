@@ -1,8 +1,8 @@
 import { lazy, memo, Suspense, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Play, Plus, SquareTerminal } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Play, Plus, SquareTerminal } from 'lucide-react'
 import { useTasks, type Task } from '@/hooks/useTasks'
 import { useProjects } from '@/hooks/useProjects'
-import { useActiveMilestone } from '@/hooks/useMilestones'
+import { useActiveMilestone, useMilestones } from '@/hooks/useMilestones'
 import { useAiResolve } from '@/hooks/useAiResolve'
 import { useTerminalTabs, type TerminalTabInfo } from '@/hooks/useTerminalTabs'
 import { SessionStatusIcon } from '@/components/terminals/SessionStatusIcon'
@@ -52,13 +52,20 @@ const RailTask = memo(function RailTask({ task, session, onOpen, onRun }: {
       tabIndex={0}
       onClick={() => onOpen(task)}
       onKeyDown={(e) => { if (e.key === 'Enter') onOpen(task) }}
-      title={live ? 'Open this task’s terminal' : task.title}
-      className="group relative flex cursor-pointer items-start gap-2 rounded-md border border-transparent px-2 py-1.5 transition-colors hover:border-border hover:bg-accent/40"
+      title={live ? 'Open this task\u2019s terminal' : task.title}
+      className={cn(
+        'group relative mb-1 flex cursor-pointer items-start gap-2 rounded-md border bg-card px-2 py-1.5 transition-colors hover:border-muted-foreground/30',
+        // The task whose agent is waiting is the one thing in the list that
+        // asks to be looked at.
+        live && session.status === 'question' && 'border-warning/40'
+      )}
     >
       <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center">
         {live
           ? <SessionStatusIcon status={session.status} />
-          : <PriorityIcon className={cn('h-3 w-3', done ? 'text-muted-foreground/40' : priority.color)} />}
+          : done
+            ? <Check className="h-3 w-3 text-muted-foreground/50" />
+            : <PriorityIcon className={cn('h-3 w-3', priority.color)} />}
       </span>
       <span className={cn(
         'line-clamp-2 min-w-0 flex-1 text-xs leading-snug',
@@ -66,10 +73,10 @@ const RailTask = memo(function RailTask({ task, session, onOpen, onRun }: {
       )}>
         {task.title}
       </span>
-      <span className="mt-0.5 shrink-0 text-[10px] tabular-nums text-muted-foreground/60 transition-opacity group-hover:opacity-0">
+      <span className="mt-0.5 shrink-0 whitespace-nowrap text-[10px] tabular-nums text-muted-foreground/60 transition-opacity group-hover:opacity-0">
         {task.number != null && `#${task.number}`}
         {task.effort ? ` · ${task.effort}p` : ''}
-        {done && task.needsReview && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-primary align-middle" />}
+        {done && task.needsReview && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-foreground/70 align-middle" />}
       </span>
       {!done && (
         <button
@@ -80,7 +87,7 @@ const RailTask = memo(function RailTask({ task, session, onOpen, onRun }: {
             if (live) onOpen(task)
             else onRun(task, e.shiftKey)
           }}
-          className="absolute right-1.5 top-1 flex h-5 items-center gap-1 rounded bg-foreground px-1.5 text-[10px] font-medium text-background opacity-0 transition-opacity focus:opacity-100 group-hover:opacity-100"
+          className="absolute right-1.5 top-1.5 flex h-5 translate-x-1 items-center gap-1 rounded bg-primary px-1.5 text-[10px] font-medium text-primary-foreground opacity-0 transition-all duration-150 focus:translate-x-0 focus:opacity-100 group-hover:translate-x-0 group-hover:opacity-100"
         >
           {live ? <SquareTerminal className="h-3 w-3" /> : <Play className="h-3 w-3" />}
           {live ? 'Open' : 'Run'}
@@ -101,6 +108,10 @@ export function TaskRail({ projectId }: { projectId: string }) {
   const project = projects?.find(p => p.id === projectId)
   const { milestoneId } = useActiveMilestone(projectId)
   const { data: tasks } = useTasks(projectId, milestoneId)
+  const { data: milestones } = useMilestones(projectId)
+  const milestoneName = milestoneId === 'default'
+    ? 'General'
+    : milestones?.find(m => m.id === milestoneId)?.name || 'General'
   const sessions = useTerminalTabs()
   const runAiResolve = useAiResolve()
 
@@ -144,35 +155,34 @@ export function TaskRail({ projectId }: { projectId: string }) {
   }
 
   return (
-    <aside className="flex w-[300px] shrink-0 flex-col border-r bg-card/30">
-      <div className="flex h-8 shrink-0 items-center gap-2 border-b px-3">
-        <span className="text-xs font-medium">Tasks</span>
-        <span className="text-[10px] tabular-nums text-muted-foreground/60">{tasks?.length ?? ''}</span>
+    <aside className="anim-slide flex w-[312px] shrink-0 flex-col border-r bg-background">
+      <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
+        <span className="text-[13px] font-semibold">Tasks</span>
+        <span className="truncate text-xs text-muted-foreground/70">{milestoneName}</span>
         <button
           onClick={() => setCreating(true)}
-          title="New task"
-          aria-label="New task"
-          className="ml-auto rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          className="ml-auto flex h-6 shrink-0 items-center gap-1 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
         >
-          <Plus className="h-3.5 w-3.5" />
+          <Plus className="h-3 w-3" />
+          New
         </button>
       </div>
 
-      <div className="scrollbar-dark min-h-0 flex-1 overflow-y-auto px-1.5 py-1">
+      <div className="scrollbar-dark min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {SECTIONS.map(section => {
           const list = grouped[section.key]
           if (list.length === 0 && section.key !== 'in_progress' && section.key !== 'todo') return null
           const isOpen = open[section.key]
           const shown = section.key === 'done' ? list.slice(0, DONE_LIMIT) : list
           return (
-            <div key={section.key} className="mb-1">
+            <div key={section.key}>
               <button
                 onClick={() => setOpen(prev => ({ ...prev, [section.key]: !prev[section.key] }))}
-                className="flex w-full items-center gap-1 px-1.5 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                className="flex w-full items-center gap-1.5 px-1.5 pb-1 pt-2.5 text-[11px] text-muted-foreground transition-colors hover:text-foreground"
               >
                 {isOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
                 {section.label}
-                <span className="font-normal tabular-nums text-muted-foreground/60">{list.length}</span>
+                <span className="tabular-nums text-muted-foreground/50">{list.length}</span>
               </button>
               {isOpen && shown.map(task => (
                 <RailTask
@@ -184,7 +194,7 @@ export function TaskRail({ projectId }: { projectId: string }) {
                 />
               ))}
               {isOpen && list.length === 0 && (
-                <div className="px-2 py-1 text-[11px] text-muted-foreground/50">Nothing here</div>
+                <div className="px-2 py-1 text-[11px] text-muted-foreground/40">Nothing here</div>
               )}
               {isOpen && shown.length < list.length && (
                 <div className="px-2 py-1 text-[11px] text-muted-foreground/50">

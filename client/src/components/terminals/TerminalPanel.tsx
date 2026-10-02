@@ -234,7 +234,7 @@ const TerminalTab = memo(function TerminalTab({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        'group flex h-6 min-w-[104px] max-w-[260px] basis-0 flex-1 cursor-pointer items-center gap-1.5 overflow-hidden rounded-sm px-2 text-[11px] transition-colors',
+        'anim-grow group flex h-6 min-w-[104px] max-w-[260px] basis-0 flex-1 cursor-pointer items-center gap-1.5 overflow-hidden rounded-sm px-2 text-[11px] transition-colors',
         // The open tab has to be findable at a glance in a row of eight: it
         // keeps the lit background and adds weight and a rule of its own.
         inPane
@@ -967,6 +967,13 @@ export function TerminalPanel() {
     if (!match && layoutStore.get().mode === 'focus') setIsVisible(false)
   }, [activeProjectId])
 
+  // "Agents" in the workspace toolbar: show the panel, whatever is in it.
+  useEffect(() => {
+    const handler = () => setIsVisible(true)
+    window.addEventListener('shipyard:show-terminal', handler)
+    return () => window.removeEventListener('shipyard:show-terminal', handler)
+  }, [])
+
   // The task rail asks for the terminal of a task.
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1125,7 +1132,7 @@ export function TerminalPanel() {
     <div
       ref={panelRef}
       className={cn(
-        'relative bg-[#0a0a0f]',
+        'relative bg-[#090b0e]',
         // Closed and with its tabs drawn in the toolbar, the panel has
         // nothing of its own to show — not even a border.
         portaled && !isVisible ? 'hidden' : 'border-t',
@@ -1276,14 +1283,25 @@ export function TerminalPanel() {
             )
           })}
           {visibleTabs.length === 0 && (
-            <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
-              <button
-                onClick={() => handleNewTab('shell')}
-                className="flex items-center gap-2 px-4 py-2 rounded-md hover:bg-background/30 transition-colors"
-              >
-                <Plus className="h-4 w-4" />
-                Open a terminal
-              </button>
+            <div className="anim-rise flex h-full flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
+              <span>No agent open in this project.</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleNewTab('claude-yolo')}
+                  className="flex h-8 items-center gap-2 rounded-md bg-primary px-3.5 text-xs font-medium text-primary-foreground transition-opacity hover:opacity-90"
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Open Claude YOLO
+                </button>
+                <button
+                  onClick={() => handleNewTab('shell')}
+                  className="flex h-8 items-center gap-2 rounded-md border px-3.5 text-xs font-medium text-foreground transition-colors hover:bg-accent"
+                >
+                  <Monitor className="h-3.5 w-3.5" />
+                  Shell
+                </button>
+              </div>
+              <span className="text-[11px] text-muted-foreground/60">or run a task from the list on the left</span>
             </div>
           )}
         </div>

@@ -250,12 +250,12 @@ function createWindow() {
     minHeight: 600,
     title: 'Shipyard',
     icon: existsSync(ICON_PATH) ? ICON_PATH : undefined,
-    backgroundColor: '#09090b',
+    backgroundColor: '#07090c',
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     ...(process.platform !== 'darwin' ? {
-      titleBarOverlay: { color: '#101014', symbolColor: '#b8b8c2', height: 35 },
+      titleBarOverlay: { color: '#0d1014', symbolColor: '#b3bbc6', height: 35 },
     } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),

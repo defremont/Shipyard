@@ -10,7 +10,7 @@ const RING_COLOR: Record<UsageSeverity, string> = {
 }
 
 const BAR_COLOR: Record<UsageSeverity, string> = {
-  normal: 'bg-primary',
+  normal: 'bg-muted-foreground',
   warning: 'bg-warning',
   critical: 'bg-destructive',
 }
@@ -27,7 +27,7 @@ const CIRCUMFERENCE = 2 * Math.PI * RADIUS
 function Ring({ percent, severity }: { percent: number; severity: UsageSeverity }) {
   const filled = (Math.min(percent, 100) / 100) * CIRCUMFERENCE
   return (
-    <svg viewBox="0 0 24 24" className={cn('h-5 w-5 -rotate-90', RING_COLOR[severity])}>
+    <svg viewBox="0 0 24 24" className={cn('h-4 w-4 -rotate-90', RING_COLOR[severity])}>
       <circle cx="12" cy="12" r={RADIUS} fill="none" strokeWidth="2.5" className="stroke-border" />
       <circle
         cx="12" cy="12" r={RADIUS} fill="none" strokeWidth="2.5" strokeLinecap="round"
@@ -119,7 +119,7 @@ function UsageDetails({ usage }: { usage: Extract<ClaudeUsage, { available: true
 }
 
 /**
- * Compact meter for the ActivityBar footer. The ring tracks the 5-hour window,
+ * Compact meter for the top bar. The ring tracks the 5-hour window,
  * which is the one that actually throttles a long working session.
  *
  * Renders nothing when the meter is unavailable (no OAuth token, or the
@@ -138,13 +138,14 @@ export function ClaudeUsageBadge() {
       <PopoverTrigger asChild>
         <button
           aria-label={`Plan usage: ${Math.round(primary.percent)}% of the 5-hour window`}
-          className="flex h-11 w-12 flex-col items-center justify-center gap-0.5 text-muted-foreground/60 transition-colors hover:text-foreground"
+          title="Plan usage"
+          className="app-no-drag flex h-7 shrink-0 items-center gap-1.5 rounded px-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
         >
           <Ring percent={primary.percent} severity={usage.severity} />
-          <span className="text-[9px] leading-none tabular-nums">{Math.round(primary.percent)}%</span>
+          <span className="text-[10px] leading-none tabular-nums">{Math.round(primary.percent)}%</span>
         </button>
       </PopoverTrigger>
-      <PopoverContent side="right" align="end" className="w-64">
+      <PopoverContent side="bottom" align="end" className="w-64">
         <UsageDetails usage={usage} />
       </PopoverContent>
     </Popover>
