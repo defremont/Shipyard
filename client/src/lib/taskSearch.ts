@@ -12,7 +12,7 @@ export function parseSearchTerms(query: string): string[] {
 /** `extra` carries fields that live outside the task (e.g. the project name). */
 export function taskMatchesTerms(task: Task, terms: string[], extra?: string): boolean {
   if (terms.length === 0) return true
-  const haystack = [task.title, task.description, task.prompt, extra]
+  const haystack = [task.title, task.description, task.prompt, task.context, extra]
     .filter(Boolean)
     .join('\n')
     .toLowerCase()

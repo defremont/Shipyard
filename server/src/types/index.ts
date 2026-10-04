@@ -65,6 +65,7 @@ export interface Task {
   effortConfidence?: EffortConfidence;
   status: 'backlog' | 'todo' | 'in_progress' | 'done';
   prompt?: string;
+  context?: string;       // Private: never pushed to Trello/ClickUp/Sheets (WhatsApp transcript, open questions)
   agent?: string;         // AgentDefinition.id — which CLI runs this task ('claude' when unset)
   createdAt: string;
   updatedAt: string;

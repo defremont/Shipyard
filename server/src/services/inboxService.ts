@@ -39,6 +39,8 @@ interface InboxConfig {
   lastSyncAt?: string;
   lastError?: string | null;
   lastCreated?: number;
+  /** Set once the tasks made before `context` existed had their prompt split. */
+  contextSplitAt?: string;
 }
 
 const EMPTY: InboxConfig = { url: '', token: '', imported: {} };
@@ -161,6 +163,8 @@ interface InboxDemand {
   title: string;
   description: string;
   prompt: string;
+  /** Doubts, origin and the message transcript: stays in Shipyard, never pushed to a board. */
+  context?: string;
   priority: 'urgent' | 'high' | 'medium' | 'low';
   effort: number | null;
   parentTaskId: string | null;
@@ -242,6 +246,7 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
       const note = [`Client follow-up (WhatsApp): ${d.title}`, d.description, d.prompt].filter(Boolean).join('\n\n');
       const task = await taskStore.updateTask(d.projectId, parent.id, {
         prompt: taskStore.appendPromptSection(parent.prompt, `— Note ${ts}`, note),
+        ...(d.context ? { context: taskStore.appendPromptSection(parent.context, `— Follow-up ${ts}`, d.context) } : {}),
         ...(parent.status === 'done' ? { status: 'todo' as const } : {}),
       });
       return { taskId: parent.id, taskNumber: task?.number, asNote: true };
@@ -253,6 +258,7 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
     title: d.title.slice(0, 300),
     description: d.description || '',
     prompt: d.prompt || '',
+    ...(d.context ? { context: d.context } : {}),
     priority: d.priority || 'medium',
     status: 'todo',
     ...(d.milestoneId && d.milestoneId !== 'default' ? { milestoneId: d.milestoneId } : {}),
@@ -261,6 +267,59 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
     ...(effort ? { effort, effortSource: 'manual' as const, effortConfidence: 'low' as const } : {}),
   });
   return { taskId: task.id, taskNumber: task.number };
+}
+
+// ── Private context ───────────────────────────────────────────────────────
+//
+// Until v1.25 the inbox sent one text and it all landed in `prompt`, which the
+// Trello and ClickUp push writes on the card the client reads: doubts, the
+// link to the inbox and the whole message transcript. Those now arrive as
+// `context`. This moves them out of the tasks made before, once; the push that
+// follows cleans the cards.
+
+const PRIVATE_START_RE = /^## (?:Dúvidas respondidas pelo André|Dúvidas ainda em aberto \(perguntar ao cliente\)|Origem: WhatsApp)/m;
+const ORIGIN_RE = /^## Origem: WhatsApp/m;
+
+/** Null when the prompt holds nothing the inbox wrote as private. */
+export function splitInboxPrompt(prompt: string): { prompt: string; context: string } | null {
+  if (!ORIGIN_RE.test(prompt)) return null;
+  // A follow-up was appended as a dated note with its own private tail, so
+  // each section is cut on its own.
+  const kept: string[] = [];
+  const moved: string[] = [];
+  for (const section of prompt.split(/(?=^— (?:Note |Summary))/m)) {
+    if (!ORIGIN_RE.test(section)) {
+      kept.push(section);
+      continue;
+    }
+    const at = section.search(PRIVATE_START_RE);
+    kept.push(section.slice(0, at));
+    const noteDate = section.match(/^— Note (\S+ \S+)/)?.[1];
+    moved.push((noteDate ? `— Follow-up ${noteDate}\n` : '') + section.slice(at).trim());
+  }
+  return {
+    prompt: kept.map(part => part.trim()).filter(Boolean).join('\n\n'),
+    context: moved.join('\n\n'),
+  };
+}
+
+async function splitExistingContext(): Promise<void> {
+  if ((await load()).contextSplitAt) return;
+  const touched = new Set<string>();
+  for (const task of await taskStore.getAllTasks()) {
+    const split = task.prompt ? splitInboxPrompt(task.prompt) : null;
+    if (!split) continue;
+    await taskStore.updateTask(task.projectId, task.id, {
+      prompt: split.prompt,
+      context: [task.context, split.context].filter(Boolean).join('\n\n'),
+    });
+    touched.add(task.projectId);
+  }
+  await mutate(c => {
+    c.contextSplitAt = new Date().toISOString();
+  });
+  for (const projectId of touched) triggerAutoSync(projectId);
+  if (touched.size) log.info('tasks', `WhatsApp context moved out of the prompt in ${touched.size} project(s)`);
 }
 
 let inFlight: Promise<{ created: number }> | null = null;
@@ -320,6 +379,8 @@ async function runSync(): Promise<{ created: number }> {
     const { demands, catalogHash } = await call<{ demands: InboxDemand[]; catalogHash?: string | null }>(c, '/api/shipyard/sync', {
       projects: payloadProjects,
       tasks: statusChanges,
+      // Tells the inbox to send the private part apart from the prompt.
+      accepts: ['context'],
     });
 
     // The inbox reports the catalog it holds; send ours only when it differs.
@@ -457,6 +518,7 @@ let timer: NodeJS.Timeout | null = null;
 
 export function startInboxSync(): void {
   if (timer) return;
+  splitExistingContext().catch(err => log.warn('server', 'WhatsApp context split failed', err.message));
   timer = setInterval(tick, POLL_MS);
   setTimeout(tick, 5_000);
   liveStarted = true;

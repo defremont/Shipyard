@@ -106,10 +106,12 @@ export async function getTask(projectId: string, taskId: string): Promise<McpToo
   const task = await taskStore.getTask(projectId, taskId);
   if (!task) return fail(`Task "${taskId}" not found`);
   // Full task details (this is the tool for getting description/prompt)
-  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks, attachments, comments } = task;
+  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, context, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks, attachments, comments } = task;
   return { content: [{ type: 'text', text: compact({
     id, number, projectId, ...(milestoneId ? { milestoneId } : {}),
     title, description, priority, effort, effortSource, effortConfidence, status, prompt,
+    // Private: the client board never gets this. Keep it out of description/prompt.
+    ...(context ? { context } : {}),
     createdAt, updatedAt, inboxAt, inProgressAt, doneAt,
     ...(subtasks?.length ? { subtasks } : {}),
     // Metadata only — call get_task_attachment to actually see an image.
@@ -484,6 +486,7 @@ export async function nextTask(projectId?: string, milestoneId?: string): Promis
           title: t.title,
           description: t.description,
           prompt: t.prompt,
+          ...(t.context ? { context: t.context } : {}),
           status: t.status,
           priority: t.priority,
         },
@@ -521,6 +524,7 @@ export async function startTask(projectId: string, taskId: string): Promise<McpT
           title: updated.title,
           description: updated.description,
           prompt: updated.prompt,
+          ...(updated.context ? { context: updated.context } : {}),
           status: updated.status,
           priority: updated.priority,
           ...(cwd ? { cwd } : {}),
@@ -572,7 +576,8 @@ export async function searchTasks(query: string, projectId?: string, status?: st
     (!status || t.status === status) && (
       t.title.toLowerCase().includes(q) ||
       t.description.toLowerCase().includes(q) ||
-      (t.prompt && t.prompt.toLowerCase().includes(q))
+      (t.prompt && t.prompt.toLowerCase().includes(q)) ||
+      (t.context && t.context.toLowerCase().includes(q))
     )
   );
   // Return slim matches — use get_task for full details

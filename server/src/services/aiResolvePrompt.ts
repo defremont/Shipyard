@@ -42,6 +42,14 @@ export function buildAiResolvePrompt(
     lines.push('');
   }
 
+  if (task.context) {
+    lines.push('## Private context');
+    lines.push('Kept out of the client-facing board. Do not copy it into the task description or prompt.');
+    lines.push('');
+    lines.push(task.context);
+    lines.push('');
+  }
+
   if (feedback) {
     lines.push('## User decision feedback');
     lines.push(feedback);

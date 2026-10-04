@@ -16,6 +16,11 @@ function formatTaskBlock(t: Task, index?: number): string[] {
     lines.push('### Details')
     lines.push(t.prompt)
   }
+  if (t.context) {
+    lines.push('')
+    lines.push('### Private context')
+    lines.push(t.context)
+  }
   lines.push('')
   return lines
 }
@@ -190,6 +195,11 @@ export function buildTaskPrompt(
   if (task.prompt) {
     lines.push('## Details')
     lines.push(task.prompt)
+    lines.push('')
+  }
+  if (task.context) {
+    lines.push('## Private context')
+    lines.push(task.context)
     lines.push('')
   }
   lines.push(`Priority: ${priorityLabel[task.priority]}`)

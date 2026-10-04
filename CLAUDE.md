@@ -63,6 +63,7 @@ interface Task {
   title: string;
   description: string;      // O QUE fazer (visao usuario/produto)
   prompt?: string;          // HOW/WHY tecnico (causas, arquivos, solucoes)
+  context?: string;         // privado: nunca sai para Trello/ClickUp/Sheets (ver "Contexto privado")
   agent?: string;           // qual CLI roda a task (id do agentRegistry; vazio = default)
   worktreePath?: string;    // worktree isolada onde o agente roda (worktree-per-task)
   worktreeBranch?: string;  // branch checada nessa worktree
@@ -914,6 +915,24 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   task #N que ja existe (vira nota nela) em vez de duplicar
 - Token cifrado com `.claude-key`, nunca volta ao client. Card em
   Settings > AI & Integrations (`InboxSettingsCard`)
+
+### Contexto privado da tarefa (`task.context`)
+- O quadro do Trello/ClickUp e lido pelo cliente, e `prompt` vai inteiro para o
+  card. O que o cliente nao deve ler mora em `context`: duvidas, origem, link do
+  inbox e a transcricao das mensagens. **Nenhum provider de sync, relatorio ou
+  export le esse campo** — nao adicionar a `renderDesc`, ao Sheets nem aos
+  exports
+- Quem le: TaskViewer ("Private context"), `get_task`/`next_task`/`start_task`
+  do MCP, o prompt do "Run with AI" e do "Copy" (`promptBuilder`), e a busca
+- O sync do inbox manda `accepts: ['context']`; so entao o inbox separa as duas
+  partes. Shipyard antigo nao manda e recebe tudo junto no `prompt`, como antes
+- Complemento (`parentTaskId`): o resumo vira `— Note` no `prompt` e a parte
+  privada vira `— Follow-up` no `context`
+- `replaceTasks` copia `context` do `existing` (senao todo pull apaga)
+- Migracao unica no boot (`splitExistingContext`, marca `contextSplitAt` em
+  `inbox-config.json`): tarefas antigas tem o `prompt` cortado a partir de
+  `## Duvidas...`/`## Origem: WhatsApp`, secao por secao, e o push seguinte
+  limpa os cards
 
 ### Indicador de deploy (Railway)
 - Responde uma pergunta so: **o ultimo build subiu?** `deployService.getStatus`
