@@ -2,7 +2,7 @@
   "name": "shipyard",
   "productName": "Shipyard",
   "desktopName": "shipyard.desktop",
-  "version": "1.24.0",
+  "version": "1.25.0",
   "description": "Local-first command center for software projects: tasks, Git, terminals, and coding agents in one workspace",
   "author": {
     "name": "Shipyard Contributors",
