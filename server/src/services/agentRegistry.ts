@@ -7,6 +7,7 @@ import { platform } from 'os';
 import type { AgentDefinition } from '../types/index.js';
 import { getSettings, saveSettings } from './settingsStore.js';
 import { DATA_DIR } from './dataDir.js';
+import { detectCli } from './cliDetect.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,9 +16,10 @@ const isWindows = platform() === 'win32';
 export const DEFAULT_AGENT_ID = 'claude';
 
 /**
- * CLIs Shipyard knows how to launch. None of them take the prompt as an
- * argument: the terminal types it into the running CLI instead, which keeps
- * the line breaks a multi-paragraph task prompt depends on.
+ * CLIs Shipyard knows how to launch. Claude Code is handed the prompt as an
+ * argument (see promptAsArgument); for the others the terminal types it into
+ * the running CLI, which keeps the line breaks a multi-paragraph task prompt
+ * depends on.
  */
 export const BUILTIN_AGENTS: AgentDefinition[] = [
   { id: 'claude', name: 'Claude Code', command: 'claude', args: '--dangerously-skip-permissions', builtin: true },
@@ -172,6 +174,45 @@ async function prunePromptFiles(): Promise<void> {
   } catch {}
 }
 
+// ── Prompt as an argument ────────────────────────────────────────────────
+//
+// Claude Code takes its first prompt on the command line
+// (`claude [options] -- <prompt>`) and submits it itself once it is up. Typing
+// the prompt into the running CLI meant guessing from the screen when it was
+// ready, and a wrong guess left the task pasted and unsent, or not pasted at
+// all. A shell line cannot carry a multi-paragraph prompt, so the prompt goes
+// to a file and the shell reads it back as one argument.
+
+// Windows caps a whole command line at 32,767 characters.
+const MAX_ARG_PROMPT = 20_000;
+
+/**
+ * Windows PowerShell 5.1 hands a native program its arguments unescaped, and
+ * only wraps one in quotes when it finds whitespace outside a pair of `"`. So
+ * the escaping the C runtime expects is done here, and the leading space makes
+ * sure the quotes are always added.
+ */
+export function escapeForPowerShellArg(prompt: string): string {
+  return ' ' + prompt.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1');
+}
+
+/** How to start Claude Code with `prompt` as its first message, or null when it has to be typed in. */
+async function promptAsArgument(prompt: string): Promise<{ command: string; arg: string } | null> {
+  if (!isWindows) {
+    if (prompt.length > MAX_ARG_PROMPT) return null;
+    const path = await writePromptFile(prompt);
+    return { command: 'claude', arg: `"$(cat ${quote(path)})"` };
+  }
+  // Only the native .exe: an npm shim runs through cmd.exe, which cuts the
+  // argument at its first line break.
+  const cli = await detectCli('claude');
+  if (!cli.available || cli.prefixArgs.length > 0 || !/\.exe$/i.test(cli.command)) return null;
+  const escaped = escapeForPowerShellArg(prompt);
+  if (escaped.length > MAX_ARG_PROMPT) return null;
+  const path = await writePromptFile(escaped);
+  return { command: cli.command, arg: `(Get-Content -Raw -Encoding UTF8 ${quote(path)})` };
+}
+
 export interface AgentLaunch {
   /** Line to type at the shell prompt. */
   command: string;
@@ -183,12 +224,13 @@ export interface AgentLaunch {
  * Turn an agent definition into the shell line that starts it.
  *
  * An args template carrying {task} or {taskFile} receives the prompt on the
- * command line and runs one-shot; anything else launches the CLI bare and
- * leaves the prompt to the terminal's injection path.
+ * command line and runs one-shot. Claude Code receives it as an argument too
+ * and stays interactive. Anything else launches the CLI bare and leaves the
+ * prompt to the terminal's injection path.
  */
 export async function buildAgentLaunch(
   agent: AgentDefinition,
-  { cwd, prompt }: { cwd: string; prompt?: string },
+  { cwd, prompt, extraArgs = '' }: { cwd: string; prompt?: string; extraArgs?: string },
 ): Promise<AgentLaunch> {
   let args = agent.args || '';
   const wantsTask = args.includes('{task}');
@@ -203,6 +245,15 @@ export async function buildAgentLaunch(
   }
   args = args.split('{cwd}').join(quote(cwd));
 
-  const command = [quoteCommand(agent.command), args.trim()].filter(Boolean).join(' ');
+  if (agent.id === DEFAULT_AGENT_ID && prompt && !wantsTask && !wantsFile) {
+    const direct = await promptAsArgument(prompt);
+    if (direct) {
+      // `--` ends the options: a prompt may start with a dash.
+      const command = [quoteCommand(direct.command), args.trim(), extraArgs, '--', direct.arg].filter(Boolean).join(' ');
+      return { command, injectsPrompt: false };
+    }
+  }
+
+  const command = [quoteCommand(agent.command), args.trim(), extraArgs].filter(Boolean).join(' ');
   return { command, injectsPrompt: !wantsTask && !wantsFile };
 }

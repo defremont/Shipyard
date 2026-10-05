@@ -774,9 +774,29 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `buildAgentLaunch()` monta a linha de comando. O template de args aceita
   `{cwd}`, `{taskFile}` (arquivo com o prompt inteiro, em `data/agent-prompts/`,
   limpo apos 24h) e `{task}` (prompt em uma linha, entre aspas do shell)
-- **Sem placeholder de prompt o CLI sobe vazio e o prompt e digitado nele**
-  (`injectPromptWhenReady`) — e o caminho dos builtins, e o unico que preserva
-  quebras de linha. Com `{task}`/`{taskFile}` a sessao e one-shot e nao ha injecao
+- **Claude Code recebe o prompt como argumento** (`claude [opcoes] -- <prompt>`,
+  `promptAsArgument`): o proprio CLI envia quando sobe, a sessao continua
+  interativa e nao ha o que adivinhar pela tela. O prompt vai para um arquivo em
+  `data/agent-prompts/` e o shell o le de volta como um argumento so
+  (`(Get-Content -Raw ...)` no PowerShell, `"$(cat ...)"` no resto). Antes ele
+  era colado no CLI ja aberto, e um palpite errado sobre "pronto" deixava a
+  tarefa colada sem enviar, ou nem colada
+- No Windows o arquivo ja vai escapado (`escapeForPowerShellArg`): o PowerShell
+  5.1 nao escapa aspas ao chamar um .exe e so poe aspas em volta quando acha
+  espaco fora de um par de `"` — dai o espaco na frente. Testado com aspas,
+  barra antes de aspas, barra no fim e prompt que comeca com hifen (o `--`
+  existe por isso). **Nao trocar o shell do terminal sem refazer esse teste**
+- Esse caminho exige o `claude.exe` nativo e prompt de ate 20 mil caracteres
+  (o Windows limita a linha de comando a 32.767). CLI instalado por npm (shim
+  `.cmd`, que passa pelo cmd.exe e corta o argumento na primeira quebra de
+  linha) ou prompt maior caem na injecao
+- **Os outros builtins sobem vazios e o prompt e digitado neles**
+  (`injectPromptWhenReady`), que preserva quebras de linha. Com
+  `{task}`/`{taskFile}` a sessao e one-shot e nao ha injecao
+- Sessao que sobe com o prompt no argumento comeca em `watchHold`; o hook
+  `UserPromptSubmit` solta, e um timer de 10s (`LAUNCH_HOLD_MS`) cobre o CLI que
+  nao chega la — o dialogo "trust this folder?" aparece antes do prompt e vira
+  `awaiting-input`
 - Aspas por shell (PowerShell no Windows, sh no resto). Comando com espaco no
   caminho vira `& 'caminho'` no PowerShell
 - Escolha do agente: `AgentSelect` no TaskViewer (grava na task) e no

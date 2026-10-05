@@ -586,9 +586,15 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `buildAgentLaunch()` monta a linha de comando. O template de args aceita
   `{cwd}`, `{taskFile}` (arquivo com o prompt inteiro, em `data/agent-prompts/`,
   limpo apos 24h) e `{task}` (prompt em uma linha, entre aspas do shell)
-- **Sem placeholder de prompt o CLI sobe vazio e o prompt e digitado nele**
-  (`injectPromptWhenReady`) — e o caminho dos builtins, e o unico que preserva
-  quebras de linha. Com `{task}`/`{taskFile}` a sessao e one-shot e nao ha injecao
+- **Claude Code recebe o prompt como argumento** (`claude [opcoes] -- <prompt>`,
+  `promptAsArgument`): o proprio CLI envia quando sobe e a sessao continua
+  interativa. O prompt vai para um arquivo em `data/agent-prompts/` e o shell o
+  le de volta como um argumento so. Exige o `claude.exe` nativo no Windows e
+  prompt de ate 20 mil caracteres; fora disso cai na injecao. Detalhes no
+  CLAUDE.md
+- **Os outros builtins sobem vazios e o prompt e digitado neles**
+  (`injectPromptWhenReady`), que preserva quebras de linha. Com
+  `{task}`/`{taskFile}` a sessao e one-shot e nao ha injecao
 - Aspas por shell (PowerShell no Windows, sh no resto). Comando com espaco no
   caminho vira `& 'caminho'` no PowerShell
 - Escolha do agente: `AgentSelect` no TaskViewer (grava na task) e no

@@ -134,6 +134,15 @@ async function detectDevCommand(projectPath: string): Promise<string | null> {
   return null;
 }
 
+// How long a CLI started with its prompt gets to boot before the screen is judged.
+const LAUNCH_HOLD_MS = 10_000;
+
+/** `--settings` for a Claude session, so it reports its state through hooks. */
+async function hookArgs(sessionId: string): Promise<string> {
+  const path = await writeHookSettings(sessionId);
+  return path ? `--settings ${quote(path)}` : '';
+}
+
 export async function createSession(
   projectId: string,
   projectPath: string,
@@ -186,20 +195,16 @@ export async function createSession(
   } else if (type === 'claude' && !agentId) {
     // Plain Claude tab from the project menu — permissions prompt intact.
     env['CLAUDECODE'] = '';
-    initialCommand = 'claude';
+    initialCommand = ['claude', await hookArgs(id)].filter(Boolean).join(' ');
     runsClaude = true;
   } else if (AGENT_SESSION_TYPES.has(type)) {
     agent = resolveAgent(agentId);
     runsClaude = agent.id === DEFAULT_AGENT_ID;
     if (runsClaude) env['CLAUDECODE'] = '';
-    const launch = await buildAgentLaunch(agent, { cwd: workdir, prompt });
+    const extraArgs = runsClaude ? await hookArgs(id) : '';
+    const launch = await buildAgentLaunch(agent, { cwd: workdir, prompt, extraArgs });
     initialCommand = launch.command;
     injectPrompt = launch.injectsPrompt;
-  }
-
-  if (runsClaude && initialCommand) {
-    const hookSettings = await writeHookSettings(id);
-    if (hookSettings) initialCommand += ` --settings ${quote(hookSettings)}`;
   }
 
   const maxLen = 18;
@@ -284,6 +289,17 @@ export async function createSession(
     // once the injection is over.
     startOutputWatcher(id, { hold: true });
     injectPromptWhenReady(id, prompt, () => releaseOutputWatcher(id));
+  } else if (prompt && runsClaude) {
+    // The prompt went in on the command line and the CLI submits it itself.
+    // Its UserPromptSubmit hook ends the hold; the timer covers a CLI that
+    // never gets that far (a "trust this folder?" dialog, no hooks).
+    startOutputWatcher(id, { hold: true });
+    setTimeout(() => {
+      const current = sessions.get(id);
+      if (!current?.watchHold) return;
+      current.watchHold = false;
+      if (!current.hooked) current.working = true;
+    }, LAUNCH_HOLD_MS);
   } else {
     startOutputWatcher(id);
   }
@@ -757,6 +773,7 @@ export function handleClaudeHook(id: string, event: any): boolean {
 
   switch (event?.hook_event_name) {
     case 'UserPromptSubmit':
+      session.watchHold = false;
       session.working = true;
       setSessionState(id, 'busy');
       break;
