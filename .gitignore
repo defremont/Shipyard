@@ -15,10 +15,13 @@ data/mcp-auth.json
 data/sync-config.json
 data/server.log
 data/agent-prompts/
+data/claude-hooks/
 data/terminal-clipboard/
 data/worktrees/
 data/ai-config.json
 data/deploy-config.json
+data/inbox-config.json
+data/cloud-sync.json
 
 # Build artifacts
 client/tsconfig.tsbuildinfo

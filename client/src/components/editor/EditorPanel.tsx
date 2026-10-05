@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { FileCode, Loader2, Eye, Code, GitCompareArrows } from 'lucide-react'
+import { FileCode, FilePen, Loader2, Eye, Code, GitCompareArrows } from 'lucide-react'
 import { toast } from 'sonner'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -12,8 +12,45 @@ import { useSaveFile } from '@/hooks/useFiles'
 import { api } from '@/lib/api'
 import { useGitFileAtRef } from '@/hooks/useGit'
 import type { EditorTab } from '@/hooks/useEditorTabs'
+import { toRepoPath } from '@/lib/repoPath'
 
-const MARKDOWN_EXTENSIONS = new Set(['.md', '.mdx'])
+/** Formats that have something to show besides their source. */
+type PreviewKind = 'markdown' | 'html' | 'svg'
+
+const PREVIEW_KINDS: Record<string, PreviewKind> = {
+  '.md': 'markdown', '.mdx': 'markdown', '.markdown': 'markdown',
+  '.html': 'html', '.htm': 'html',
+  '.svg': 'svg',
+}
+
+function previewKindOf(extension: string): PreviewKind | undefined {
+  return PREVIEW_KINDS[extension.toLowerCase()]
+}
+
+/** What the file looks like rendered — always from the editor's text, so an
+ *  unsaved change shows up too. */
+function FilePreview({ kind, content, name }: { kind: PreviewKind; content: string; name: string }) {
+  if (kind === 'html') {
+    // Sandboxed without same-origin: the page may run its scripts, but it is
+    // a stranger to this app — no cookies, no storage, no API.
+    return <iframe title={name} srcDoc={content} sandbox="allow-scripts" className="h-full w-full border-0 bg-white" />
+  }
+  if (kind === 'svg') {
+    return (
+      <div className="flex h-full items-center justify-center overflow-auto scrollbar-dark p-6">
+        {/* As an image an SVG cannot run script or reach the page. */}
+        <img alt={name} src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(content)}`} className="max-h-full max-w-full" />
+      </div>
+    )
+  }
+  return (
+    <div className="h-full overflow-auto scrollbar-dark p-6">
+      <div className="prose prose-invert prose-sm max-w-none">
+        <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a> }}>{content}</Markdown>
+      </div>
+    </div>
+  )
+}
 
 interface EditorPanelProps {
   projectId: string
@@ -24,6 +61,8 @@ interface EditorPanelProps {
   onContentChange: (path: string, content: string) => void
   onMarkSaved: (path: string, content: string) => void
   onInitContent: (path: string, content: string) => void
+  /** Leave the diff and open the file itself in the same tab. */
+  onEditFile?: (tab: EditorTab) => void
 }
 
 function TabContentLoader({ projectId, tab, onInit }: { projectId: string; tab: EditorTab; onInit: (path: string, content: string) => void }) {
@@ -85,9 +124,11 @@ function DiffTabContent({ projectId, tab }: { projectId: string; tab: EditorTab 
   // Unstaged diff: index "‌:0" (original — what's already staged, falls back to HEAD
   // when the file isn't staged) ↔ working tree content (modified — `tab.content`).
   const originalRef = isStaged ? 'HEAD' : ':0'
+  // The tab holds the path from the project root; git wants it from its own.
+  const repoPath = toRepoPath(tab.path, tab.subrepo)
   const { data: originalData, isLoading: originalLoading } = useGitFileAtRef(
     projectId,
-    tab.path,
+    repoPath,
     originalRef,
     tab.subrepo,
   )
@@ -95,7 +136,7 @@ function DiffTabContent({ projectId, tab }: { projectId: string; tab: EditorTab 
   // we just compare against the working tree the editor already loaded.
   const { data: stagedData, isLoading: stagedLoading } = useGitFileAtRef(
     projectId,
-    isStaged ? tab.path : undefined,
+    isStaged ? repoPath : undefined,
     ':0',
     tab.subrepo,
   )
@@ -129,6 +170,7 @@ export function EditorPanel({
   onContentChange,
   onMarkSaved,
   onInitContent,
+  onEditFile,
 }: EditorPanelProps) {
   const saveFile = useSaveFile()
   // A queue, not one path: "Close All" hands over several dirty files and each
@@ -137,7 +179,7 @@ export function EditorPanel({
   const confirmClose = confirmQueue[0] ?? null
   const [previewPaths, setPreviewPaths] = useState<Set<string>>(new Set())
   const activeTab = tabs.find(t => t.path === activeTabPath)
-  const isMarkdown = activeTab ? MARKDOWN_EXTENSIONS.has(activeTab.extension) : false
+  const canPreview = !!activeTab && !activeTab.diffMode && !!previewKindOf(activeTab.extension)
   const isPreview = activeTab ? previewPaths.has(activeTab.path) : false
 
   const togglePreview = useCallback(() => {
@@ -221,10 +263,10 @@ export function EditorPanel({
         onCloseTab={handleCloseTab}
       />
 
-      {/* Toolbar: markdown preview toggle + diff mode indicator */}
-      {activeTab && !activeTab.needsFetch && (isMarkdown || activeTab.diffMode) && (
+      {/* Toolbar: preview toggle + diff mode indicator */}
+      {activeTab && !activeTab.needsFetch && (canPreview || activeTab.diffMode) && (
         <div className="flex items-center gap-1 px-2 py-1 border-b bg-card/50 shrink-0">
-          {isMarkdown && (
+          {canPreview && (
             <button
               onClick={togglePreview}
               className="flex items-center gap-1.5 px-2 py-1 text-xs rounded hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
@@ -249,12 +291,22 @@ export function EditorPanel({
               <span>Diff: HEAD vs {activeTab.diffMode === 'staged' ? 'staged' : 'working tree'}</span>
             </div>
           )}
+          {activeTab.diffMode && onEditFile && (
+            <button
+              onClick={() => onEditFile(activeTab)}
+              className="ml-auto flex items-center gap-1.5 px-2 py-1 text-xs rounded hover:bg-accent/50 transition-colors text-muted-foreground hover:text-foreground"
+              title="Open the file itself, to read or edit it"
+            >
+              <FilePen className="h-3.5 w-3.5" />
+              <span>Edit file</span>
+            </button>
+          )}
         </div>
       )}
 
       <div className="flex-1 min-h-0 relative">
         {tabs.map(tab => {
-          const showPreview = previewPaths.has(tab.path) && MARKDOWN_EXTENSIONS.has(tab.extension)
+          const previewKind = previewPaths.has(tab.path) ? previewKindOf(tab.extension) : undefined
           return (
             <div
               key={tab.path}
@@ -264,12 +316,8 @@ export function EditorPanel({
                 <TabContentLoader projectId={projectId} tab={tab} onInit={onInitContent} />
               ) : tab.diffMode ? (
                 <DiffTabContent projectId={projectId} tab={tab} />
-              ) : showPreview ? (
-                <div className="h-full overflow-auto scrollbar-dark p-6">
-                  <div className="prose prose-invert prose-sm max-w-none">
-                    <Markdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{ a: ({ children, ...props }) => <a {...props} target="_blank" rel="noopener noreferrer">{children}</a> }}>{tab.content}</Markdown>
-                  </div>
-                </div>
+              ) : previewKind ? (
+                <FilePreview kind={previewKind} content={tab.content} name={tab.name} />
               ) : (
                 <CodeMirrorEditor
                   value={tab.content}

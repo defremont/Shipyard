@@ -44,6 +44,7 @@ server/src/
 data/           # Persistencia (auto-criado)
   projects.json, settings.json, ai-config.json, .claude-key,   # claude.json = legado, migrado
   mcp-config.json, mcp-auth.json, server.log,
+  claude-hooks/{sessionId}.json,   # settings de hooks por sessao Claude (efemero)
   sync-config.json,                # v3: providers (creds globais) + projects[id][provider][milestoneId]
   deploy-config.json,              # token Railway (cifrado) + link por projeto
   cloud-sync.json,                 # Shipyard Cloud: sessao cifrada + cursor/hashes do sync
@@ -115,7 +116,7 @@ interface Project {
 **Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
 **Git**: GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
-**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id
+**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **AI (multi-provedor)**: GET /api/ai/status, POST /api/ai/preferred, POST/DELETE /api/ai/config/:provider, POST /api/ai/config/:provider/test
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
@@ -374,6 +375,18 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   nada). So monta com o dropdown aberto e usa a chave do `useGitStatus` — o
   seletor fechado nao faz poll de 12 repos
 - Query keys incluem `subrepo`: `['git-status', projectId, subrepo]`
+- **Git fala em caminho relativo ao repo; editor e rotas de arquivo, relativo
+  ao projeto.** `lib/repoPath.ts` (`toProjectPath` / `toRepoPath`) converte, e
+  o `SingleRepoPanel` e quem traduz na saida para o editor. A aba do editor
+  guarda o caminho **do projeto**; o `DiffTabContent` volta ao do repo para
+  pedir o ref ao git. Sem isso, arquivo de sub-repo abria vazio: a leitura
+  falhava e aba de diff engole o erro como "sem conteudo"
+
+### Editor: preview
+- `PREVIEW_KINDS` em EditorPanel: markdown (`.md`, `.mdx`, `.markdown`), HTML
+  (iframe `sandbox="allow-scripts"`, sem same-origin) e SVG (como `<img>`,
+  que nao roda script). Sempre a partir do texto do editor, entao mudanca nao
+  salva aparece. Aba em diff nao tem preview; "Edit file" sai do diff
 
 ### MCP (servidor de ferramentas para agentes)
 - `mcpServer.ts` expoe 29 tools. Cobertura: projetos, milestones (CRUD),
@@ -496,16 +509,87 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Digitar `claude` e dar Enter conta como input e ligaria `working`, entao o
   reconhecimento do CLI **zera `working`** (fora de `watchHold`): subir o CLI
   nao e trabalho
-- Transicoes viram frame WS `{ type: 'state', state }` e o estado atual e
-  reenviado quando um socket conecta. **O socket so existe com o terminal
-  montado** — com o painel fechado (board na frente) nada chegaria, que e
-  justamente quando o aviso importa. Por isso `GET /api/terminal/sessions`
-  devolve `state` e o TerminalPanel faz poll de 3s (`useLiveTerminalSessions`),
-  passando pelo mesmo `applyState` dos frames
+- **So o que submete conta como resposta** (`noteSessionInput`): Enter, ou,
+  num dialogo, digito e Esc. Seta e rascunho digitado nao tiram o aviso — antes
+  cada tecla virava `busy` e a pergunta piscava. `session.asking`
+  (`dialog` | `prose`) diz de que tipo e a espera
+- `DECISION_RE` casa tambem o **rodape** do dialogo (`Enter to confirm`,
+  `Enter to select`, `Esc to cancel`): ele e a ultima linha de todo dialogo,
+  entao continua a vista quando a lista e mais alta que as 15 linhas lidas, e
+  ha dialogo sem numero nenhum ("Yes, I trust this folder"). Era assim que uma
+  pergunta pendente aparecia como "trabalhando"
+- **O titulo e a melhor testemunha de "nada rodando"** (`session.resting`):
+  um Esc devolve o prompt enviado para a caixa, entao a tela nao mostra prompt
+  vazio, e um pedaco pode terminar num `esc to interrupt` velho
+- Titulo **vazio** = o CLI saiu (`markCliGone`): estado volta a `null` (shell
+  comum). `goneUntil` ignora por 5s os ultimos frames, que ainda trazem as
+  marcas do CLI
+- Sessao de outro agente (Codex, Aider...) **nao recebe estado**: nada do que
+  lemos vale para a tela deles e a aba ficava em `busy` para sempre
+- Tudo sai por **um fluxo SSE**, `GET /api/terminal/events`
+  (`onSessionEvent`): `snapshot` ao conectar, depois `state` / `label` /
+  `exit`. O socket de um terminal so existe com ele montado, e timer de janela
+  minimizada e estrangulado pelo Chromium ate 1 tick por minuto — por isso nao
+  ha mais poll nem frame de estado no WS. O `EventSource` reconecta sozinho e
+  cada conexao recomeca do snapshot
+- O `pty.onExit` do **service** fecha a sessao e emite `exit`; antes so o WS
+  ouvia, e processo que morria com o painel fechado ficava zumbi
 - No client: `state` no `GlobalTab` (o que o CLI faz) + `awaitingInput` /
   `finished` (ainda nao visto). `tabStatus()` reduz a um `SessionStatus`.
   Pergunta fica acesa ate ser respondida, mesmo na aba aberta; "terminou" some
   quando a aba e vista
+
+### Hooks do Claude Code (fonte primaria do estado)
+- Ler a tela e inferencia. Sessao Claude aberta pelo Shipyard sobe com
+  `--settings data/claude-hooks/{sessionId}.json` (`claudeHooks.ts`): hooks
+  `type: http` que postam em `POST /api/terminal/hook/:sessionId`. Nada em
+  `~/.claude` nem no projeto e tocado; o arquivo some com a sessao e a pasta e
+  varrida no boot
+- Eventos e o que viram (`handleClaudeHook`): `UserPromptSubmit` → `busy`;
+  `PreToolUse` de `AskUserQuestion|ExitPlanMode`, `PermissionRequest` e
+  `Elicitation` → `awaiting-input` (dialog); `Stop` → `finished`, ou
+  `awaiting-input` (prose) quando `last_assistant_message` termina em `?`
+  (`endsWithQuestion`, ultimas 3 linhas); `StopFailure` → `finished`;
+  `SessionEnd` (menos `reason: clear`) → sem estado
+- **So esses eventos**: cada hook e um request que o CLI espera. Nao registrar
+  `PostToolUse` nem `PreToolUse` geral — tool de subagente em paralelo
+  apagaria uma pergunta pendente. `Notification: permission_prompt` chega 6s
+  depois do dialogo e marcaria pergunta ja respondida
+- A rota responde `{}` na hora: qualquer corpo seria lido como decisao sobre a
+  tool
+- **Hook e titulo chegam por canais diferentes** (HTTP e PTY) e em qualquer
+  ordem: spinner no titulo ate 1,5s depois de um hook de parada
+  (`HOOK_TITLE_GRACE_MS`) e o frame anterior, nao trabalho novo
+- Com `session.hooked` o leitor de tela so cobre o que hook nenhum anuncia:
+  dialogo desconhecido (so enquanto a aba diz `busy`), Esc e comando de barra
+  (titulo em repouso + `busy` → `idle`). Enter nao vira `busy` ali — quem diz
+  e o `UserPromptSubmit`
+- `claude` digitado a mao num shell nao tem `--settings`: segue so pela tela
+- Verificado no CLI 2.1.289. `SessionStart` nao chega por hook http
+
+### Avisos de sessao (som, notificacao, barra de tarefas)
+- `lib/sessionAlerts.ts` + cartao em Settings > Preferences. Por evento
+  (`question` / `finished`) tres canais: som, notificacao e barra de tarefas.
+  Fica em `shipyard:session-alerts` (localStorage — e desta maquina)
+- Quem dispara e um efeito no TerminalPanel que compara o `state` de cada aba
+  com o anterior. **Vale a mudanca**: estado que ja estava la no load e aba
+  vista pela primeira vez nao sao noticia (`alertsArmedRef`)
+- "Olhando" = aba no pane **e** painel aberto **e** `document.hasFocus()`
+  (`isWatching`). Janela minimizada ou atras de outra nao conta — a aba
+  ativa tambem ganha o "terminou" e o aviso sai. Voltar o foco limpa
+- Olhando: nada, ou so o som se `whenWatching`
+- Desktop: IPC `session-alert` → `Notification` do Electron (`silent`, o som
+  e nosso) + `flashFrame`; o clique manda `session-alert-click` e o renderer
+  emite `shipyard:focus-terminal`. Navegador: Web Notification (pede
+  permissao ao ligar) e `●` no titulo da aba
+- Sons em `lib/sounds.ts` (`playSessionSound`): pergunta = a mesma nota duas
+  vezes; terminou = tres notas subindo. Tem que dar para distinguir sem olhar
+- `backgroundThrottling: false` na janela: agente trabalha com ela minimizada
+
+### Ultimo terminal por projeto
+- `shipyard:terminal-last-by-project` (`{ projectId: sessionId }`), gravado
+  quando a aba ativa muda. Voltar a um projeto reabre a sessao que estava
+  aberta nele; sem lembranca (ou sessao fechada), a primeira viva
 
 ### Abas do terminal: nome, ordem e split
 - O nome de uma aba nao e uma string so: o server guarda `projectName`,

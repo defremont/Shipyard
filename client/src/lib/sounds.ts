@@ -6,6 +6,9 @@ function getAudioContext(): AudioContext {
   if (!audioCtx) {
     audioCtx = new AudioContext()
   }
+  // A context created before the first click starts suspended, and one in a
+  // window left in the background can be put back to sleep.
+  if (audioCtx.state === 'suspended') void audioCtx.resume().catch(() => {})
   return audioCtx
 }
 
@@ -17,21 +20,11 @@ export function setSoundEnabled(enabled: boolean) {
   localStorage.setItem(SOUND_KEY, String(enabled))
 }
 
-/**
- * Play a subtle two-tone chime when AI operations complete.
- * Uses Web Audio API — no audio files needed.
- */
-export function playAiCompleteSound() {
-  if (!isSoundEnabled()) return
-
+/** Play a short run of sine notes. Web Audio API — no audio files needed. */
+function playNotes(frequencies: number[], { duration = 0.12, gap = 0.08, volume = 0.15 } = {}) {
   try {
     const ctx = getAudioContext()
     const now = ctx.currentTime
-
-    // Two-tone ascending chime (C5 → E5)
-    const frequencies = [523.25, 659.25]
-    const duration = 0.12
-    const gap = 0.08
 
     frequencies.forEach((freq, i) => {
       const osc = ctx.createOscillator()
@@ -42,7 +35,7 @@ export function playAiCompleteSound() {
 
       const start = now + i * (duration + gap)
       gain.gain.setValueAtTime(0, start)
-      gain.gain.linearRampToValueAtTime(0.15, start + 0.02)
+      gain.gain.linearRampToValueAtTime(volume, start + 0.02)
       gain.gain.exponentialRampToValueAtTime(0.001, start + duration)
 
       osc.connect(gain)
@@ -53,4 +46,20 @@ export function playAiCompleteSound() {
   } catch {
     // Silently fail — sound is non-critical
   }
+}
+
+/** A subtle two-tone ascending chime (C5 → E5): an AI operation completed. */
+export function playAiCompleteSound() {
+  if (!isSoundEnabled()) return
+  playNotes([523.25, 659.25])
+}
+
+/**
+ * The two sounds an agent session makes. They have to be told apart without
+ * looking: "finished" resolves upwards and is done; "question" is the same
+ * note twice, like a knock, because someone is waiting.
+ */
+export function playSessionSound(kind: 'question' | 'finished') {
+  if (kind === 'question') playNotes([880, 880], { duration: 0.1, gap: 0.09, volume: 0.18 })
+  else playNotes([523.25, 659.25, 783.99], { duration: 0.11, gap: 0.05 })
 }

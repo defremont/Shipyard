@@ -22,4 +22,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('update-ready', listener);
   },
   installUpdate: () => ipcRenderer.send('install-update'),
+  /** An agent session wants the user: show a notification, flash the taskbar. */
+  sessionAlert: (alert: { sessionId: string; title: string; body: string; desktop: boolean; flash: boolean }) =>
+    ipcRenderer.send('session-alert', alert),
+  onSessionAlertClick: (callback: (sessionId: string) => void) => {
+    const listener = (_event: IpcRendererEvent, sessionId: string) => callback(sessionId);
+    ipcRenderer.on('session-alert-click', listener);
+    return () => ipcRenderer.removeListener('session-alert-click', listener);
+  },
 });

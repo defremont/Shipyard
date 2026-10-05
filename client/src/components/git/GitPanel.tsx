@@ -10,6 +10,7 @@ import { CommitDetailDialog } from './CommitDetailDialog'
 import { useGitStatus, useGitLog, useGitMainCommit, useGitBranches, useCheckoutBranch, useStageAll, useUnstageAll, useGitPush, useGitPull, useDiscardAll, useUndoCommit } from '@/hooks/useGit'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { toProjectPath, toRepoPath } from '@/lib/repoPath'
 import { DeployScopeBadge } from '@/components/deploy/DeployBadge'
 
 interface GitPanelProps {
@@ -23,6 +24,14 @@ interface GitPanelProps {
 
 function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEditor, activeFilePath }: { projectId: string; subrepo?: string; onOpenInEditor?: (path: string, name: string, extension: string) => void; onOpenDiffInEditor?: (path: string, name: string, extension: string, diffMode: 'staged' | 'unstaged', subrepo?: string) => void; activeFilePath?: string | null }) {
   const { data: status, isLoading, isFetching, refetch } = useGitStatus(projectId, subrepo)
+  // Git names files from the repository; the editor opens them from the
+  // project. In a sub-repository the two differ, and handing over git's path
+  // made the editor read a file that is not there and show it empty.
+  const openInEditor = useMemo(() => onOpenInEditor && ((path: string, name: string, extension: string) =>
+    onOpenInEditor(toProjectPath(path, subrepo), name, extension)), [onOpenInEditor, subrepo])
+  const openDiffInEditor = useMemo(() => onOpenDiffInEditor && ((path: string, name: string, extension: string, diffMode: 'staged' | 'unstaged', repo?: string) =>
+    onOpenDiffInEditor(toProjectPath(path, subrepo), name, extension, diffMode, repo)), [onOpenDiffInEditor, subrepo])
+  const activeRepoPath = activeFilePath ? toRepoPath(activeFilePath, subrepo) : activeFilePath
   const { data: logData } = useGitLog(projectId, subrepo)
   const { data: mainCommitData } = useGitMainCommit(projectId, status?.current, subrepo)
   const { data: branchData } = useGitBranches(projectId, subrepo)
@@ -227,9 +236,9 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
               files={stagedFiles}
               staged
               subrepo={subrepo}
-              onOpenInEditor={onOpenInEditor}
-              onOpenDiffInEditor={onOpenDiffInEditor}
-              activeFilePath={activeFilePath}
+              onOpenInEditor={openInEditor}
+              onOpenDiffInEditor={openDiffInEditor}
+              activeFilePath={activeRepoPath}
             />
           )}
         </div>
@@ -280,9 +289,9 @@ function SingleRepoPanel({ projectId, subrepo, onOpenInEditor, onOpenDiffInEdito
               files={unstagedFiles}
               staged={false}
               subrepo={subrepo}
-              onOpenInEditor={onOpenInEditor}
-              onOpenDiffInEditor={onOpenDiffInEditor}
-              activeFilePath={activeFilePath}
+              onOpenInEditor={openInEditor}
+              onOpenDiffInEditor={openDiffInEditor}
+              activeFilePath={activeRepoPath}
             />
           )}
         </div>

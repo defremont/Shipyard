@@ -8,6 +8,7 @@ import { AiSettingsCard } from '@/components/ai/AiSettingsCard'
 import { AgentSettingsCard } from '@/components/ai/AgentSettingsCard'
 import { WorktreeSettingsCard } from '@/components/ai/WorktreeSettingsCard'
 import { TerminalTitleSettingsCard } from '@/components/ai/TerminalTitleSettingsCard'
+import { SessionAlertsSettingsCard } from '@/components/terminals/SessionAlertsSettingsCard'
 import { RailwaySettingsCard } from '@/components/deploy/RailwaySettingsCard'
 import { McpSettingsCard } from '@/components/mcp/McpSettingsCard'
 import { CloudSettingsCard } from '@/components/cloud/CloudSettingsCard'
@@ -418,6 +419,8 @@ export function Settings() {
                   </button>
                 </CardContent>
               </Card>
+
+              <SessionAlertsSettingsCard />
             </>
           )}
 

@@ -132,7 +132,7 @@ const PROMPT_DIR = join(DATA_DIR, 'agent-prompts');
 const PROMPT_TTL_MS = 24 * 60 * 60 * 1000;
 
 /** Quote a value for the shell the integrated terminal runs (PowerShell or sh). */
-function quote(value: string): string {
+export function quote(value: string): string {
   return isWindows
     ? `'${value.replace(/'/g, "''")}'`
     : `'${value.replace(/'/g, `'\''`)}'`;

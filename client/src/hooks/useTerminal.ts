@@ -20,22 +20,6 @@ export function useTerminalSessions(projectId?: string) {
   })
 }
 
-/**
- * Every live session, polled while the terminal panel has tabs. This is how a
- * tab learns its label and what its CLI is doing while its terminal is not
- * mounted (the socket only exists for a mounted terminal). The route reads an
- * in-memory map, so it is cheap.
- */
-export function useLiveTerminalSessions(enabled: boolean) {
-  return useQuery({
-    queryKey: ['terminal', 'sessions', 'all'],
-    queryFn: () => api.getTerminalSessions(),
-    enabled,
-    refetchInterval: 3_000,
-    staleTime: 2_000,
-  })
-}
-
 export function useRenameTerminalSession() {
   const queryClient = useQueryClient()
   return useMutation({

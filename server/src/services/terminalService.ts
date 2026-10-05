@@ -2,8 +2,9 @@ import { platform } from 'os';
 import { nanoid } from 'nanoid';
 import { readFile } from 'fs/promises';
 import { join } from 'path';
-import { resolveAgent, buildAgentLaunch, DEFAULT_AGENT_ID } from './agentRegistry.js';
+import { resolveAgent, buildAgentLaunch, quote, DEFAULT_AGENT_ID } from './agentRegistry.js';
 import { aiTitlesEnabled, cleanTerminalOutput, summarizeTerminal } from './terminalSummary.js';
+import { endsWithQuestion, removeHookSettings, writeHookSettings } from './claudeHooks.js';
 import type { AgentDefinition } from '../types/index.js';
 
 const os = platform();
@@ -44,8 +45,20 @@ export interface TerminalSession {
    *  Without it, the idle prompt a freshly opened CLI shows would read as
    *  "finished" before any work was asked of it. */
   working?: boolean;
-  /** Set by the WS layer — called on every state transition */
-  onStateChange?: (state: TerminalState) => void;
+  /** Why the session is `awaiting-input`: a dialog on screen, or a run that
+   *  ended on a question in plain prose. A dialog is only left by answering
+   *  it; moving the selection around is not an answer. */
+  asking?: 'dialog' | 'prose';
+  /** The Claude CLI has shown itself in this terminal. */
+  claude?: boolean;
+  /** The CLI in this terminal reports through hooks (see handleClaudeHook). */
+  hooked?: boolean;
+  /** When a hook last said the CLI stopped — see readTitles. */
+  hookAt?: number;
+  /** The CLI has just quit: until then its last frames are not read as a CLI. */
+  goneUntil?: number;
+  /** The terminal title shows the resting glyph: no run in flight. */
+  resting?: boolean;
   /** True once the output watcher has been attached (never attach twice) */
   watching?: boolean;
   /** Project name, so the client can build the tab label itself */
@@ -64,11 +77,33 @@ export interface TerminalSession {
   titled?: boolean;
   /** Prompt injection is still under way: the screen is not classified yet */
   watchHold?: boolean;
-  /** Set by the WS layer — called when `summary` changes */
-  onLabelChange?: (summary: string | undefined) => void;
 }
 
 const sessions = new Map<string, TerminalSession>();
+
+// ── Session events ─────────────────────────────────────────────────────
+//
+// What every session is doing, for whoever wants to know. One stream for all
+// of them: a terminal's own socket only exists while that terminal is on
+// screen, and the moment a flag matters is when it is not.
+
+export type SessionEvent =
+  | { type: 'state'; sessionId: string; state: TerminalState | null }
+  | { type: 'label'; sessionId: string; summary: string | null }
+  | { type: 'exit'; sessionId: string; code: number };
+
+const sessionListeners = new Set<(event: SessionEvent) => void>();
+
+export function onSessionEvent(listener: (event: SessionEvent) => void): () => void {
+  sessionListeners.add(listener);
+  return () => { sessionListeners.delete(listener); };
+}
+
+function emitSessionEvent(event: SessionEvent): void {
+  for (const listener of sessionListeners) {
+    try { listener(event); } catch {}
+  }
+}
 
 // Session types that run a coding agent, so the picked agent decides the
 // command line. 'claude' is here too, but only when a session explicitly names
@@ -143,18 +178,28 @@ export async function createSession(
   // nothing left to type into it once it starts.
   let injectPrompt = false;
 
+  // Claude Code is the one CLI that reports its own state (see claudeHooks).
+  let runsClaude = false;
+
   if (type === 'dev') {
     initialCommand = await detectDevCommand(workdir);
   } else if (type === 'claude' && !agentId) {
     // Plain Claude tab from the project menu — permissions prompt intact.
     env['CLAUDECODE'] = '';
     initialCommand = 'claude';
+    runsClaude = true;
   } else if (AGENT_SESSION_TYPES.has(type)) {
     agent = resolveAgent(agentId);
-    if (agent.id === DEFAULT_AGENT_ID) env['CLAUDECODE'] = '';
+    runsClaude = agent.id === DEFAULT_AGENT_ID;
+    if (runsClaude) env['CLAUDECODE'] = '';
     const launch = await buildAgentLaunch(agent, { cwd: workdir, prompt });
     initialCommand = launch.command;
     injectPrompt = launch.injectsPrompt;
+  }
+
+  if (runsClaude && initialCommand) {
+    const hookSettings = await writeHookSettings(id);
+    if (hookSettings) initialCommand += ` --settings ${quote(hookSettings)}`;
   }
 
   const maxLen = 18;
@@ -199,10 +244,23 @@ export async function createSession(
     ...(task?.title ? { taskTitle: task.title } : {}),
     ...(task?.number ? { taskNumber: task.number } : {}),
     ...(agent ? { agent: agent.id } : {}),
-    ...(CLAUDE_SESSION_TYPES.has(type) ? { state: 'busy' as TerminalState } : {}),
+    // Another agent's CLI says nothing we can read, so its tab claims nothing:
+    // a state set here would never change and the tab would spin forever.
+    ...(runsClaude ? { state: 'busy' as TerminalState, claude: true } : {}),
   };
 
   sessions.set(id, session);
+
+  // The process can die while no terminal is mounted to hear it (the board is
+  // in front), so the session is closed from here, not from the socket.
+  pty.onExit(({ exitCode }) => {
+    if (!sessions.has(id)) return;
+    // Let the socket, if there is one, flush the last output first.
+    setImmediate(() => {
+      killSession(id);
+      emitSessionEvent({ type: 'exit', sessionId: id, code: exitCode });
+    });
+  });
 
   // Send initial command after shell initializes
   // Use a longer delay on Windows (PowerShell startup is slower)
@@ -254,16 +312,17 @@ export function killSession(id: string): boolean {
   pendingResizes.delete(id);
   stopOutputWatcher(id);
   stopSummaryWatcher(id);
+  removeHookSettings(id);
   return true;
 }
 
-type SessionInfo = Omit<TerminalSession, 'pty' | 'onStateChange' | 'onLabelChange'>;
+type SessionInfo = Omit<TerminalSession, 'pty'>;
 
 export function listSessions(projectId?: string): SessionInfo[] {
   const list: SessionInfo[] = [];
   for (const session of sessions.values()) {
     if (!projectId || session.projectId === projectId) {
-      const { pty, onStateChange, onLabelChange, ...rest } = session;
+      const { pty, ...rest } = session;
       list.push(rest);
     }
   }
@@ -301,7 +360,7 @@ export function listAiSessions(): SessionInfo[] {
   const list: SessionInfo[] = [];
   for (const session of sessions.values()) {
     if (session.taskId) {
-      const { pty, onStateChange, onLabelChange, ...rest } = session;
+      const { pty, ...rest } = session;
       list.push(rest);
     }
   }
@@ -613,16 +672,17 @@ export function injectPromptWhenReady(sessionId: string, prompt: string, onInjec
 // the user never notices. So we watch the output of every Claude session and
 // tell the client when the CLI is waiting on a human.
 
-const CLAUDE_SESSION_TYPES = new Set(['claude', 'claude-yolo', 'ai-resolve', 'ai-manage']);
-
 // Claude is not only where it was launched from: people open a shell and type
 // `claude` in it. So the screen decides, not the session type — these are the
 // marks the CLI leaves on it (the status line, the hint bar, its own banner).
 const CLAUDE_SCREEN_RE = /bypass permissions|\? for shortcuts|esc to interrupt|Claude Code v\d|shift\+tab to cycle/i;
 
-// A permission dialog or a numbered choice list — the CLI is blocked on a
-// decision, not merely idle.
-const DECISION_RE = /Do you want|❯\s*\d[.)]|\(y\/n\)/i;
+// A permission dialog or a choice list — the CLI is blocked on a decision, not
+// merely idle. The footer counts as much as the options: it is the last line
+// of every dialog, so it is still in view when a long list has pushed the
+// selected option out of the lines we read, and some dialogs ("Yes, I trust
+// this folder") have no numbers at all.
+const DECISION_RE = /Do you want|❯\s*\d[.)]|\(y\/n\)|Enter to (?:confirm|select)|Esc to cancel/i;
 
 // The empty input box, as it survives cleanTerminalOutput: a line that is a
 // prompt character and nothing else, or the greyed-out suggestion the CLI
@@ -660,18 +720,84 @@ function lastLines(clean: string): string[] {
     .slice(-IDLE_TAIL_LINES);
 }
 
-function setSessionState(id: string, state: TerminalState): void {
+function setSessionState(id: string, state: TerminalState | null, asking?: 'dialog' | 'prose'): void {
   const session = sessions.get(id);
-  if (!session || session.state === state) return;
-  session.state = state;
-  try { session.onStateChange?.(state); } catch {}
+  if (!session) return;
+  session.asking = state === 'awaiting-input' ? asking ?? session.asking : undefined;
+  if ((session.state ?? null) === state) return;
+  if (state) session.state = state;
+  else delete session.state;
+  emitSessionEvent({ type: 'state', sessionId: id, state });
 }
 
 function setSessionSummary(id: string, summary: string): void {
   const session = sessions.get(id);
   if (!session || session.summary === summary) return;
   session.summary = summary;
-  try { session.onLabelChange?.(summary); } catch {}
+  emitSessionEvent({ type: 'label', sessionId: id, summary });
+}
+
+// How long after a hook said the CLI stopped a spinner in the title is still
+// taken for the frame drawn just before it. The hook comes over HTTP and the
+// title through the PTY, so the two can arrive in either order.
+const HOOK_TITLE_GRACE_MS = 1_500;
+const CLI_EXIT_GRACE_MS = 5_000;
+
+/**
+ * Claude Code reporting on itself (see claudeHooks). These are facts, where
+ * the screen watcher below only infers — so they set the state outright, and
+ * the watcher is left to cover what no hook announces: an interrupted run and
+ * a CLI someone started by hand.
+ */
+export function handleClaudeHook(id: string, event: any): boolean {
+  const session = sessions.get(id);
+  if (!session) return false;
+  session.claude = true;
+  session.hooked = true;
+
+  switch (event?.hook_event_name) {
+    case 'UserPromptSubmit':
+      session.working = true;
+      setSessionState(id, 'busy');
+      break;
+    case 'PreToolUse':
+    case 'PermissionRequest':
+    case 'Elicitation':
+      session.hookAt = Date.now();
+      setSessionState(id, 'awaiting-input', 'dialog');
+      break;
+    case 'StopFailure':
+      // The run died on an API error. It is over all the same.
+      session.hookAt = Date.now();
+      session.working = false;
+      setSessionState(id, 'finished');
+      break;
+    case 'Stop':
+      session.hookAt = Date.now();
+      session.working = false;
+      if (endsWithQuestion(event.last_assistant_message)) setSessionState(id, 'awaiting-input', 'prose');
+      else setSessionState(id, 'finished');
+      break;
+    case 'SessionEnd':
+      // `/clear` ends a session and starts the next in the same process.
+      if (event.reason === 'clear') break;
+      markCliGone(id);
+      break;
+  }
+  return true;
+}
+
+/** The CLI quit: the terminal is a plain shell again, with nothing to report. */
+function markCliGone(id: string): void {
+  const session = sessions.get(id);
+  if (!session) return;
+  session.claude = false;
+  session.hooked = false;
+  session.titled = false;
+  session.working = false;
+  // What it draws on the way out still carries its marks.
+  session.goneUntil = Date.now() + CLI_EXIT_GRACE_MS;
+  setSessionState(id, null);
 }
 
 // ── What Claude Code says about itself ─────────────────────────────────
@@ -760,16 +886,14 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
   let lastOutputTime = Date.now();
   let lastBusyCheck = 0;
   let sawOutput = false;
-  let sawClaude = false;
 
   /** The CLI has just shown itself. Typing `claude` and pressing Enter counts
    *  as input, but booting is not work, so the first prompt it draws must not
    *  be announced as a finished run. */
   const markClaude = () => {
-    if (sawClaude) return;
-    sawClaude = true;
     const current = sessions.get(sessionId);
-    if (!current) return;
+    if (!current || current.claude) return;
+    current.claude = true;
     if (!current.watchHold) current.working = false;
     // A shell someone typed `claude` into has no state yet.
     if (!current.state) setSessionState(sessionId, 'busy');
@@ -783,10 +907,17 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
     titleCarry = open !== -1 && !/\x07|\x1b\\/.test(text.slice(open + 2)) ? text.slice(open, open + 512) : '';
 
     for (const match of text.matchAll(OSC_TITLE_RE)) {
-      const title = parseTitle(match[1]);
-      if (!title) continue;
       const current = sessions.get(sessionId);
       if (!current) return;
+      // The CLI hands the title back empty when it quits. That is the only
+      // word on an exit no hook reports — one before the session began, like
+      // turning down the "trust this folder?" dialog.
+      if (!match[1].trim() && current.claude && !current.watchHold) {
+        markCliGone(sessionId);
+        continue;
+      }
+      const title = parseTitle(match[1]);
+      if (!title) continue;
       // Only a terminal that has introduced itself as Claude Code is trusted
       // from then on — any program may put a symbol in front of its title.
       if (title.text === CLAUDE_TITLE_NAME) current.titled = true;
@@ -799,8 +930,13 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
           : title.text;
         setSessionSummary(sessionId, label);
       }
-      // Any glyph but the resting one is the spinner: a run is in flight.
-      if (title.glyph !== TITLE_REST_GLYPH && !current.watchHold) {
+      // Any glyph but the resting one is the spinner: a run is in flight. The
+      // CLI rests the title while a dialog is up and when a run ends, so a
+      // spinner after either means work resumed — unless it is the frame
+      // drawn just before the hook that reported the stop.
+      current.resting = title.glyph === TITLE_REST_GLYPH;
+      const staleFrame = Date.now() - (current.hookAt ?? 0) < HOOK_TITLE_GRACE_MS;
+      if (!current.resting && !current.watchHold && !staleFrame) {
         current.working = true;
         setSessionState(sessionId, 'busy');
       }
@@ -831,7 +967,7 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
       // Output that never settles is a run in flight (the spinner redraws ten
       // times a second), so it has to be recognised without waiting for a
       // pause that will not come.
-      if (sawClaude && current.state !== 'busy' && now - lastBusyCheck >= WATCH_BUSY_CHECK) {
+      if (current.claude && !current.hooked && current.state !== 'busy' && now - lastBusyCheck >= WATCH_BUSY_CHECK) {
         lastBusyCheck = now;
         if (lastLines(cleanTerminalOutput(tail)).slice(-RUNNING_TAIL_LINES).some(line => RUNNING_RE.test(line))) {
           current.working = true;
@@ -850,7 +986,7 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
 
     // Once the CLI has shown itself, the session is a Claude session until it
     // dies — a later frame that draws only the spinner still belongs to it.
-    if (!sawClaude && !looksLikeClaude(clean)) return;
+    if (!current.claude && (now < (current.goneUntil ?? 0) || !looksLikeClaude(clean))) return;
     markClaude();
 
     // Read the screen as it stands, not the whole buffer: one settled chunk
@@ -871,17 +1007,37 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
 
     // A dialog redraws the input area around itself, so a prompt a few lines
     // after it belongs to the same frame, not to a later one.
-    if (decisionAt !== -1 && decisionAt > runningAt && idleAt <= decisionAt + DECISION_FRAME_LINES) {
+    // A session that reports through hooks has already said how its run
+    // ended, so there a dialog is only read off the screen while the tab
+    // still says "busy": one no hook announced, or the next question of a
+    // dialog that asks several.
+    const mayAsk = !current.hooked || current.state === 'busy';
+    if (mayAsk && decisionAt !== -1 && decisionAt > runningAt && idleAt <= decisionAt + DECISION_FRAME_LINES) {
       current.working = false;
-      setSessionState(sessionId, 'awaiting-input');
+      setSessionState(sessionId, 'awaiting-input', 'dialog');
       return;
     }
-    if (runningAt > idleAt) {
+    // The title is the better witness of "no run in flight": the screen may
+    // not show an empty prompt at all — a run interrupted with Esc puts the
+    // prompt that was sent back in the box — and a chunk can end on a stale
+    // "esc to interrupt".
+    const titleRests = !!current.titled && !!current.resting;
+    if (current.hooked) {
+      // Hooks announce every ending but an interrupted run, which leaves the
+      // tab on "busy" with the CLI at rest.
+      const atRest = current.titled ? titleRests : idleAt !== -1;
+      if (atRest && current.state === 'busy') {
+        current.working = false;
+        setSessionState(sessionId, 'idle');
+      }
+      return;
+    }
+    if (!titleRests && runningAt > idleAt) {
       current.working = true;
       setSessionState(sessionId, 'busy');
       return;
     }
-    if (idleAt === -1) return;
+    if (idleAt === -1 && !titleRests) return;
 
     // Back at an empty prompt: a run just ended, or the CLI was never given
     // anything to do. Only the first is worth telling the user about, and it
@@ -889,7 +1045,8 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
     // ended on a question is waiting for an answer, not merely done.
     if (current.working) {
       current.working = false;
-      setSessionState(sessionId, asksSomething(screen) ? 'awaiting-input' : 'finished');
+      if (asksSomething(screen)) setSessionState(sessionId, 'awaiting-input', 'prose');
+      else setSessionState(sessionId, 'finished');
     } else if (current.state === 'busy' || !current.state) {
       // Never downgrade a flag that is still waiting to be seen: an idle
       // repaint of the same screen is not news.
@@ -1001,9 +1158,11 @@ function startSummaryWatcher(sessionId: string): void {
 }
 
 /**
- * Any keystroke or paste means the user answered — back to busy. A submitted
- * line (the Enter) is also what puts the CLI back to work, and only then is the
- * next idle prompt worth calling "finished".
+ * The user answered — back to busy. Only what submits counts: a line sent
+ * with Enter, or, in a dialog, the keys that pick an option (a digit) or
+ * dismiss it (Esc). Typing a draft or moving the selection with the arrows
+ * leaves the CLI exactly as blocked as it was, and flipping the tab to "busy"
+ * on every keystroke made the question flag blink off and on again.
  */
 function noteSessionInput(id: string, data?: string): void {
   const session = sessions.get(id);
@@ -1012,7 +1171,14 @@ function noteSessionInput(id: string, data?: string): void {
   // device attributes, mouse reports) on the input channel. Nobody typed
   // those, and counting them as an answer cleared the flag unseen.
   if (data !== undefined && isTerminalReport(data)) return;
-  if (data === undefined || /[\r\n]/.test(data)) session.working = true;
+  const submitted = data === undefined || /[\r\n]/.test(data);
+  const dialogKey = session.asking === 'dialog' && (data === '\x1b' || /^\d$/.test(data ?? ''));
+  if (!submitted && !dialogKey) return;
+  // A CLI that reports through hooks says so itself when a prompt goes in,
+  // and an Enter that was no prompt (a slash command) is not work. Only the
+  // answer to a dialog has no hook of its own.
+  if (session.hooked && session.asking !== 'dialog') return;
+  session.working = true;
   if (session.state !== 'busy') setSessionState(id, 'busy');
 }
 
@@ -1020,18 +1186,6 @@ const TERMINAL_REPORT_RE = /\x1b\[[IO]|\x1b\[[?>]?[\d;]*[Rcn]|\x1b\[<[\d;]+[Mm]|
 
 function isTerminalReport(data: string): boolean {
   return data.includes('\x1b') && data.replace(TERMINAL_REPORT_RE, '') === '';
-}
-
-export function setLabelListener(id: string, listener: ((summary: string | undefined) => void) | undefined): void {
-  const session = sessions.get(id);
-  if (session) session.onLabelChange = listener;
-}
-
-export function setStateListener(id: string, listener: ((state: TerminalState) => void) | undefined): TerminalState | null {
-  const session = sessions.get(id);
-  if (!session) return null;
-  session.onStateChange = listener;
-  return session.state ?? null;
 }
 
 const MAX_RETRIES = 2;

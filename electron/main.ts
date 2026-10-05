@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, nativeImage, shell, dialog, ipcMain, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, Tray, Menu, Notification, nativeImage, shell, dialog, ipcMain, type MenuItemConstructorOptions } from 'electron';
 import { join, resolve } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { spawn, execSync, type ChildProcess } from 'child_process';
@@ -242,6 +242,48 @@ ipcMain.on('titlebar-command', (_event, command: string) => {
   }
 });
 
+// ── Session alerts ─────────────────────────────────────────────────
+//
+// An agent stopped to ask something, or finished, while the user was
+// elsewhere. The renderer decides when and plays the sound; what only the
+// main process can do is reach outside the window: a desktop notification
+// and the taskbar button.
+
+// One notification per session, the newest replacing the last. The map also
+// keeps them referenced — a collected Notification never delivers its click.
+const sessionNotifications = new Map<string, Notification>();
+
+ipcMain.on('session-alert', (_event, alert: { sessionId: string; title: string; body: string; desktop: boolean; flash: boolean }) => {
+  if (!mainWindow) return;
+  const window = mainWindow;
+
+  // Stops by itself when the window gets focus (see createWindow).
+  if (alert.flash && !window.isFocused()) window.flashFrame(true);
+
+  if (!alert.desktop || !Notification.isSupported()) return;
+  sessionNotifications.get(alert.sessionId)?.close();
+  const notification = new Notification({
+    title: String(alert.title || 'Shipyard'),
+    body: String(alert.body || ''),
+    silent: true, // the renderer plays its own sound
+    icon: existsSync(ICON_PATH) ? ICON_PATH : undefined,
+  });
+  const forget = () => {
+    if (sessionNotifications.get(alert.sessionId) === notification) sessionNotifications.delete(alert.sessionId);
+  };
+  notification.on('click', () => {
+    forget();
+    if (window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.show();
+    window.focus();
+    window.webContents.send('session-alert-click', alert.sessionId);
+  });
+  notification.on('close', forget);
+  sessionNotifications.set(alert.sessionId, notification);
+  notification.show();
+});
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
@@ -262,9 +304,13 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // Agents keep working while the window is minimised or in the tray, and
+      // that is when their alerts have to go out on time.
+      backgroundThrottling: false,
     },
   });
   mainWindow.setMenuBarVisibility(false);
+  mainWindow.on('focus', () => mainWindow?.flashFrame(false));
 
   // In dev mode with Vite, load from dev server; otherwise from Fastify
   if (isDev && process.env.VITE_DEV_SERVER) {

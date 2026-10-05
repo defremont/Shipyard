@@ -15,9 +15,10 @@ import {
   useTerminalStatus,
   useCreateTerminalSession,
   useKillTerminalSession,
-  useLiveTerminalSessions,
   useRenameTerminalSession,
+  type TerminalSessionInfo,
 } from '@/hooks/useTerminal'
+import { alertSession, listenForAlertClicks, type SessionAlertKind } from '@/lib/sessionAlerts'
 import { useLaunchTerminal } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
 import { useAiSessions } from '@/hooks/useAiSessions'
@@ -122,6 +123,7 @@ const PANEL_VISIBLE_KEY = 'shipyard:terminal-visible'
 const TABS_STORAGE_KEY = 'shipyard:terminal-tabs'
 const ACTIVE_TAB_KEY = 'shipyard:terminal-active-tab'
 const SPLIT_SESSION_KEY = 'shipyard:terminal-split-session'
+const LAST_BY_PROJECT_KEY = 'shipyard:terminal-last-by-project'
 const MIN_HEIGHT = 150
 const MAX_HEIGHT_RATIO = 0.7
 const DEFAULT_HEIGHT = 300
@@ -146,6 +148,14 @@ function loadSplitSessionId(): string | null {
     return localStorage.getItem(SPLIT_SESSION_KEY) || null
   } catch {}
   return null
+}
+
+/** projectId → the session that was open the last time that project was in front. */
+function loadLastByProject(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_BY_PROJECT_KEY) || '{}') || {}
+  } catch {}
+  return {}
 }
 
 /**
@@ -411,10 +421,18 @@ export function TerminalPanel() {
     localStorage.setItem(TABS_STORAGE_KEY, JSON.stringify(tabs))
   }, [tabs])
 
-  // Persist active terminal tab
+  // Persist active terminal tab — and remember it as its project's own, so
+  // coming back to a project with several sessions lands on the one that was
+  // open there, not on the first of the strip.
+  const lastByProjectRef = useRef<Record<string, string>>(loadLastByProject())
   useEffect(() => {
     if (activeTabId) {
       localStorage.setItem(ACTIVE_TAB_KEY, activeTabId)
+      const projectId = tabsRef.current.find(t => t.sessionId === activeTabId)?.projectId
+      if (projectId && lastByProjectRef.current[projectId] !== activeTabId) {
+        lastByProjectRef.current = { ...lastByProjectRef.current, [projectId]: activeTabId }
+        localStorage.setItem(LAST_BY_PROJECT_KEY, JSON.stringify(lastByProjectRef.current))
+      }
     } else {
       localStorage.removeItem(ACTIVE_TAB_KEY)
     }
@@ -429,9 +447,26 @@ export function TerminalPanel() {
     }
   }, [splitSessionId])
 
+  /** Is the user looking at this session right now? On screen is not enough:
+   *  the window can be minimised or behind another one, and that is exactly
+   *  when a flag has to stay up and an alert has to go out. */
+  const isWatching = useCallback((sessionId: string) => (
+    (activeTabIdRef.current === sessionId || splitSessionIdRef.current === sessionId)
+    && isVisibleRef.current
+    && document.hasFocus()
+  ), [])
+
+  // Coming back to the window counts as seeing what is on screen.
+  const [focusTick, setFocusTick] = useState(0)
+  useEffect(() => {
+    const handler = () => setFocusTick(tick => tick + 1)
+    window.addEventListener('focus', handler)
+    return () => window.removeEventListener('focus', handler)
+  }, [])
+
   // Clear notification when visible tabs become visible
   useEffect(() => {
-    if (isVisible) {
+    if (isVisible && document.hasFocus()) {
       const visibleIds = [activeTabId, splitSessionId].filter(Boolean) as string[]
       if (visibleIds.length > 0) {
         setTabs(prev => {
@@ -447,32 +482,26 @@ export function TerminalPanel() {
         })
       }
     }
-  }, [isVisible, activeTabId, splitSessionId])
+  }, [isVisible, activeTabId, splitSessionId, focusTick])
 
   /** A state the server reported for a session, turned into what the tab
-   *  shows. Called for socket frames and for the poll alike. */
-  const applyState = useCallback((tab: GlobalTab, state: TerminalState): GlobalTab => {
-    if (tab.state === state) return tab
-    const isVisibleToUser =
-      (activeTabIdRef.current === tab.sessionId || splitSessionIdRef.current === tab.sessionId) && isVisibleRef.current
+   *  shows. `null` is a terminal with no agent in it: nothing to report. */
+  const applyState = useCallback((tab: GlobalTab, state: TerminalState | null): GlobalTab => {
+    if ((tab.state ?? null) === state) return tab
+    const watching = isWatching(tab.sessionId)
     return {
       ...tab,
-      state,
-      awaitingInput: state === 'awaiting-input' && !isVisibleToUser,
+      state: state ?? undefined,
+      awaitingInput: state === 'awaiting-input' && !watching,
       // The tab the user is on never gets the "finished" flag: they can see
       // the prompt for themselves. Going back to work clears it.
-      finished: state === 'finished' && !isVisibleToUser,
+      finished: state === 'finished' && !watching,
     }
-  }, [])
+  }, [isWatching])
 
-  // Labels and states are written server-side after the tab exists. The socket
-  // pushes both, but a terminal is only connected while it is mounted — with
-  // the panel closed (the board is in front) nothing would arrive, which is
-  // exactly when a flag matters. So the list is polled as well.
-  const { data: liveSessions } = useLiveTerminalSessions(tabs.length > 0)
-  useEffect(() => {
-    const sessions = liveSessions?.sessions
-    if (!sessions) return
+  /** The whole list as the server has it — sent when the event stream opens,
+   *  so a reconnect starts from the truth instead of from what was missed. */
+  const applySnapshot = useCallback((sessions: TerminalSessionInfo[]) => {
     const byId = new Map(sessions.map(s => [s.id, s]))
     setTabs(prev => {
       let changed = false
@@ -483,16 +512,18 @@ export function TerminalPanel() {
         const sameLabel = (Object.keys(fields) as (keyof GlobalTab)[])
           .every(key => tab[key] === fields[key])
         const labelled = sameLabel ? tab : { ...tab, ...fields }
-        const stated = session.state ? applyState(labelled, session.state) : labelled
+        const stated = applyState(labelled, session.state ?? null)
         if (stated !== tab) changed = true
         return stated
       })
       return changed ? next : prev
     })
-  }, [liveSessions, applyState])
+  }, [applyState])
 
   // On mount: validate persisted tabs against server sessions (recovery from refresh)
   const initializedRef = useRef(false)
+  /** True once the persisted tabs have been checked against the server. */
+  const restoredRef = useRef(false)
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
@@ -552,7 +583,7 @@ export function TerminalPanel() {
       if (sessions.length > 0 && layoutStore.get().mode !== 'focus') {
         setIsVisible(true)
       }
-    }).catch(() => {})
+    }).catch(() => {}).finally(() => { restoredRef.current = true })
   }, [])
 
   // Drag resize
@@ -845,10 +876,13 @@ export function TerminalPanel() {
   const handleTabExit = useCallback((sessionId: string, _code: number) => {
     // Find the tab before modifying state — we need the taskId for needsReview
     const tab = tabsRef.current.find(t => t.sessionId === sessionId)
+    // The exit is reported twice when the terminal is mounted: by its own
+    // socket and by the event stream.
+    if (!tab || tab.exited) return
 
     // Show notification if the exited tab is not currently visible
     // (either it's not in any visible pane, or the panel is collapsed)
-    const isVisibleToUser = (activeTabIdRef.current === sessionId || splitSessionIdRef.current === sessionId) && isVisibleRef.current
+    const isVisibleToUser = isWatching(sessionId)
 
     setTabs(prev => prev.map(t =>
       t.sessionId === sessionId
@@ -884,7 +918,7 @@ export function TerminalPanel() {
         } catch {}
       }, 3000)
     }
-  }, [aiSessions])
+  }, [aiSessions, isWatching])
 
   // Stable ref so IntegratedTerminal doesn't re-create on every render
   const handleTabExitRef = useRef(handleTabExit)
@@ -894,7 +928,7 @@ export function TerminalPanel() {
   // the tab is flagged unless the user is already looking at it; otherwise the
   // question sits unanswered, or the finished run goes unnoticed, behind
   // another tab.
-  const handleTabState = useCallback((sessionId: string, state: TerminalState) => {
+  const handleTabState = useCallback((sessionId: string, state: TerminalState | null) => {
     setTabs(prev => {
       const tab = prev.find(t => t.sessionId === sessionId)
       if (!tab) return prev
@@ -912,6 +946,69 @@ export function TerminalPanel() {
       return prev.map(t => (t.sessionId === sessionId ? { ...t, summary: summary ?? undefined } : t))
     })
   }, [])
+
+  // Labels and states are written server-side after the tab exists, and they
+  // matter most while the terminal is not mounted (the board is in front, the
+  // window is minimised). One event stream carries them for every session;
+  // the browser reconnects it by itself and each connection opens with the
+  // full list.
+  const terminalAvailable = !!status?.available
+  useEffect(() => {
+    if (!terminalAvailable) return
+    const source = new EventSource('/api/terminal/events')
+    source.onmessage = (message) => {
+      let event: any
+      try { event = JSON.parse(message.data) } catch { return }
+      switch (event.type) {
+        case 'snapshot': applySnapshot(event.sessions || []); break
+        case 'state': handleTabState(event.sessionId, event.state ?? null); break
+        case 'label': handleTabLabel(event.sessionId, event.summary ?? null); break
+        case 'exit': handleTabExitRef.current(event.sessionId, event.code); break
+      }
+    }
+    return () => source.close()
+  }, [terminalAvailable, applySnapshot, handleTabState, handleTabLabel])
+
+  // Tell the user when a session starts waiting for them or finishes — by
+  // sound, desktop notification and taskbar, as set in Settings. What counts
+  // is the change: a state that was already there when the page loaded, or a
+  // tab seen for the first time, is not news.
+  const alertStatesRef = useRef(new Map<string, string>())
+  const alertsArmedRef = useRef(false)
+  useEffect(() => {
+    const known = alertStatesRef.current
+    const armed = alertsArmedRef.current
+    if (restoredRef.current) alertsArmedRef.current = true
+
+    const live = new Set<string>()
+    for (const tab of tabs) {
+      live.add(tab.sessionId)
+      const now = tab.exited ? 'exited' : tab.state ?? 'none'
+      const before = known.get(tab.sessionId)
+      known.set(tab.sessionId, now)
+      if (!armed || before === undefined || before === now) continue
+
+      let kind: SessionAlertKind | null = null
+      if (now === 'awaiting-input') kind = 'question'
+      else if (now === 'finished') kind = 'finished'
+      // A one-shot agent says it is done by exiting. A shell closing is not news.
+      else if (now === 'exited' && tab.taskId && before !== 'finished') kind = 'finished'
+      if (!kind) continue
+
+      const { number, project, detail } = describeTab(tab)
+      alertSession(kind, {
+        sessionId: tab.sessionId,
+        project,
+        label: [number, detail].filter(Boolean).join(' '),
+        watching: isWatching(tab.sessionId),
+      })
+    }
+    for (const sessionId of known.keys()) {
+      if (!live.has(sessionId)) known.delete(sessionId)
+    }
+  }, [tabs, isWatching])
+
+  useEffect(() => listenForAlertClicks(), [])
 
   // --- Bidirectional sync: terminal tabs <-> project tabs ---
 
@@ -957,8 +1054,10 @@ export function TerminalPanel() {
       const splitTab = tabsRef.current.find(t => t.sessionId === splitSessionIdRef.current)
       if (splitTab && splitTab.projectId === activeProjectId) return
     }
-    // Find a non-exited terminal for this project
-    const match = tabsRef.current.find(t => t.projectId === activeProjectId && !t.exited)
+    // The session that was open here last time, else any live one
+    const remembered = lastByProjectRef.current[activeProjectId]
+    const match = tabsRef.current.find(t => t.sessionId === remembered && t.projectId === activeProjectId)
+      || tabsRef.current.find(t => t.projectId === activeProjectId && !t.exited)
       || tabsRef.current.find(t => t.projectId === activeProjectId)
     // The pane never shows another project's terminal: with nothing of this
     // project to show it is empty, and in focus layout it gets out of the way
@@ -1274,8 +1373,6 @@ export function TerminalPanel() {
                       // against a zero-size box would shrink the PTY.
                       isActive={isShown && !chatFull}
                       onExit={handleTabExit}
-                      onStateChange={handleTabState}
-                      onLabelChange={handleTabLabel}
                     />
                   </Suspense>
                 </div>

@@ -19,7 +19,7 @@ const DATA_DIR = process.env.SHIPYARD_DATA_DIR
   : resolve(import.meta.dirname, '..', 'data');
 
 // Runtime noise and machine-local state: never travels.
-const DATA_SKIP = new Set(['server.log', 'terminal-clipboard', 'worktrees', 'agent-prompts', '.gitkeep']);
+const DATA_SKIP = new Set(['server.log', 'terminal-clipboard', 'worktrees', 'agent-prompts', 'claude-hooks', '.gitkeep']);
 // Encrypted credentials plus the key that opens them.
 const DATA_SECRETS = new Set(['.claude-key', 'ai-config.json', 'deploy-config.json', 'mcp-auth.json', 'mcp-config.json', 'sync-config.json', 'claude.json']);
 

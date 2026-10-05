@@ -353,6 +353,7 @@ export function Workspace() {
                 onContentChange={editor.setContent}
                 onMarkSaved={editor.markSaved}
                 onInitContent={editor.initContent}
+                onEditFile={(tab) => editor.openFile(tab.path, tab.name, tab.extension, '')}
               />
             </Suspense>
           )}

@@ -15,9 +15,6 @@ interface IntegratedTerminalProps {
   sessionId: string
   isActive: boolean
   onExit?: (sessionId: string, code: number) => void
-  onStateChange?: (sessionId: string, state: TerminalState) => void
-  /** The server wrote a new label for this tab (null clears it). */
-  onLabelChange?: (sessionId: string, summary: string | null) => void
 }
 
 const TERMINAL_THEME = {
@@ -78,7 +75,7 @@ function attachRenderer(term: Terminal): () => void {
   }
 }
 
-export function IntegratedTerminal({ sessionId, isActive, onExit, onStateChange, onLabelChange }: IntegratedTerminalProps) {
+export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitAddonRef = useRef<FitAddon | null>(null)
@@ -89,10 +86,6 @@ export function IntegratedTerminal({ sessionId, isActive, onExit, onStateChange,
   // Use ref for onExit to avoid re-creating WS on every render
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
-  const onStateChangeRef = useRef(onStateChange)
-  onStateChangeRef.current = onStateChange
-  const onLabelChangeRef = useRef(onLabelChange)
-  onLabelChangeRef.current = onLabelChange
 
   const connectWs = useCallback(() => {
     if (disposedRef.current || !termRef.current) return
@@ -129,12 +122,6 @@ export function IntegratedTerminal({ sessionId, isActive, onExit, onStateChange,
           case 'exit':
             termRef.current?.write(`\r\n\x1b[90m[Process exited with code ${msg.code}]\x1b[0m\r\n`)
             onExitRef.current?.(sessionId, msg.code)
-            break
-          case 'state':
-            onStateChangeRef.current?.(sessionId, msg.state)
-            break
-          case 'label':
-            onLabelChangeRef.current?.(sessionId, msg.summary ?? null)
             break
           case 'error':
             termRef.current?.write(`\r\n\x1b[31m[Error: ${msg.data}]\x1b[0m\r\n`)

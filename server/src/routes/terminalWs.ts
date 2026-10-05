@@ -9,8 +9,8 @@ import {
   listAiSessions,
   writeToSession,
   resizeSession,
-  setStateListener,
-  setLabelListener,
+  handleClaudeHook,
+  onSessionEvent,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
 import * as taskStore from '../services/taskStore.js';
@@ -96,6 +96,46 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       return { sessions: listSessions(request.query.projectId) };
     }
   );
+
+  // Claude Code reporting on itself: each session started here posts its hook
+  // events to this URL (see claudeHooks). Answered at once and with an empty
+  // body — the CLI waits for the reply, and anything in it would be read as
+  // a decision about the tool call.
+  app.post<{ Params: { sessionId: string }; Body: unknown }>(
+    '/api/terminal/hook/:sessionId',
+    // A plan waiting for approval travels whole in the event.
+    { bodyLimit: 8 * 1024 * 1024 },
+    async (request) => {
+      handleClaudeHook(request.params.sessionId, request.body);
+      return {};
+    }
+  );
+
+  // SSE: what every session is doing. One stream for the whole app, open for
+  // as long as the page is — a terminal's own socket only exists while that
+  // terminal is on screen, and a timer in a minimised window is throttled to
+  // one tick a minute, which is too late for "the agent is asking".
+  app.get('/api/terminal/events', (request, reply) => {
+    reply.hijack();
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const send = (event: unknown) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`);
+
+    // Whoever connects (or reconnects) starts from the truth, not from
+    // whatever it remembered.
+    send({ type: 'snapshot', sessions: listSessions() });
+    const unsubscribe = onSessionEvent(send);
+    const keepAlive = setInterval(() => reply.raw.write(': keepalive\n\n'), 25_000);
+
+    request.raw.on('close', () => {
+      clearInterval(keepAlive);
+      unsubscribe();
+    });
+  });
 
   // REST: Create a new terminal session
   app.post<{ Body: { projectId: string; type?: string; cols?: number; rows?: number; taskId?: string; prompt?: string; agent?: string } }>(
@@ -256,37 +296,15 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         if (socket.readyState === 1) {
           socket.send(JSON.stringify({ type: 'exit', code: exitCode }));
         }
+        // The session itself is closed by the service, which also tells the
+        // event stream — the exit has to be heard with no socket open too.
         activeConnections.delete(sessionId);
-        killSession(sessionId);
-      });
-
-      // Tell the client when the Claude CLI is waiting on a human, so the tab
-      // can show it even while another tab is in front.
-      const currentState = setStateListener(sessionId, state => {
-        if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'state', state }));
-      });
-      if (currentState && socket.readyState === 1) {
-        socket.send(JSON.stringify({ type: 'state', state: currentState }));
-      }
-
-      // The tab label is written after the tab exists (the topic Claude Code
-      // gives its terminal, or the AI summary of a shell). Pushing it here
-      // puts it on the tab at once instead of at the next poll.
-      setLabelListener(sessionId, summary => {
-        if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'label', summary: summary ?? null }));
       });
 
       const cleanup = () => {
         if (flushTimer) clearTimeout(flushTimer);
         onData.dispose();
         onExit.dispose();
-        // A replaced connection's close handler runs after the new one has
-        // already registered its listener — only drop the listener if it is
-        // still ours, or a reconnect would silently lose state updates.
-        if (activeConnections.get(sessionId)?.socket === socket) {
-          setStateListener(sessionId, undefined);
-          setLabelListener(sessionId, undefined);
-        }
       };
 
       // Track this as the active connection

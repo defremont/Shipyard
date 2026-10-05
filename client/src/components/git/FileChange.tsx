@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils'
 import { useStageFile, useUnstageFile, useGitDiff, useDiscardFile } from '@/hooks/useGit'
 import { FileIcon } from '@/components/files/FileIcon'
 import { LazyFilePreviewDialog as FilePreviewDialog } from '@/components/files/LazyFilePreviewDialog'
+import { toProjectPath } from '@/lib/repoPath'
 
 const PREVIEW_ONLY_EXTENSIONS = new Set([
   '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp', '.tiff', '.avif',
@@ -131,7 +132,7 @@ export function FileChange({ projectId, file, status, staged, subrepo, onOpenInE
           <Trash2 className="h-3 w-3" />
         </Button>
       </div>
-      <FilePreviewDialog projectId={projectId} filePath={previewPath} onClose={() => setPreviewPath(null)} />
+      <FilePreviewDialog projectId={projectId} filePath={previewPath && toProjectPath(previewPath, subrepo)} onClose={() => setPreviewPath(null)} />
       {showDiff && diffData?.diff && (
         <div className="relative border-t">
           <pre className={cn(

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { useStageFile, useUnstageFile, useDiscardFile } from '@/hooks/useGit'
 import { FileIcon } from '@/components/files/FileIcon'
 import { LazyFilePreviewDialog as FilePreviewDialog } from '@/components/files/LazyFilePreviewDialog'
+import { toProjectPath } from '@/lib/repoPath'
 
 export interface ChangeEntry {
   file: string
@@ -255,7 +256,7 @@ function FileRow({
           {statusLabel(node.status)}
         </span>
       </div>
-      <FilePreviewDialog projectId={projectId} filePath={previewPath} onClose={() => setPreviewPath(null)} />
+      <FilePreviewDialog projectId={projectId} filePath={previewPath && toProjectPath(previewPath, subrepo)} onClose={() => setPreviewPath(null)} />
     </>
   )
 }
