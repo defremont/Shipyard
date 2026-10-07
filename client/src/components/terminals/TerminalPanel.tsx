@@ -1320,12 +1320,15 @@ export function TerminalPanel() {
       </div>
       )}
 
-      {/* Terminal content area */}
-      {isVisible && (
+      {/* Terminal content area. A closed panel hides it and never unmounts
+          it: the xterm holds the scrollback and the modes the program set
+          (alternate screen, mouse tracking), and a new one starts without
+          them — the wheel stopped scrolling a full-screen Claude Code after
+          a visit to the board. */}
         <div
           ref={contentRef}
           style={isFull ? undefined : { height: panelHeight }}
-          className={cn('relative', isFull && 'min-h-0 flex-1')}
+          className={cn('relative', !isVisible && 'hidden', isFull && 'min-h-0 flex-1')}
         >
           {/* Split divider */}
           {isSplit && (
@@ -1396,7 +1399,7 @@ export function TerminalPanel() {
                       sessionId={tab.sessionId}
                       // Full-size chat hides the whole main column; a fit
                       // against a zero-size box would shrink the PTY.
-                      isActive={isShown && !chatFull}
+                      isActive={isVisible && isShown && !chatFull}
                       onExit={handleTabExit}
                     />
                   </Suspense>
@@ -1427,7 +1430,6 @@ export function TerminalPanel() {
             </div>
           )}
         </div>
-      )}
     </div>
   )
 }

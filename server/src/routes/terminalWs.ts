@@ -11,6 +11,7 @@ import {
   resizeSession,
   handleClaudeHook,
   onSessionEvent,
+  terminalModePreamble,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
 import * as taskStore from '../services/taskStore.js';
@@ -309,6 +310,11 @@ export async function terminalWsRoutes(app: FastifyInstance) {
 
       // Track this as the active connection
       activeConnections.set(sessionId, { socket, cleanup });
+
+      // A terminal created after the program set its modes starts without
+      // them — see terminalModePreamble.
+      const modes = terminalModePreamble(sessionId);
+      if (modes) socket.send(JSON.stringify({ type: 'output', data: modes }));
 
       // Handle messages from WebSocket client
       socket.on('message', (raw: Buffer | string) => {

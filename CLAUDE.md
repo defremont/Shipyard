@@ -470,6 +470,14 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Saida do PTY e agrupada por ~8ms antes de ir pro WebSocket (um redraw de TUI
   gera centenas de chunks minusculos)
 - Renderer WebGL com fallback automatico para DOM (`attachRenderer`)
+- **O xterm e o dono do scrollback e dos modos do terminal** (tela alternativa,
+  mouse tracking, bracketed paste): o programa liga uma vez e nao repete. Por
+  isso o TerminalPanel **esconde** o conteudo quando fecha (`hidden`), nunca
+  desmonta — um xterm novo nascia sem mouse tracking e a roda parava de rolar o
+  Claude Code em `tui: fullscreen` depois de uma ida ao Board (a tela parecia
+  certa porque o ConPTY repinta no resize). Para xterm criado depois (reload),
+  `trackTerminalModes` (terminalService) guarda os modos ligados e o WS manda
+  `terminalModePreamble` antes de qualquer saida
 
 ### Indicador de "esperando resposta" no terminal Claude
 - `startOutputWatcher` (terminalService.ts) roda em **toda** sessao e classifica

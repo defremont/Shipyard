@@ -255,6 +255,7 @@ export async function createSession(
   };
 
   sessions.set(id, session);
+  trackTerminalModes(id, pty);
 
   // The process can die while no terminal is mounted to hear it (the board is
   // in front), so the session is closed from here, not from the socket.
@@ -326,6 +327,7 @@ export function killSession(id: string): boolean {
   sessions.delete(id);
   clearQueue(id);
   pendingResizes.delete(id);
+  terminalModes.delete(id);
   stopOutputWatcher(id);
   stopSummaryWatcher(id);
   removeHookSettings(id);
@@ -343,6 +345,50 @@ export function listSessions(projectId?: string): SessionInfo[] {
     }
   }
   return list;
+}
+
+// ── Terminal modes ──────────────────────────────────────────────────
+// The alternate screen, mouse tracking, focus reports and bracketed paste are
+// switched on once by the program and from then on live in the terminal that
+// heard it. An xterm created later (page reload, a second window) is a blank
+// one: a full-screen Claude Code still looks right there, because ConPTY
+// repaints on the first resize, but the wheel no longer reaches the CLI and
+// nothing scrolls. So the modes are remembered here and handed to every new
+// connection before any output.
+
+const RESTORED_MODES = new Set([47, 1047, 1049, 1000, 1002, 1003, 1005, 1006, 1015, 1016, 1004, 2004]);
+// The screen first: the rest is set on whichever buffer is active.
+const SCREEN_MODES = [1049, 1047, 47];
+const MODE_RE = /\x1b\[\?([0-9;]+)([hl])/g;
+const PARTIAL_MODE_RE = /\x1b(?:\[(?:\?[0-9;]*)?)?$/;
+
+const terminalModes = new Map<string, { on: Set<number>; tail: string }>();
+
+function trackTerminalModes(id: string, pty: import('node-pty').IPty): void {
+  const state = { on: new Set<number>(), tail: '' };
+  terminalModes.set(id, state);
+  pty.onData((data: string) => {
+    if (!state.tail && !data.includes('\x1b')) return;
+    const text = state.tail + data;
+    for (const match of text.matchAll(MODE_RE)) {
+      for (const param of match[1].split(';')) {
+        const mode = Number(param);
+        if (!RESTORED_MODES.has(mode)) continue;
+        if (match[2] === 'h') state.on.add(mode);
+        else state.on.delete(mode);
+      }
+    }
+    // A switch cut in two by the chunk boundary is finished by the next one.
+    state.tail = text.match(PARTIAL_MODE_RE)?.[0] ?? '';
+  });
+}
+
+/** What a terminal that just connected has to hear to match the session. */
+export function terminalModePreamble(id: string): string {
+  const on = terminalModes.get(id)?.on;
+  if (!on?.size) return '';
+  const ordered = [...SCREEN_MODES.filter(m => on.has(m)), ...[...on].filter(m => !SCREEN_MODES.includes(m))];
+  return ordered.map(mode => `\x1b[?${mode}h`).join('');
 }
 
 // Pending resizes to apply after injection completes
