@@ -22,6 +22,9 @@ interface LayoutState {
 
 const MODE_KEY = 'shipyard:layout-mode'
 const TASK_RAIL_KEY = 'shipyard:task-rail'
+/** sessionStorage: id of the project whose editor was asked for from another
+ *  project. TerminalPanel reads it on the switch and stays out of the way. */
+export const PENDING_EDITOR_VIEW_KEY = 'shipyard:pending-editor-view'
 
 let state: LayoutState = {
   mode: localStorage.getItem(MODE_KEY) === 'split' ? 'split' : 'focus',

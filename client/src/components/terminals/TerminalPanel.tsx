@@ -22,7 +22,7 @@ import { alertSession, listenForAlertClicks, type SessionAlertKind } from '@/lib
 import { useLaunchTerminal } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
 import { useAiSessions } from '@/hooks/useAiSessions'
-import { layoutStore, useLayoutMode } from '@/hooks/useLayoutMode'
+import { layoutStore, useLayoutMode, PENDING_EDITOR_VIEW_KEY } from '@/hooks/useLayoutMode'
 import { api } from '@/lib/api'
 // xterm + its addons are ~300kB and TerminalPanel is mounted by Layout on
 // every page, so load the terminal only once a session actually exists.
@@ -124,6 +124,22 @@ const TABS_STORAGE_KEY = 'shipyard:terminal-tabs'
 const ACTIVE_TAB_KEY = 'shipyard:terminal-active-tab'
 const SPLIT_SESSION_KEY = 'shipyard:terminal-split-session'
 const LAST_BY_PROJECT_KEY = 'shipyard:terminal-last-by-project'
+
+/** True when the switch to this project came with a request for its editor:
+ *  "Open in Editor" from a project menu, or a file picked in search. */
+function consumeEditorRequest(projectId: string): boolean {
+  if (sessionStorage.getItem(PENDING_EDITOR_VIEW_KEY) === projectId) {
+    sessionStorage.removeItem(PENDING_EDITOR_VIEW_KEY)
+    return true
+  }
+  try {
+    // Left for the Workspace to consume: it opens the file
+    const pending = JSON.parse(localStorage.getItem('shipyard:pending-editor-file') || 'null')
+    return pending?.projectId === projectId
+  } catch {
+    return false
+  }
+}
 const MIN_HEIGHT = 150
 const MAX_HEIGHT_RATIO = 0.7
 const DEFAULT_HEIGHT = 300
@@ -1043,27 +1059,36 @@ export function TerminalPanel() {
     }
   }, [followTabProject])
 
-  // Project tab change → find and activate a terminal for that project
-  useEffect(() => {
+  // Project tab change → find and activate a terminal for that project.
+  // A layout effect: it has to run before the Workspace effects of the same
+  // commit, so a request for the editor made there still closes the panel.
+  useLayoutEffect(() => {
     if (!activeProjectId) return
-    // Check if active terminal already belongs to this project
-    const activeTab = tabsRef.current.find(t => t.sessionId === activeTabIdRef.current)
-    if (activeTab && activeTab.projectId === activeProjectId) return
-    // Also check if split session already belongs to this project
-    if (splitSessionIdRef.current) {
-      const splitTab = tabsRef.current.find(t => t.sessionId === splitSessionIdRef.current)
-      if (splitTab && splitTab.projectId === activeProjectId) return
+    const ofProject = tabsRef.current.filter(t => t.projectId === activeProjectId)
+    const focus = layoutStore.get().mode === 'focus'
+    // Active or split terminal already belongs to this project: keep it
+    const shown = ofProject.some(t =>
+      t.sessionId === activeTabIdRef.current || t.sessionId === splitSessionIdRef.current)
+    if (!shown) {
+      // The session that was open here last time, else any live one
+      const remembered = lastByProjectRef.current[activeProjectId]
+      const match = ofProject.find(t => t.sessionId === remembered)
+        || ofProject.find(t => !t.exited)
+        || ofProject[0]
+      // The pane never shows another project's terminal: with nothing of this
+      // project to show it is empty, and in focus layout it gets out of the way
+      // of the workspace the user just asked for.
+      setActiveTabId(match ? match.sessionId : null)
+      if (!match && focus) setIsVisible(false)
     }
-    // The session that was open here last time, else any live one
-    const remembered = lastByProjectRef.current[activeProjectId]
-    const match = tabsRef.current.find(t => t.sessionId === remembered && t.projectId === activeProjectId)
-      || tabsRef.current.find(t => t.projectId === activeProjectId && !t.exited)
-      || tabsRef.current.find(t => t.projectId === activeProjectId)
-    // The pane never shows another project's terminal: with nothing of this
-    // project to show it is empty, and in focus layout it gets out of the way
-    // of the workspace the user just asked for.
-    setActiveTabId(match ? match.sessionId : null)
-    if (!match && layoutStore.get().mode === 'focus') setIsVisible(false)
+    // A project with a session running opens on its agents, not on the board
+    // left behind by the previous project. Not before the persisted tabs were
+    // checked against the server (boot keeps the saved state), and not when
+    // the user asked for the editor of this project.
+    const editorAsked = consumeEditorRequest(activeProjectId)
+    if (!focus) return
+    if (editorAsked) setIsVisible(false)
+    else if (restoredRef.current && ofProject.some(t => !t.exited)) setIsVisible(true)
   }, [activeProjectId])
 
   // "Agents" in the workspace toolbar: show the panel, whatever is in it.

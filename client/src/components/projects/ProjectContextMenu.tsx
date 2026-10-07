@@ -8,6 +8,7 @@ import {
 import { ProjectSettingsDialog } from '@/components/projects/ProjectSettingsDialog'
 import { useUpdateProject, type Project } from '@/hooks/useProjects'
 import { useTabs } from '@/hooks/useTabs'
+import { PENDING_EDITOR_VIEW_KEY } from '@/hooks/useLayoutMode'
 import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 
 interface ProjectContextMenuProps {
@@ -25,10 +26,13 @@ export function ProjectContextMenu({ project, children, onOpenSettings, extra }:
 
   const openInEditor = () => {
     localStorage.setItem(`shipyard:workspace-mode:${project.id}`, 'editor')
-    openTab(project.id)
     if (activeTabId === project.id) {
       window.dispatchEvent(new CustomEvent('shipyard:workspace-mode', { detail: { mode: 'editor' } }))
+    } else {
+      // Switching project opens its agents when one is running; not this time
+      sessionStorage.setItem(PENDING_EDITOR_VIEW_KEY, project.id)
     }
+    openTab(project.id)
   }
 
   return (

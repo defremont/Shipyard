@@ -255,8 +255,13 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
 - Quem decide "cheio" e o TerminalPanel (`isVisible && focus && rota
   /project/`) e ele publica `terminalFull`; fora de um projeto (Dashboard,
   Settings) o terminal usa a altura do split para nao cobrir a pagina
-- Em focus, trocar para um projeto sem terminal fecha o painel, e a recuperacao
-  de sessoes no boot nao o reabre — "aberto" ali significa cobrir o workspace
+- Em focus, trocar de projeto decide a vista: projeto com sessao viva abre em
+  **Agents** (mesmo que o anterior estivesse no Board), projeto sem sessao
+  fecha o painel. O efeito e um `useLayoutEffect` no TerminalPanel — roda antes
+  dos efeitos do Workspace, entao pedido de Editor ainda vence: arquivo vindo
+  da busca (`shipyard:pending-editor-file`) e o item "Editor" do menu de
+  projeto (`PENDING_EDITOR_VIEW_KEY` no sessionStorage)
+- Em focus, a recuperacao de sessoes no boot nao reabre o painel — "aberto" ali significa cobrir o workspace
 - Chat: o botao no cabecalho da ClaudeView liga `chatFull` — o SidePanel vira
   `flex-1`, o `<main>` some e o ChatPanel (`expanded`) preenche a altura com
   coluna de leitura (`max-w-3xl`, `text-sm`). Nao e persistido e zera quando a
