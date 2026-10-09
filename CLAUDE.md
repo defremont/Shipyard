@@ -220,7 +220,16 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   (montada pelo Layout). Nao aparece ao lado do board (seria a mesma lista duas
   vezes) nem do editor (la a coluna esquerda e a arvore de arquivos). Task com sessao viva mostra o
   estado do agente e o clique leva ao terminal dela (`shipyard:focus-terminal`);
-  sem sessao, abre o TaskViewer. "Run" usa o mesmo `AiResolveHost` da paleta
+  sem sessao, abre o TaskViewer. "Run" usa o mesmo `AiResolveHost` da paleta.
+  A ordem de In Progress / Inbox / Backlog vem do menu de ordenacao do
+  cabecalho (`shipyard:task-rail-sort`: `updated` — default, ultima atualizada
+  primeiro —, `priority` ou `board`, a ordem manual do kanban); Done e sempre
+  a mais recente primeiro. Mover de coluna: botao direito na linha ("Move
+  to") ou o check que aparece no hover (Done). Usa `useUpdateTask`, o mesmo
+  caminho do board
+- **Abrir uma sessao para uma task move a task para In Progress**, no server
+  (`POST /api/terminal/sessions` com `taskId`), seja qual for o botao que
+  iniciou. Nao depender do agente chamar `start_task`
 - O "+" da fila e um menu: abre Claude (YOLO ou nao), shell e dev, e guarda as
   acoes do painel (split, nativo, limpar, matar) que antes eram seis botoes
 - **Nao existe mais ActivityBar.** A barra do topo (`AppTitleBar`, agora
@@ -426,9 +435,25 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   unico escritor. Nunca voltar a ler o JSON do disco por chamada
 - `taskStore`: caminho de leitura NAO escreve. O backfill de `number` persiste
   uma unica vez, sob lock, e retorna a lista ja autoritativa
-- `projectDiscovery`: refresh de git a cada 15s usa `gitService` (instancia
-  compartilhada por repo = fila serializada). `status.current` ja da o branch —
-  nao chamar `git.branch()`. Remote URL e sub-repos sao cacheados
+- `projectDiscovery`: o timer de git continua em 15s, mas cada repo decide se
+  esta na vez (`gitPoll` em `refreshGitStatus`). Resultado identico 4 vezes
+  seguidas → 60s; 8 vezes → 120s. Volta a 15s quando o resultado muda, quando
+  o repo e usado pelo app (`gitService.touch`: toda mutacao via
+  `invalidateStatus`, o fim de um `fetch` e a rota `git/status`), quando
+  `.git` muda no disco (mtime/tamanho de `HEAD`, `logs/HEAD` e `index`) ou
+  enquanto houver terminal aberto no projeto (agente editando nao deixa rastro
+  em `.git`). **O sinal de disco so acorda mais cedo, nunca prova que nada
+  mudou** — o `git status` de verdade sempre roda no fim da espera. Projeto
+  sem `.git` so e rechecado a cada 180s (pega `git init` posterior).
+  `git log -1` so roda quando `HEAD`/`logs/HEAD` mudam (`getLastCommit`); com
+  `.git` arquivo (worktree, submodule) ou sem reflog roda sempre. Usa
+  `gitService` (instancia compartilhada por repo = fila serializada).
+  `status.current` ja da o branch — nao chamar `git.branch()`. Remote URL e
+  sub-repos sao cacheados. Rota ou mutacao de git nova tem que passar por
+  `invalidateStatus`/`touch`, senao o repo fica no poll lento
+- `cliDetect`: CLI encontrado fica em cache por 6h; CLI ausente, 60s (instalar
+  com o app aberto aparece em um minuto). Cada sondagem sobe `where` + o
+  proprio CLI — nao voltar a TTL curto para o caso encontrado
 - `gitService`: **`fetch` nunca bloqueia uma rota**. Ele fala com a rede (um
   remote lento ou um prompt de credencial travava `git/status` por dezenas de
   segundos — medido em 80s num sub-repo), roda numa instancia SimpleGit propria
@@ -726,7 +751,7 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `claudeService.ts` virou so o cliente Anthropic; as credenciais vivem no store
 
 ### Deteccao de CLIs (`cliDetect.ts` / `cliRunner.ts`)
-- `detectCli(bin)` resolve **como** lancar o CLI e cacheia por 60s, devolvendo
+- `detectCli(bin)` resolve **como** lancar o CLI e cacheia por 6h (60s se nao achou), devolvendo
   `{ command, prefixArgs }`
 - **Windows**: npm instala CLI como shim `.cmd` e o Node se recusa a spawnar
   `.cmd` sem shell; passar pelo shell estragaria prompt multilinha. Entao o shim
@@ -876,6 +901,26 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   `npm install` contra o `package.json` da raiz resolve a arvore de dev inteira
   (electron-builder junto) e estoura o timeout
 
+### Relatorios: presets e cursor (localStorage)
+O ReportDialog guarda tres chaves por projeto, todas lidas e escritas por
+`client/src/lib/reportPresets.ts` (try/catch em tudo; JSON invalido vira vazio):
+- `shipyard:report-presets:{projectId}` -> `{ [nomeDoPreset]: { title, clientName,
+  usePeriod, sections, includeCommits, includeTech } }`. As datas from/to nao
+  entram no preset. "Save" sobrescreve o preset selecionado, "Save as…" pede um
+  nome (mesmo nome sobrescreve) e apagar pede confirmacao
+- `shipyard:report-presets:{projectId}:last` -> nome do ultimo preset usado; e
+  aplicado sozinho quando o dialogo abre, se o preset ainda existir
+- `shipyard:report-cursor:{projectId}` -> timestamp ISO do ultimo "Mark as
+  reported" (acao do toast que aparece depois de exportar PDF, HTML ou TXT).
+  Com cursor, ao carregar as tasks so entram marcadas as `in_progress` e as
+  `done` com `doneAt > cursor`; `todo`, `backlog`, `done` antigas e `done` sem
+  `doneAt` entram desmarcadas. A pill "New since last report" filtra as `done`
+  posteriores ao cursor e so aparece quando ele existe. Sem cursor, tudo entra
+  marcado como antes
+- Nao usar `window.prompt`/`confirm` aqui: nome e confirmacao usam `ui/dialog` e
+  `ui/alert-dialog`. O toast de export leva `className: 'pointer-events-auto'`
+  porque o dialogo modal desliga os cliques no `<body>`
+
 ### Atualizacao automatica (app desktop)
 - `electron-updater` com provider GitHub (`publish` em electron-builder.yml).
   O build escreve `latest*.yml` + `.blockmap`; o workflow de release sobe os
@@ -952,6 +997,16 @@ sua propria sheet/board/list. O milestone "General" usa o id literal `'default'`
 - Anti-loop: `lastPushAt` guard impede pull nos 10s apos push
 
 **Trello / ClickUp** (server-side, schema v3 em `data/sync-config.json`):
+- **Toda espera por um provedor tem teto** (incidente de 2026-10-09: a janela
+  parou de carregar tasks, projetos e Settings). O auto-pull e uma rota que o
+  renderer espera, e o Chromium so abre 6 conexoes por origem: 6 merges
+  pendurados e mais nada carrega. Regras em `trelloRequest`: timeout de 20s
+  por chamada, `Retry-After` limitado a 5s entre tentativas e, se o 429
+  persistir, o **token** fica pausado (2 a 10 min, `pausedUntil`) e as chamadas
+  seguintes falham na hora — o limite do Trello e por token, nao por board.
+  ClickUp tem o mesmo timeout. No client, `useIntegrationAutoPull` roda **um
+  ciclo por vez** (`ticking`) e `mergeIntegration` tem timeout de 120s. Nao
+  voltar a esperar um `Retry-After` inteiro nem a empilhar ciclos
 - Creds globais em `providers[providerId]` (apiKey/token), config em `projects[id][provider][milestoneId]`
 - Push: server-side debounce 2.5s em mutations de task — empurra TODOS os milestones
   habilitados do projeto, cada um para sua propria board/list
