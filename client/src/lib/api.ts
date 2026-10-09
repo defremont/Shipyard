@@ -479,7 +479,8 @@ export const api = {
   mergeIntegration: (projectId: string, providerId: 'trello' | 'clickup', milestoneId?: string) =>
     request<SyncOperationResult>(
       `/projects/${projectId}/sync/${providerId}/merge`,
-      { method: 'POST', body: JSON.stringify({ milestoneId }) },
+      // Runs in the background every 30s: it must give its connection back.
+      { method: 'POST', body: JSON.stringify({ milestoneId }), timeout: 120_000 },
     ),
 
   // Git

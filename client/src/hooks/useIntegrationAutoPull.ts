@@ -16,6 +16,11 @@ import { api } from '@/lib/api'
 
 const INTERVAL_MS = 30_000
 const running = new Set<string>()
+// One pass at a time. A pass used to start every 30s whether or not the last
+// one had finished: with a slow provider each new pass skipped the stuck
+// integration and got stuck on the next, until six merges held every
+// connection the window has and nothing else in the app could load.
+let ticking = false
 // Integrations that have completed at least one pull in this session.
 const primed = new Set<string>()
 
@@ -30,6 +35,8 @@ export function useIntegrationAutoPull() {
       if (cancelled.current) return
       // Nobody is looking — the next tick after the tab is restored will catch up.
       if (document.hidden) return
+      if (ticking) return
+      ticking = true
       try {
         const { integrations } = await api.listIntegrations()
         const active = integrations.filter(i => i.enabled)
@@ -65,6 +72,8 @@ export function useIntegrationAutoPull() {
         }
       } catch {
         // ignore — next tick retries
+      } finally {
+        ticking = false
       }
     }
 

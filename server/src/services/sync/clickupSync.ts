@@ -78,8 +78,17 @@ async function clickupRequest<T = any>(
     init.body = JSON.stringify(body);
   }
 
-  const res = await fetch(url, init);
-  const text = await res.text();
+  // Same ceiling as Trello: a request that never answers must not hold the
+  // route — and the window's connection — that is waiting on it.
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(20_000) });
+    text = await res.text();
+  } catch (err: any) {
+    if (err?.name === 'TimeoutError' || err?.name === 'AbortError') throw new Error('ClickUp: no response after 20s');
+    throw new Error(`ClickUp: ${err?.message ?? err}`);
+  }
   let data: any = text;
   try { data = JSON.parse(text); } catch { /* keep text */ }
   if (!res.ok) {

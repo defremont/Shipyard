@@ -65,6 +65,20 @@ function credentials(config: SyncConfig): { apiKey: string; token: string } {
 const MAX_CONCURRENT_REQUESTS = 6;
 const MAX_RETRIES = 3;
 
+// A request that never answers used to hold its caller for minutes, and the
+// caller is an HTTP route the app window is waiting on. Chromium opens six
+// connections per origin: six stuck auto-pulls and the window loads nothing
+// else. So every wait here has a ceiling.
+const REQUEST_TIMEOUT_MS = 20_000;
+const MAX_RETRY_DELAY_MS = 5_000;
+
+// Trello throttles per token, not per board. Once a token is refused after the
+// retries, asking again for the next project only extends the penalty — stop
+// calling with that token for a while and fail fast instead.
+const RATE_LIMIT_PAUSE_MS = 2 * 60_000;
+const MAX_RATE_LIMIT_PAUSE_MS = 10 * 60_000;
+const pausedUntil = new Map<string, number>();
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** Run `worker` over `items` with at most `limit` in flight, preserving order. */
@@ -89,6 +103,10 @@ async function trelloRequest<T = any>(
   body?: unknown,
 ): Promise<T> {
   const { apiKey, token } = credentials(config);
+  const pause = (pausedUntil.get(token) ?? 0) - Date.now();
+  if (pause > 0) {
+    throw new Error(`Trello: rate limited — paused for ${Math.ceil(pause / 1000)}s`);
+  }
   const params = new URLSearchParams();
   params.set('key', apiKey);
   params.set('token', token);
@@ -107,8 +125,17 @@ async function trelloRequest<T = any>(
   }
 
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, init);
-    const text = await res.text();
+    let res: Response;
+    let text: string;
+    try {
+      res = await fetch(url, { ...init, signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) });
+      text = await res.text();
+    } catch (err: any) {
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        throw new Error(`Trello: no response after ${REQUEST_TIMEOUT_MS / 1000}s`);
+      }
+      throw new Error(`Trello: ${err?.message ?? err}`);
+    }
     let data: any = text;
     try { data = JSON.parse(text); } catch { /* keep text */ }
 
@@ -116,13 +143,16 @@ async function trelloRequest<T = any>(
 
     // 429 = rate limited, 5xx = transient. Honour Retry-After when present.
     const retryable = res.status === 429 || res.status >= 500;
+    const retryAfter = Number(res.headers.get('retry-after'));
+    const retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 0;
     if (retryable && attempt < MAX_RETRIES) {
-      const retryAfter = Number(res.headers.get('retry-after'));
-      const delay = Number.isFinite(retryAfter) && retryAfter > 0
-        ? retryAfter * 1000
-        : 500 * 2 ** attempt;
-      await sleep(delay);
+      await sleep(Math.min(retryAfterMs || 500 * 2 ** attempt, MAX_RETRY_DELAY_MS));
       continue;
+    }
+    if (res.status === 429 && (pausedUntil.get(token) ?? 0) <= Date.now()) {
+      const wait = Math.min(Math.max(retryAfterMs, RATE_LIMIT_PAUSE_MS), MAX_RATE_LIMIT_PAUSE_MS);
+      pausedUntil.set(token, Date.now() + wait);
+      log.warn('sync', `Trello rate limit: pausing this token for ${Math.round(wait / 1000)}s`, undefined, config.projectId);
     }
 
     const message = typeof data === 'string' ? data : data?.message || `Status ${res.status}`;
