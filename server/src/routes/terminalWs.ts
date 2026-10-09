@@ -16,6 +16,7 @@ import {
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
 import * as taskStore from '../services/taskStore.js';
 import * as worktreeService from '../services/worktreeService.js';
+import { triggerAutoSync } from '../services/sync/syncEngine.js';
 import * as log from '../services/logService.js';
 import { mkdir, readdir, stat, unlink, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -158,9 +159,11 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       // The tab is named after the task, so the title survives a refresh
       // without the client having to carry it around.
       let taskLabel: { title?: string; number?: number } | undefined;
+      let startTask = false;
       if (taskId) {
         const task = await taskStore.getTask(projectId, taskId);
         if (task) {
+          startTask = task.status !== 'in_progress';
           taskLabel = { title: task.title, number: task.number };
           const worktree = await worktreeService.ensureTaskWorktree(project, task);
           cwd = worktree.path;
@@ -174,6 +177,14 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       }
 
       await updateProject(project.id, { lastOpenedAt: new Date().toISOString() });
+
+      // An agent was just handed this task: it is in progress, whichever
+      // button started it. Leaving that to the agent meant the board only
+      // moved if the agent remembered to say so.
+      if (taskId && startTask) {
+        await taskStore.updateTask(projectId, taskId, { status: 'in_progress' });
+        triggerAutoSync(projectId);
+      }
 
       const session = getSession(sessionId);
       return {
