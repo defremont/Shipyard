@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -21,6 +32,16 @@ import {
   type ReportSections,
 } from './reportTemplates'
 import { downloadHtml, downloadTxt, printAsPdf } from './reportExport'
+import {
+  readLastReportPreset,
+  readReportCursor,
+  readReportPresets,
+  writeLastReportPreset,
+  writeReportCursor,
+  writeReportPresets,
+  type ReportPresetConfig,
+  type ReportPresets,
+} from '@/lib/reportPresets'
 import {
   FileText,
   FileDown,
@@ -50,6 +71,7 @@ import {
   X,
   Filter,
   AlertCircle,
+  Trash2,
 } from 'lucide-react'
 
 interface ReportDialogProps {
@@ -135,6 +157,11 @@ function todayIso(offsetDays = 0): string {
 
 function slugify(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'report'
+}
+
+/** Done after the last "Mark as reported" — what the next report has not shown yet. */
+function doneSince(t: Task, cursor: string): boolean {
+  return t.status === 'done' && !!t.doneAt && Date.parse(t.doneAt) > Date.parse(cursor)
 }
 
 // --- Small presentational helpers ---
@@ -360,6 +387,13 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
   const [includeTech, setIncludeTech] = useState(false)
   const [loading, setLoading] = useState(false)
 
+  // Presets (per project, localStorage)
+  const [presets, setPresets] = useState<ReportPresets>({})
+  const [presetName, setPresetName] = useState('')
+  const [saveAsOpen, setSaveAsOpen] = useState(false)
+  const [saveAsName, setSaveAsName] = useState('')
+  const [deletePresetOpen, setDeletePresetOpen] = useState(false)
+
   // Task selection/edit state
   const [reportData, setReportData] = useState<ReportData | null>(null)
   const [drafts, setDrafts] = useState<TaskDraft[]>([])
@@ -368,6 +402,9 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
   const [priorityFilter, setPriorityFilter] = useState<PriorityFilter>('all')
   const [descriptionFilter, setDescriptionFilter] = useState<DescriptionFilter>('all')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<Task['status']>>(new Set())
+  // Last "Mark as reported" timestamp, read when the tasks are loaded
+  const [cursor, setCursor] = useState<string | null>(null)
+  const [newOnly, setNewOnly] = useState(false)
 
   // Editor state
   const [html, setHtmlValue] = useState('')
@@ -384,8 +421,80 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
       setPriorityFilter('all')
       setDescriptionFilter('all')
       setCollapsedGroups(new Set())
+      setNewOnly(false)
     }
   }, [open])
+
+  const applyPreset = (p: ReportPresetConfig) => {
+    setTitle(p.title)
+    setClientName(p.clientName)
+    setUsePeriod(p.usePeriod)
+    setSections(p.sections)
+    setIncludeCommits(p.includeCommits)
+    setIncludeTech(p.includeTech)
+  }
+
+  // Load the project's presets and re-apply the last one used
+  useEffect(() => {
+    if (!open) return
+    const stored = readReportPresets(projectId)
+    const last = readLastReportPreset(projectId)
+    setPresets(stored)
+    if (last && Object.hasOwn(stored, last)) {
+      setPresetName(last)
+      applyPreset(stored[last])
+    } else {
+      setPresetName('')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, projectId])
+
+  const presetNames = useMemo(
+    () => Object.keys(presets).sort((a, b) => a.localeCompare(b)),
+    [presets]
+  )
+
+  const selectPreset = (name: string) => {
+    if (!Object.hasOwn(presets, name)) return
+    setPresetName(name)
+    applyPreset(presets[name])
+    writeLastReportPreset(projectId, name)
+  }
+
+  const savePreset = (name: string) => {
+    const next: ReportPresets = {
+      ...presets,
+      [name]: { title, clientName, usePeriod, sections, includeCommits, includeTech },
+    }
+    if (!writeReportPresets(projectId, next)) {
+      toast.error('Could not save preset')
+      return
+    }
+    writeLastReportPreset(projectId, name)
+    setPresets(next)
+    setPresetName(name)
+    toast.success(`Preset "${name}" saved`)
+  }
+
+  const handleSaveAs = () => {
+    const name = saveAsName.trim()
+    if (!name) return
+    savePreset(name)
+    setSaveAsOpen(false)
+  }
+
+  const handleDeletePreset = () => {
+    const next: ReportPresets = Object.fromEntries(
+      Object.entries(presets).filter(([name]) => name !== presetName)
+    )
+    if (!writeReportPresets(projectId, next)) {
+      toast.error('Could not delete preset')
+      return
+    }
+    writeLastReportPreset(projectId, null)
+    setPresets(next)
+    setPresetName('')
+  }
 
   const renderOptions: ReportRenderOptions = useMemo(
     () => ({
@@ -406,11 +515,14 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
         to: usePeriod ? to : undefined,
         includeCommits: sections.commits || includeCommits,
       })) as ReportData
+      // With a cursor, start from what is new: done since the last report, plus work in progress
+      const since = readReportCursor(projectId)
+      setCursor(since)
       setReportData(data)
       setDrafts(
         data.tasks.map(t => ({
           id: t.id,
-          include: true,
+          include: !since || t.status === 'in_progress' || doneSince(t, since),
           includeDescription: !!t.description,
           title: t.title,
           description: t.description || '',
@@ -453,6 +565,32 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
     toast.success('Report regenerated', { description: 'Any manual HTML edits were discarded.' })
   }
 
+  const handleExport = (run: () => void) => {
+    try {
+      run()
+    } catch (err: any) {
+      toast.error(err?.message || 'Export failed')
+      return
+    }
+    toast.success('Report exported', {
+      duration: 10000,
+      // The open dialog sets pointer-events: none on <body>; without this the action cannot be clicked
+      className: 'pointer-events-auto',
+      action: {
+        label: 'Mark as reported',
+        onClick: () => {
+          if (writeReportCursor(projectId, new Date().toISOString())) {
+            toast.success('Marked as reported', {
+              description: 'The next report starts from tasks completed after now.',
+            })
+          } else {
+            toast.error('Could not save the report marker')
+          }
+        },
+      },
+    })
+  }
+
   const filename = useMemo(() => {
     const base = slugify(title || `${projectName}-report`)
     return `${base}-${todayIso(0)}`
@@ -475,7 +613,13 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
     return counts
   }, [drafts])
 
+  const newCount = useMemo(
+    () => (cursor ? drafts.filter(d => doneSince(d.original, cursor)).length : 0),
+    [drafts, cursor]
+  )
+
   const matchesFilters = (d: TaskDraft): boolean => {
+    if (newOnly && cursor && !doneSince(d.original, cursor)) return false
     if (statusFilter !== 'all' && d.original.status !== statusFilter) return false
     if (priorityFilter !== 'all' && d.original.priority !== priorityFilter) return false
     if (descriptionFilter === 'with' && !d.description.trim()) return false
@@ -496,7 +640,7 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
   const filteredDrafts = useMemo(
     () => drafts.filter(matchesFilters),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [drafts, taskSearch, statusFilter, priorityFilter, descriptionFilter]
+    [drafts, taskSearch, statusFilter, priorityFilter, descriptionFilter, newOnly, cursor]
   )
 
   const groupedDrafts = useMemo(() => {
@@ -541,13 +685,15 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
     setStatusFilter('all')
     setPriorityFilter('all')
     setDescriptionFilter('all')
+    setNewOnly(false)
   }
 
   const hasActiveFilters =
     taskSearch.trim() !== '' ||
     statusFilter !== 'all' ||
     priorityFilter !== 'all' ||
-    descriptionFilter !== 'all'
+    descriptionFilter !== 'all' ||
+    newOnly
 
   const titleOfStep: Record<Step, string> = {
     config: 'New Report',
@@ -557,7 +703,13 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[90vh] max-w-[1200px] flex-col gap-0 overflow-hidden p-0">
+      <DialogContent
+        className="flex h-[90vh] max-w-[1200px] flex-col gap-0 overflow-hidden p-0"
+        // Clicking a toast (e.g. "Mark as reported") must not close the dialog
+        onInteractOutside={e => {
+          if ((e.target as Element | null)?.closest?.('[data-sonner-toaster]')) e.preventDefault()
+        }}
+      >
         <DialogHeader className="shrink-0 border-b px-6 py-3">
           <div className="flex items-center justify-between gap-4">
             <DialogTitle className="flex items-center gap-2 text-base">
@@ -572,6 +724,64 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
           <TooltipProvider delayDuration={300}>
             <div className="flex-1 overflow-y-auto">
               <div className="mx-auto max-w-3xl space-y-8 px-8 py-8">
+                {/* Presets */}
+                <div className="flex items-center gap-2 pl-11">
+                  <span className="text-xs font-medium text-muted-foreground">Preset</span>
+                  <Select
+                    value={presetName}
+                    onValueChange={selectPreset}
+                    disabled={presetNames.length === 0}
+                  >
+                    <SelectTrigger className="h-8 w-56 text-xs">
+                      <SelectValue
+                        placeholder={presetNames.length === 0 ? 'No presets yet' : 'Select a preset'}
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {presetNames.map(name => (
+                        <SelectItem key={name} value={name} className="text-xs">
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    disabled={!presetName}
+                    onClick={() => savePreset(presetName)}
+                  >
+                    Save
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    onClick={() => {
+                      setSaveAsName('')
+                      setSaveAsOpen(true)
+                    }}
+                  >
+                    Save as…
+                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        disabled={!presetName}
+                        onClick={() => setDeletePresetOpen(true)}
+                        aria-label="Delete preset"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Delete preset</TooltipContent>
+                  </Tooltip>
+                </div>
+
                 {/* Identification */}
                 <section className="space-y-4">
                   <SectionHeader
@@ -796,6 +1006,18 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
                       {STATUS_META[s].label}
                     </FilterPill>
                   ))}
+                  {cursor && (
+                    <>
+                      <div className="mx-1 h-5 w-px bg-border" />
+                      <FilterPill
+                        active={newOnly}
+                        onClick={() => setNewOnly(v => !v)}
+                        count={newCount}
+                      >
+                        New since last report
+                      </FilterPill>
+                    </>
+                  )}
                 </div>
 
                 {/* Row 3: Priority + description filters */}
@@ -953,7 +1175,8 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
                         {!collapsed && (
                           <div className="divide-y divide-border">
                             {list.map(d => {
-                              const pmeta = PRIORITY_META[d.original.priority]
+                              // Old task files carry priorities that no longer exist ("critical").
+                              const pmeta = PRIORITY_META[d.original.priority] ?? PRIORITY_META.medium
                               return (
                                 <div
                                   key={d.id}
@@ -1091,7 +1314,7 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
                     variant="outline"
                     size="sm"
                     className="w-full justify-start"
-                    onClick={() => printAsPdf(html)}
+                    onClick={() => handleExport(() => printAsPdf(html))}
                   >
                     <Printer className="mr-2 h-3.5 w-3.5" /> PDF (print)
                   </Button>
@@ -1099,7 +1322,7 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
                     variant="outline"
                     size="sm"
                     className="w-full justify-start"
-                    onClick={() => downloadHtml(html, filename)}
+                    onClick={() => handleExport(() => downloadHtml(html, filename))}
                   >
                     <FileDown className="mr-2 h-3.5 w-3.5" /> Download HTML
                   </Button>
@@ -1107,7 +1330,7 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
                     variant="outline"
                     size="sm"
                     className="w-full justify-start"
-                    onClick={() => downloadTxt(html, filename)}
+                    onClick={() => handleExport(() => downloadTxt(html, filename))}
                   >
                     <FileType2 className="mr-2 h-3.5 w-3.5" /> Download TXT
                   </Button>
@@ -1194,6 +1417,66 @@ export function ReportDialog({ projectId, projectName, milestoneId, open, onOpen
             </div>
           </div>
         )}
+
+        {/* Rendered inside the content so Radix treats them as part of this dialog */}
+        <Dialog open={saveAsOpen} onOpenChange={setSaveAsOpen}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle className="text-base">Save preset as</DialogTitle>
+            </DialogHeader>
+            <form
+              className="space-y-4"
+              onSubmit={e => {
+                e.preventDefault()
+                e.stopPropagation()
+                handleSaveAs()
+              }}
+            >
+              <div className="space-y-1.5">
+                <Input
+                  autoFocus
+                  value={saveAsName}
+                  onChange={e => setSaveAsName(e.target.value)}
+                  placeholder="Preset name"
+                  maxLength={60}
+                />
+                {Object.hasOwn(presets, saveAsName.trim()) && (
+                  <p className="text-[11px] text-muted-foreground">
+                    A preset with this name already exists and will be overwritten.
+                  </p>
+                )}
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setSaveAsOpen(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={!saveAsName.trim()}>
+                  Save
+                </Button>
+              </DialogFooter>
+            </form>
+          </DialogContent>
+        </Dialog>
+
+        <AlertDialog open={deletePresetOpen} onOpenChange={setDeletePresetOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete preset "{presetName}"?</AlertDialogTitle>
+              <AlertDialogDescription>
+                The saved configuration is removed for this project. The current form is not changed.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeletePreset}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </DialogContent>
     </Dialog>
   )
