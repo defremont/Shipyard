@@ -75,9 +75,23 @@ const STATUS_TTL_MS = 2_500;
 const statusCache = new Map<string, { at: number; result: StatusResult }>();
 const statusInFlight = new Map<string, Promise<StatusResult>>();
 
+// When a repo was last used through the app. The project list refresh backs
+// off on repos that sit unchanged and reads this to go back to its fast poll.
+const touchedAt = new Map<string, number>();
+
+/** Mark a repo as in use: a mutation ran on it or someone is looking at it. */
+export function touch(projectPath: string): void {
+  touchedAt.set(path.resolve(projectPath), Date.now());
+}
+
+export function getTouchedAt(projectPath: string): number {
+  return touchedAt.get(path.resolve(projectPath)) ?? 0;
+}
+
 /** Drop the cached status of a repo — every write path below calls this. */
 function invalidateStatus(projectPath: string): void {
   statusCache.delete(path.resolve(projectPath));
+  touch(projectPath);
 }
 
 export async function getStatus(projectPath: string): Promise<StatusResult> {

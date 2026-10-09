@@ -67,6 +67,10 @@ export async function gitRoutes(app: FastifyInstance) {
           void gitService.fetch(path);
         }
 
+        // Someone has this repo on screen (panel, hover prefetch, opening the
+        // project): keep the project list refresh on its fast poll for it.
+        gitService.touch(path);
+
         const status = await gitService.getStatus(path);
         return status;
       } catch (err: any) {

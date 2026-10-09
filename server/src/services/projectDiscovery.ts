@@ -4,6 +4,7 @@ import type { Project, ProjectsCache } from '../types/index.js';
 import { getSettings, saveSettings } from './settingsStore.js';
 import { DATA_DIR } from './dataDir.js';
 import * as gitService from './gitService.js';
+import { listSessions } from './terminalService.js';
 
 const CACHE_FILE = join(DATA_DIR, 'projects.json');
 
@@ -134,6 +135,76 @@ const subReposCache = new Map<string, string[]>();
 function clearGitCaches(): void {
   remoteUrlCache.clear();
   subReposCache.clear();
+  lastCommitCache.clear();
+  gitPoll.clear();
+}
+
+// The last commit only changes when HEAD moves, and every HEAD move (commit,
+// checkout, reset, pull) appends to .git/logs/HEAD. Stat those two files and
+// only spawn `git log -1` when they differ from the last look. Null means the
+// files cannot be read that way — a worktree or submodule, where `.git` is a
+// file, or a repo without a reflog yet — and then the log runs every time.
+const lastCommitCache = new Map<string, { signal: string; date?: string; message?: string }>();
+
+async function statSignal(file: string): Promise<string> {
+  const s = await stat(file);
+  return `${s.mtimeMs}:${s.size}`;
+}
+
+async function headSignal(projectPath: string): Promise<string | null> {
+  try {
+    const gitDir = join(projectPath, '.git');
+    const [head, reflog] = await Promise.all([
+      statSignal(join(gitDir, 'HEAD')),
+      statSignal(join(gitDir, 'logs', 'HEAD')),
+    ]);
+    return `${head}|${reflog}`;
+  } catch {
+    return null;
+  }
+}
+
+async function getLastCommit(projectPath: string): Promise<{ date?: string; message?: string }> {
+  const signal = await headSignal(projectPath);
+  const cached = lastCommitCache.get(projectPath);
+  if (signal && cached?.signal === signal) return cached;
+
+  const log = await gitService.getLog(projectPath, 1).catch(() => null);
+  const last = { date: log?.latest?.date, message: log?.latest?.message };
+  // The signal was read before the log ran: if HEAD moved in between, the next
+  // look sees a different signal and asks again.
+  if (signal && log) lastCommitCache.set(projectPath, { signal, ...last });
+  else lastCommitCache.delete(projectPath);
+  return last;
+}
+
+// Adaptive poll. The timer still ticks every 15s, but a repo whose git info
+// came back identical several times in a row is only asked every 60s, then
+// every 120s. It returns to 15s when the result changes, when the repo is used
+// through the app (gitService.touch) or when .git itself moves on disk.
+// The disk check only ever wakes a repo up early — .git says nothing about
+// unstaged edits, so a real `git status` always runs when the wait is over.
+const GIT_POLL_MS = 15_000;
+const GIT_BACKOFF_MS = [GIT_POLL_MS, 60_000, 120_000];
+const GIT_BACKOFF_AFTER = 4; // identical results before each step down
+// A project with no .git is only re-checked for a later `git init`.
+const NON_GIT_RECHECK_MS = 180_000;
+
+interface GitPollState {
+  polledAt: number;
+  nextAt: number;
+  unchanged: number;
+  fingerprint: string;
+  signal: string | null;
+}
+const gitPoll = new Map<string, GitPollState>();
+
+/** Cheap "did git touch this repo" signal: HEAD, its reflog and the index. */
+async function gitDirSignal(projectPath: string): Promise<string | null> {
+  const head = await headSignal(projectPath);
+  if (!head) return null;
+  const index = await statSignal(join(projectPath, '.git', 'index')).catch(() => '');
+  return `${head}|${index}`;
 }
 
 async function getRemoteUrl(projectPath: string): Promise<string | undefined> {
@@ -184,9 +255,9 @@ async function detectGitInfo(projectPath: string): Promise<{
     // concurrent reads from tripping over index.lock on Windows.
     // `status.current` already carries the branch name, so a separate
     // git.branch() call would be a wasted subprocess.
-    const [status, log, gitRemoteUrl, subRepos] = await Promise.all([
+    const [status, lastCommit, gitRemoteUrl, subRepos] = await Promise.all([
       gitService.getStatus(projectPath),
-      gitService.getLog(projectPath, 1).catch(() => null),
+      getLastCommit(projectPath),
       getRemoteUrl(projectPath),
       getSubRepos(projectPath),
     ]);
@@ -200,8 +271,8 @@ async function detectGitInfo(projectPath: string): Promise<{
       gitStaged: status.staged.length,
       gitUnstaged: status.modified.length + status.deleted.length,
       gitUntracked: status.not_added.length,
-      lastCommitDate: log?.latest?.date,
-      lastCommitMessage: log?.latest?.message,
+      lastCommitDate: lastCommit.date,
+      lastCommitMessage: lastCommit.message,
       gitRemoteUrl,
       ...(subRepos.length > 0 ? { subRepos } : {}),
     };
@@ -367,13 +438,33 @@ export async function getProjects(): Promise<Project[]> {
 
 /** Lightweight refresh: only updates git status, skips tech stack detection */
 export async function refreshGitStatus(): Promise<Project[]> {
+  const now = Date.now();
   const updated = await Promise.all(
     projectsCache.map(async (p) => {
-      // Also re-check non-git projects: detectGitInfo is cheap for them (one
-      // .git existence check + shallow sub-repo scan), and it's what picks up
-      // a `git init` done after the project was added.
       try {
+        const poll = gitPoll.get(p.path);
+        // Read before the status runs: `git status` may rewrite the index, and
+        // a signal taken afterwards would hide a change made in between.
+        const signal = p.isGitRepo ? await gitDirSignal(p.path) : null;
+        let woken = false;
+        if (poll && now < poll.nextAt) {
+          // A terminal open in the project is an agent (or the user) editing
+          // files, and unstaged edits leave no trace in .git: no backing off.
+          woken = p.isGitRepo
+            && (gitService.getTouchedAt(p.path) > poll.polledAt || signal !== poll.signal
+              || listSessions(p.id).length > 0);
+          if (!woken) return p;
+        }
+
+        // Non-git projects come through here too, on the slow cycle: it's what
+        // picks up a `git init` done after the project was added.
         const gitInfo = await detectGitInfo(p.path);
+        const fingerprint = JSON.stringify(gitInfo);
+        const unchanged = poll && !woken && fingerprint === poll.fingerprint ? poll.unchanged + 1 : 0;
+        const step = Math.min(Math.floor(unchanged / GIT_BACKOFF_AFTER), GIT_BACKOFF_MS.length - 1);
+        const wait = gitInfo.isGitRepo ? GIT_BACKOFF_MS[step] : NON_GIT_RECHECK_MS;
+        // 1s of slack so timer jitter doesn't push a due repo to the next tick.
+        gitPoll.set(p.path, { polledAt: now, nextAt: now + wait - 1000, unchanged, fingerprint, signal });
         return { ...p, ...gitInfo };
       } catch {
         return p;
@@ -396,6 +487,8 @@ export async function refreshProjects(): Promise<Project[]> {
 export async function updateProject(id: string, updates: Partial<Pick<Project, 'name' | 'favorite' | 'lastOpenedAt' | 'externalLink' | 'notes' | 'links'>>): Promise<Project | null> {
   const idx = projectsCache.findIndex(p => p.id === id);
   if (idx === -1) return null;
+  // Opened (terminal launched in it): poll its git state at full speed again.
+  if (updates.lastOpenedAt) gitPoll.delete(projectsCache[idx].path);
   projectsCache[idx] = { ...projectsCache[idx], ...updates };
   await saveCache(projectsCache);
   return projectsCache[idx];
@@ -410,7 +503,8 @@ export async function initProjectDiscovery(): Promise<void> {
     console.log(`Loaded ${projectsCache.length} projects`);
   });
 
-  // Lightweight git refresh every 15s (only updates git status fields).
+  // Lightweight git refresh every 15s (only updates git status fields); each
+  // repo decides inside refreshGitStatus whether it is due on this tick.
   // The guard keeps ticks from stacking when a slow repo makes one poll
   // outlast the interval.
   let refreshing = false;
@@ -420,5 +514,5 @@ export async function initProjectDiscovery(): Promise<void> {
     refreshGitStatus()
       .catch(() => {})
       .finally(() => { refreshing = false; });
-  }, 15000);
+  }, GIT_POLL_MS);
 }

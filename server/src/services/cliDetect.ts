@@ -5,7 +5,11 @@ import { dirname, join } from 'path';
 
 const execFileAsync = promisify(execFile);
 const isWindows = process.platform === 'win32';
-const CACHE_TTL = 60_000;
+// How to launch an installed CLI does not change while the app runs, and each
+// probe spawns `where` plus the CLI itself. A missing CLI keeps the short TTL
+// so one installed with the app open shows up within a minute.
+const CACHE_TTL = 6 * 60 * 60_000;
+const MISSING_TTL = 60_000;
 
 export interface CliInfo {
   available: boolean;
@@ -58,14 +62,14 @@ async function resolve(bin: string): Promise<CliInfo | null> {
 }
 
 /**
- * Probe a CLI once a minute and remember how to launch it.
+ * Probe a CLI and remember how to launch it (hours once found, a minute while missing).
  * Falls back to the bare command name so a CLI that `where`/`which` cannot see
  * — but the OS can — still works.
  */
 export async function detectCli(bin: string, versionArgs: string[] = ['--version']): Promise<CliInfo> {
   const hit = cache.get(bin);
   const now = Date.now();
-  if (hit && now - hit.checkedAt < CACHE_TTL) return hit.info;
+  if (hit && now - hit.checkedAt < (hit.info.available ? CACHE_TTL : MISSING_TTL)) return hit.info;
 
   const unavailable: CliInfo = { available: false, command: bin, prefixArgs: [] };
   const candidate = (await resolve(bin)) ?? { available: true, command: bin, prefixArgs: [] };
