@@ -65,6 +65,19 @@ export interface TerminalSessionInfo {
   state?: 'busy' | 'awaiting-input' | 'idle' | 'finished'
 }
 
+/** A Claude Code conversation that can be picked up with `claude --resume`. */
+export interface ClaudeConversation {
+  id: string
+  projectId: string
+  title?: string
+  lastPrompt?: string
+  updatedAt: string
+  yolo: boolean
+  taskId?: string
+  /** It was on a tab when Shipyard last closed */
+  open: boolean
+}
+
 export interface AppSettings {
   tasksDir: string
   terminalAiTitles?: boolean
@@ -526,10 +539,14 @@ export const api = {
     request<{ sessions: TerminalSessionInfo[] }>(
       `/terminal/sessions${projectId ? `?projectId=${projectId}` : ''}`
     ),
-  createTerminalSession: (projectId: string, type = 'shell', cols = 80, rows = 24, taskId?: string, prompt?: string, agent?: string) =>
+  createTerminalSession: (projectId: string, type = 'shell', cols = 80, rows = 24, taskId?: string, prompt?: string, agent?: string, resume?: { id: string; title?: string }) =>
     request<TerminalSessionInfo>(
       '/terminal/sessions',
-      { method: 'POST', body: JSON.stringify({ projectId, type, cols, rows, ...(taskId ? { taskId } : {}), ...(prompt ? { prompt } : {}), ...(agent ? { agent } : {}) }) }
+      { method: 'POST', body: JSON.stringify({ projectId, type, cols, rows, ...(taskId ? { taskId } : {}), ...(prompt ? { prompt } : {}), ...(agent ? { agent } : {}), ...(resume ? { resume: resume.id, resumeTitle: resume.title } : {}) }) }
+    ),
+  getClaudeConversations: (projectId?: string) =>
+    request<{ conversations: ClaudeConversation[] }>(
+      '/terminal/conversations' + (projectId ? `?projectId=${encodeURIComponent(projectId)}` : '')
     ),
   killTerminalSession: (sessionId: string) =>
     request('/terminal/sessions/' + sessionId, { method: 'DELETE' }),

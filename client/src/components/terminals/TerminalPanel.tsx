@@ -6,6 +6,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { SessionStatusIcon } from './SessionStatusIcon'
+import { ResumeConversations } from './ResumeConversations'
 import { terminalTabsStore, type SessionStatus } from '@/hooks/useTerminalTabs'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
@@ -16,6 +17,7 @@ import {
   useCreateTerminalSession,
   useKillTerminalSession,
   useRenameTerminalSession,
+  useClaudeConversations,
   type TerminalSessionInfo,
 } from '@/hooks/useTerminal'
 import { alertSession, listenForAlertClicks, type SessionAlertKind } from '@/lib/sessionAlerts'
@@ -540,6 +542,7 @@ export function TerminalPanel() {
   const initializedRef = useRef(false)
   /** True once the persisted tabs have been checked against the server. */
   const restoredRef = useRef(false)
+  const [restored, setRestored] = useState(false)
   useEffect(() => {
     if (initializedRef.current) return
     initializedRef.current = true
@@ -599,7 +602,7 @@ export function TerminalPanel() {
       if (sessions.length > 0 && layoutStore.get().mode !== 'focus') {
         setIsVisible(true)
       }
-    }).catch(() => {}).finally(() => { restoredRef.current = true })
+    }).catch(() => {}).finally(() => { restoredRef.current = true; setRestored(true) })
   }, [])
 
   // Drag resize
@@ -642,7 +645,7 @@ export function TerminalPanel() {
   }, [panelHeight])
 
   // Create a new terminal tab for a given project (or active project)
-  const handleNewTab = useCallback(async (type = 'shell', forProjectId?: string, taskId?: string, prompt?: string, taskNumber?: number, agent?: string) => {
+  const handleNewTab = useCallback(async (type = 'shell', forProjectId?: string, taskId?: string, prompt?: string, taskNumber?: number, agent?: string, resume?: { id: string; title?: string }) => {
     if (!status?.available) {
       toast.error('Integrated terminal not available')
       return
@@ -664,6 +667,7 @@ export function TerminalPanel() {
         projectId: targetProject, type, cols: 80, rows: 24, taskId,
         ...(prompt ? { prompt } : {}),
         ...(agent ? { agent } : {}),
+        ...(resume ? { resume } : {}),
       })
       const tab: GlobalTab = {
         sessionId: session.id,
@@ -1091,6 +1095,19 @@ export function TerminalPanel() {
     else if (restoredRef.current && ofProject.some(t => !t.exited)) setIsVisible(true)
   }, [activeProjectId])
 
+  // After a restart nothing is running, so focus layout would hide the panel —
+  // and with it the conversations left open here. Show them once per project.
+  const { data: projectConversations } = useClaudeConversations(activeProjectId ?? undefined, scoped)
+  const offeredResumeRef = useRef(new Set<string>())
+  useEffect(() => {
+    if (!scoped || !activeProjectId || !restored) return
+    if (offeredResumeRef.current.has(activeProjectId)) return
+    if (!projectConversations?.some(c => c.open)) return
+    offeredResumeRef.current.add(activeProjectId)
+    if (tabsRef.current.some(t => t.projectId === activeProjectId && !t.exited)) return
+    if (layoutStore.get().mode === 'focus') setIsVisible(true)
+  }, [scoped, activeProjectId, projectConversations, restored])
+
   // "Agents" in the workspace toolbar: show the panel, whatever is in it.
   useEffect(() => {
     const handler = () => setIsVisible(true)
@@ -1121,8 +1138,8 @@ export function TerminalPanel() {
 
   // Listen for shipyard:open-terminal events (from TerminalLauncher) for ANY project
   useEffect(() => {
-    const handler = (e: CustomEvent<{ projectId: string; type: string; taskId?: string; taskNumber?: number; prompt?: string; agent?: string }>) => {
-      handleNewTab(e.detail.type, e.detail.projectId, e.detail.taskId, e.detail.prompt, e.detail.taskNumber, e.detail.agent)
+    const handler = (e: CustomEvent<{ projectId: string; type: string; taskId?: string; taskNumber?: number; prompt?: string; agent?: string; resume?: { id: string; title?: string } }>) => {
+      handleNewTab(e.detail.type, e.detail.projectId, e.detail.taskId, e.detail.prompt, e.detail.taskNumber, e.detail.agent, e.detail.resume)
     }
     window.addEventListener('shipyard:open-terminal' as any, handler as any)
     return () => window.removeEventListener('shipyard:open-terminal' as any, handler as any)
@@ -1427,9 +1444,21 @@ export function TerminalPanel() {
                 </button>
               </div>
               <span className="text-[11px] text-muted-foreground/60">or run a task from the list on the left</span>
+              {scoped && activeProjectId && <ProjectConversations projectId={activeProjectId} />}
             </div>
           )}
         </div>
+    </div>
+  )
+}
+
+/** The project's Claude conversations to pick up, under the empty state. */
+function ProjectConversations({ projectId }: { projectId: string }) {
+  const { data } = useClaudeConversations(projectId)
+  if (!data?.length) return null
+  return (
+    <div className="mt-4 w-full max-w-xl px-4">
+      <ResumeConversations conversations={data} />
     </div>
   )
 }

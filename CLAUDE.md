@@ -49,6 +49,7 @@ data/           # Persistencia (auto-criado)
   deploy-config.json,              # token Railway (cifrado) + link por projeto
   cloud-sync.json,                 # Shipyard Cloud: sessao cifrada + cursor/hashes do sync
   inbox-config.json,               # WhatsApp inbox: URL + token (cifrado) + demandas ja entregues
+  claude-conversations.json,       # conversas do Claude que estavam numa aba (para o resume)
   tasks/{projectId}.json  # { milestones?: Milestone[], tasks: Task[] }
 
 electron/       # main.ts, preload.ts (desktop wrapper)
@@ -116,7 +117,7 @@ interface Project {
 **Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
 **Git**: GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
-**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
+**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba; POST aceita `resume` + `resumeTitle`), GET /api/terminal/conversations?projectId= (conversas do Claude para retomar), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **AI (multi-provedor)**: GET /api/ai/status, POST /api/ai/preferred, POST/DELETE /api/ai/config/:provider, POST /api/ai/config/:provider/test
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
@@ -628,6 +629,25 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `shipyard:terminal-last-by-project` (`{ projectId: sessionId }`), gravado
   quando a aba ativa muda. Voltar a um projeto reabre a sessao que estava
   aberta nele; sem lembranca (ou sessao fechada), a primeira viva
+
+### Retomar conversas do Claude depois de reiniciar
+- Depois de um reboot nenhum terminal sobrevive. `claudeConversations.ts` le
+  os transcripts do proprio Claude Code (`~/.claude/projects/<cwd com todo
+  nao-alfanumerico virando ->/<id>.jsonl`): titulo (`custom-title` vence
+  `ai-title`), `last-prompt` e `permission-mode` (`bypassPermissions` = YOLO),
+  lendo so os ultimos 256KB e com cache por mtime. Nao guardamos copia
+- O que guardamos e **quais conversas estavam numa aba**
+  (`data/claude-conversations.json`): todo hook traz `session_id`, e
+  `handleClaudeHook` mantem `session.claudeSessionId` (muda no `/clear`). A
+  entrada so sai quando o usuario fecha a aba (`DELETE` da sessao) — desligar
+  o PC mata os PTYs sem passar por essa rota, entao a lista sobrevive
+- `POST /api/terminal/sessions` com `resume` roda `claude [--dangerously-skip-permissions] --resume <id>`
+  no cwd onde a conversa rodou (o Claude so acha a conversa a partir dele),
+  ja com o titulo na aba e sem mover a task para In Progress
+- `ResumeConversations` aparece no Dashboard (todos os projetos, "Reopen N
+  tabs") e no estado vazio do painel de agentes. Em focus o painel fecha em
+  projeto sem sessao; por isso, uma vez por projeto apos o boot, ele abre se
+  houver conversa "open at close"
 
 ### Abas do terminal: nome, ordem e split
 - O nome de uma aba nao e uma string so: o server guarda `projectName`,

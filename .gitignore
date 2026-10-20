@@ -22,6 +22,7 @@ data/ai-config.json
 data/deploy-config.json
 data/inbox-config.json
 data/cloud-sync.json
+data/claude-conversations.json
 
 # Build artifacts
 client/tsconfig.tsbuildinfo

@@ -34,10 +34,11 @@ export function useRenameTerminalSession() {
 export function useCreateTerminalSession() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ projectId, type, cols, rows, taskId, prompt, agent }: { projectId: string; type?: string; cols?: number; rows?: number; taskId?: string; prompt?: string; agent?: string }) =>
-      api.createTerminalSession(projectId, type, cols, rows, taskId, prompt, agent),
+    mutationFn: ({ projectId, type, cols, rows, taskId, prompt, agent, resume }: { projectId: string; type?: string; cols?: number; rows?: number; taskId?: string; prompt?: string; agent?: string; resume?: { id: string; title?: string } }) =>
+      api.createTerminalSession(projectId, type, cols, rows, taskId, prompt, agent, resume),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['terminal', 'sessions', variables.projectId] })
+      if (variables.resume) queryClient.invalidateQueries({ queryKey: ['terminal', 'conversations'] })
     },
   })
 }
@@ -48,7 +49,19 @@ export function useKillTerminalSession() {
     mutationFn: (sessionId: string) => api.killTerminalSession(sessionId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['terminal', 'sessions'] })
+      queryClient.invalidateQueries({ queryKey: ['terminal', 'conversations'] })
     },
+  })
+}
+
+/** Claude Code conversations to pick up again; all projects when projectId is omitted. */
+export function useClaudeConversations(projectId?: string, enabled = true) {
+  return useQuery({
+    enabled,
+    queryKey: ['terminal', 'conversations', projectId ?? 'all'],
+    queryFn: () => api.getClaudeConversations(projectId),
+    select: data => data.conversations,
+    staleTime: 30_000,
   })
 }
 

@@ -2,6 +2,8 @@ import { useState, useMemo, useCallback, lazy, Suspense } from 'react'
 import { Loader, ArrowRight, FolderSearch, FolderPlus, Rocket } from 'lucide-react'
 import { ProjectList } from '@/components/projects/ProjectList'
 import { ActivityFeed } from '@/components/tasks/ActivityFeed'
+import { ResumeConversations } from '@/components/terminals/ResumeConversations'
+import { useClaudeConversations } from '@/hooks/useTerminal'
 import { useProjects, type Project } from '@/hooks/useProjects'
 import { useAllTasks, type Task } from '@/hooks/useTasks'
 import { useTabs } from '@/hooks/useTabs'
@@ -24,6 +26,7 @@ export function Dashboard() {
   const { data: tasks } = useAllTasks()
   const { openTab } = useTabs()
   const onboarding = useOnboarding()
+  const { data: conversations } = useClaudeConversations()
 
   const projectMap = useMemo(() => {
     const m = new Map<string, Project>()
@@ -196,6 +199,15 @@ export function Dashboard() {
                 </button>
               ))}
             </div>
+          )}
+
+          {/* Claude conversations to pick up after a restart — hides itself when there are none */}
+          {!hasNoProjects && (
+            <ResumeConversations
+              conversations={conversations}
+              projectNames={projectNames}
+              onBeforeResume={c => openTab(c.projectId)}
+            />
           )}
 
           {/* Agent activity — hides itself when the last day was quiet */}

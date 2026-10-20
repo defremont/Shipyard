@@ -14,6 +14,7 @@ import {
   terminalModePreamble,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
+import { findOpenConversation, forgetConversation, listConversations } from '../services/claudeConversations.js';
 import * as taskStore from '../services/taskStore.js';
 import * as worktreeService from '../services/worktreeService.js';
 import { triggerAutoSync } from '../services/sync/syncEngine.js';
@@ -139,15 +140,34 @@ export async function terminalWsRoutes(app: FastifyInstance) {
     });
   });
 
+  // REST: Claude Code conversations to pick up again — the ones left open on a
+  // tab when Shipyard closed, then the newest of each project. Without
+  // projectId it covers every project, for the Dashboard.
+  app.get<{ Querystring: { projectId?: string } }>(
+    '/api/terminal/conversations',
+    async (request) => {
+      const { projectId } = request.query;
+      const projects = (await getProjects()).filter(p => !projectId || p.id === projectId);
+      const liveIds = new Set(listSessions().map(s => s.claudeSessionId).filter((id): id is string => !!id));
+      const conversations = await listConversations({
+        projects,
+        liveIds,
+        perProject: projectId ? 5 : 2,
+        limit: projectId ? 5 : 8,
+      });
+      return { conversations };
+    }
+  );
+
   // REST: Create a new terminal session
-  app.post<{ Body: { projectId: string; type?: string; cols?: number; rows?: number; taskId?: string; prompt?: string; agent?: string } }>(
+  app.post<{ Body: { projectId: string; type?: string; cols?: number; rows?: number; taskId?: string; prompt?: string; agent?: string; resume?: string; resumeTitle?: string } }>(
     '/api/terminal/sessions',
     async (request, reply) => {
       if (!isAvailable()) {
         return reply.status(503).send({ error: 'Integrated terminal not available (node-pty not installed)' });
       }
 
-      const { projectId, type = 'shell', cols = 80, rows = 24, taskId, prompt, agent } = request.body;
+      const { projectId, type = 'shell', cols = 80, rows = 24, taskId, prompt, agent, resume, resumeTitle } = request.body;
       const projects = await getProjects();
       const project = projects.find(p => p.id === projectId);
       if (!project) return reply.status(404).send({ error: 'Project not found' });
@@ -163,14 +183,21 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       if (taskId) {
         const task = await taskStore.getTask(projectId, taskId);
         if (task) {
-          startTask = task.status !== 'in_progress';
+          // Picking a conversation back up is not starting the task again.
+          startTask = !resume && task.status !== 'in_progress';
           taskLabel = { title: task.title, number: task.number };
           const worktree = await worktreeService.ensureTaskWorktree(project, task);
           cwd = worktree.path;
         }
       }
 
-      const sessionId = await createSession(projectId, project.path, type, cols, rows, project.name, taskId, prompt, agent, cwd, taskLabel);
+      // Claude Code only finds a conversation from the folder it ran in.
+      if (resume && !taskId) cwd = (await findOpenConversation(resume))?.cwd || cwd;
+
+      const sessionId = await createSession(
+        projectId, project.path, type, cols, rows, project.name, taskId, prompt, agent, cwd, taskLabel,
+        resume ? { id: resume, title: resumeTitle } : undefined,
+      );
       if (!sessionId) {
         log.error('terminal', 'Failed to create terminal session', `type=${type}`, projectId);
         return reply.status(500).send({ error: 'Failed to create terminal session' });
@@ -200,6 +227,7 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         typeLabel: session?.typeLabel,
         taskTitle: session?.taskTitle,
         taskNumber: session?.taskNumber,
+        summary: session?.summary,
         state: session?.state,
       };
     }
@@ -245,6 +273,9 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         conn.cleanup();
         activeConnections.delete(sessionId);
       }
+      // Closed by the user: its conversation is no longer one left open.
+      const conversationId = getSession(sessionId)?.claudeSessionId;
+      if (conversationId) await forgetConversation(conversationId);
       const killed = killSession(sessionId);
       if (!killed) return reply.status(404).send({ error: 'Session not found' });
       return { success: true };

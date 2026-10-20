@@ -5,6 +5,7 @@ import { join } from 'path';
 import { resolveAgent, buildAgentLaunch, quote, DEFAULT_AGENT_ID } from './agentRegistry.js';
 import { aiTitlesEnabled, cleanTerminalOutput, summarizeTerminal } from './terminalSummary.js';
 import { endsWithQuestion, removeHookSettings, writeHookSettings } from './claudeHooks.js';
+import { trackConversation } from './claudeConversations.js';
 import type { AgentDefinition } from '../types/index.js';
 
 const os = platform();
@@ -77,6 +78,10 @@ export interface TerminalSession {
   titled?: boolean;
   /** Prompt injection is still under way: the screen is not classified yet */
   watchHold?: boolean;
+  /** Claude Code's own id for the conversation in this tab (from its hooks) */
+  claudeSessionId?: string;
+  /** Claude runs here with --dangerously-skip-permissions */
+  yolo?: boolean;
 }
 
 const sessions = new Map<string, TerminalSession>();
@@ -157,6 +162,8 @@ export async function createSession(
   cwd?: string,
   /** Task behind this session, so the tab can say what it is working on. */
   task?: { title?: string; number?: number },
+  /** Claude Code conversation to pick up (`claude --resume <id>`), and its title */
+  resume?: { id: string; title?: string },
 ): Promise<string | null> {
   if (!nodePty) return null;
 
@@ -189,20 +196,23 @@ export async function createSession(
 
   // Claude Code is the one CLI that reports its own state (see claudeHooks).
   let runsClaude = false;
+  let yolo = false;
+  const resumeArgs = resume ? `--resume ${quote(resume.id)}` : '';
 
   if (type === 'dev') {
     initialCommand = await detectDevCommand(workdir);
   } else if (type === 'claude' && !agentId) {
     // Plain Claude tab from the project menu — permissions prompt intact.
     env['CLAUDECODE'] = '';
-    initialCommand = ['claude', await hookArgs(id)].filter(Boolean).join(' ');
+    initialCommand = ['claude', resumeArgs, await hookArgs(id)].filter(Boolean).join(' ');
     runsClaude = true;
   } else if (AGENT_SESSION_TYPES.has(type)) {
     agent = resolveAgent(agentId);
     runsClaude = agent.id === DEFAULT_AGENT_ID;
     if (runsClaude) env['CLAUDECODE'] = '';
-    const extraArgs = runsClaude ? await hookArgs(id) : '';
-    const launch = await buildAgentLaunch(agent, { cwd: workdir, prompt, extraArgs });
+    yolo = runsClaude && (agent.args || '').includes('--dangerously-skip-permissions');
+    const extraArgs = runsClaude ? [resumeArgs, await hookArgs(id)].filter(Boolean).join(' ') : '';
+    const launch = await buildAgentLaunch(agent, { cwd: workdir, prompt: resume ? undefined : prompt, extraArgs });
     initialCommand = launch.command;
     injectPrompt = launch.injectsPrompt;
   }
@@ -251,11 +261,14 @@ export async function createSession(
     ...(agent ? { agent: agent.id } : {}),
     // Another agent's CLI says nothing we can read, so its tab claims nothing:
     // a state set here would never change and the tab would spin forever.
-    ...(runsClaude ? { state: 'busy' as TerminalState, claude: true } : {}),
+    ...(runsClaude ? { state: 'busy' as TerminalState, claude: true, yolo } : {}),
+    ...(runsClaude && resume ? { claudeSessionId: resume.id } : {}),
+    ...(runsClaude && resume?.title ? { summary: resume.title } : {}),
   };
 
   sessions.set(id, session);
   trackTerminalModes(id, pty);
+  if (session.claudeSessionId) rememberConversation(session);
 
   // The process can die while no terminal is mounted to hear it (the board is
   // in front), so the session is closed from here, not from the socket.
@@ -817,6 +830,15 @@ export function handleClaudeHook(id: string, event: any): boolean {
   session.claude = true;
   session.hooked = true;
 
+  // Every hook names the conversation. It changes on /clear, and may on a
+  // resume, so the tab is kept pointing at the current one.
+  const conversationId = typeof event?.session_id === 'string' ? event.session_id : '';
+  if (conversationId && conversationId !== session.claudeSessionId) {
+    const previous = session.claudeSessionId;
+    session.claudeSessionId = conversationId;
+    rememberConversation(session, previous);
+  }
+
   switch (event?.hook_event_name) {
     case 'UserPromptSubmit':
       session.watchHold = false;
@@ -848,6 +870,18 @@ export function handleClaudeHook(id: string, event: any): boolean {
       break;
   }
   return true;
+}
+
+/** Note the tab's conversation as open, so it can be resumed after a restart. */
+function rememberConversation(session: TerminalSession, replaces?: string): void {
+  if (!session.claudeSessionId) return;
+  void trackConversation({
+    id: session.claudeSessionId,
+    projectId: session.projectId,
+    cwd: session.cwd,
+    yolo: !!session.yolo,
+    ...(session.taskId ? { taskId: session.taskId } : {}),
+  }, replaces).catch(() => {});
 }
 
 /** The CLI quit: the terminal is a plain shell again, with nothing to report. */
