@@ -442,6 +442,8 @@ export function replaceTasks(projectId: string, incoming: Partial<Task>[], miles
         needsReview: t.needsReview ?? existing?.needsReview,
         agent: t.agent ?? existing?.agent,
         context: t.context ?? existing?.context,
+        rootCause: t.rootCause ?? existing?.rootCause,
+        resolution: t.resolution ?? existing?.resolution,
         attachments: t.attachments ?? existing?.attachments,
         comments: t.comments ?? existing?.comments,
         worktreePath: t.worktreePath ?? existing?.worktreePath,

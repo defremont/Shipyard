@@ -18,6 +18,7 @@ import { TaskAttachments } from '@/components/tasks/TaskAttachments'
 import { TaskComments } from '@/components/tasks/TaskComments'
 import { AgentSelect } from '@/components/tasks/AgentSelect'
 import { TaskReviewPanel } from '@/components/tasks/TaskReviewPanel'
+import { TaskOutcomeCard } from '@/components/tasks/TaskOutcomeCard'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { playAiCompleteSound } from '@/lib/sounds'
@@ -156,6 +157,8 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
 
   const detailsBody = (
     <>
+      <TaskOutcomeCard task={task} onEdit={handleEdit} />
+
       {task.description && (
         <div>
           <label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Description</label>
@@ -266,7 +269,8 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
                 </Badge>
                 {task.effort && (
                   <Badge variant="outline" className="text-[10px]">{task.effort} pts effort</Badge>
-                )}                <span className="text-[10px] text-muted-foreground/60 font-mono select-all ml-auto">#{task.number || '?'}</span>
+                )}
+                <span className="text-[10px] text-muted-foreground/60 font-mono select-all ml-auto">#{task.number || '?'}</span>
               </div>
             </div>
           </div>

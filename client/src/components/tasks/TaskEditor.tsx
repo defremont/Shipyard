@@ -44,6 +44,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
   const [effortSource, setEffortSource] = useState<'claude' | 'manual'>('manual')
   const [status, setStatus] = useState<string>('todo')
   const [prompt, setPrompt] = useState('')
+  const [rootCause, setRootCause] = useState('')
+  const [resolution, setResolution] = useState('')
   const [subtasks, setSubtasks] = useState<Subtask[]>([])
   const [newSubtask, setNewSubtask] = useState('')
   const [showDetails, setShowDetails] = useState(false)
@@ -72,6 +74,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
       setEffortSource(task.effortSource === 'claude' ? 'claude' : 'manual')
       setStatus(task.status)
       setPrompt(task.prompt || '')
+      setRootCause(task.rootCause || '')
+      setResolution(task.resolution || '')
       setSubtasks(task.subtasks || [])
       setShowDetails(Boolean(task.prompt) || (task.subtasks?.length ?? 0) > 0)
     } else {
@@ -81,6 +85,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
       setEffort('none')
       setStatus('todo')
       setPrompt('')
+      setRootCause('')
+      setResolution('')
       setSubtasks([])
       setShowDetails(false)
     }
@@ -94,6 +100,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
     setEffort('none')
     setEffortSource('manual')
     setPrompt('')
+    setRootCause('')
+    setResolution('')
     setSubtasks([])
     setNewSubtask('')
     setShowDetails(false)
@@ -130,6 +138,9 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
           effortSource: effort === 'none' ? null : effortSource,
           status,
           prompt: prompt || undefined,
+          // Sent even when empty, so clearing a field actually clears it.
+          rootCause: rootCause.trim(),
+          resolution: resolution.trim(),
           subtasks: finalSubtasks.length > 0 ? finalSubtasks : undefined,
         },
         { onSuccess: () => onOpenChange(false) }
@@ -145,6 +156,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
           effortSource: effort === 'none' ? undefined : effortSource,
           status,
           prompt: prompt || undefined,
+          rootCause: rootCause.trim() || undefined,
+          resolution: resolution.trim() || undefined,
           milestoneId: milestoneId && milestoneId !== 'default' ? milestoneId : undefined,
           subtasks: finalSubtasks.length > 0 ? finalSubtasks : undefined,
         },
@@ -184,6 +197,8 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
   }
 
   const detailsCount = (prompt.trim() ? 1 : 0) + subtasks.length
+  // The outcome only makes sense once the work is over, or once it was written.
+  const showOutcome = status === 'done' || !!rootCause.trim() || !!resolution.trim()
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -289,6 +304,38 @@ export function TaskEditor({ projectId, task, milestoneId, open, onOpenChange }:
               </SelectContent>
             </Select>
           </div>
+
+          {showOutcome && (
+            <div className="rounded-lg border bg-muted/40 p-3 space-y-3">
+              <div>
+                <label htmlFor="task-root-cause" className="text-xs font-medium uppercase tracking-wider text-warning">
+                  Why it happened
+                </label>
+                <span className="ml-2 text-[11px] text-muted-foreground">bugs and problems only</span>
+                <Textarea
+                  id="task-root-cause"
+                  value={rootCause}
+                  onChange={e => setRootCause(e.target.value)}
+                  placeholder="The underlying cause, not the symptom"
+                  className="mt-1.5 resize-y bg-background"
+                  rows={2}
+                />
+              </div>
+              <div>
+                <label htmlFor="task-resolution" className="text-xs font-medium uppercase tracking-wider text-success">
+                  What was done
+                </label>
+                <Textarea
+                  id="task-resolution"
+                  value={resolution}
+                  onChange={e => setResolution(e.target.value)}
+                  placeholder="The change, where it lives and how it was verified"
+                  className="mt-1.5 resize-y bg-background"
+                  rows={3}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="pt-1">
             <button

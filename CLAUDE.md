@@ -38,7 +38,7 @@ server/src/
                 # terminalService, aiBackend, aiConfigStore, aiJson,
                 # claudeService, claudeCliService, openaiService, geminiService,
                 # cliDetect, cliRunner, sseStream, claudeContextBuilder,
-                # aiResolvePrompt, aiManagePrompt,
+                # aiResolvePrompt, aiManagePrompt, fileSearch,
                 # mcpServer, mcpAuth, logService, settingsStore, dataDir
 
 data/           # Persistencia (auto-criado)
@@ -66,6 +66,8 @@ interface Task {
   description: string;      // O QUE fazer (visao usuario/produto)
   prompt?: string;          // HOW/WHY tecnico (causas, arquivos, solucoes)
   context?: string;         // privado: nunca sai para Trello/ClickUp/Sheets (ver "Contexto privado")
+  rootCause?: string;       // task done de bug/problema: por que aconteceu (ver "Resolucao da tarefa")
+  resolution?: string;      // task done: o que foi feito
   agent?: string;           // qual CLI roda a task (id do agentRegistry; vazio = default)
   worktreePath?: string;    // worktree isolada onde o agente roda (worktree-per-task)
   worktreeBranch?: string;  // branch checada nessa worktree
@@ -141,6 +143,7 @@ interface Project {
     no DELETE, `?link=` remove um deploy, `?subrepo=` os daquele checkout e
     nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
+**Busca**: GET /api/search/files|content (`q`, `projectId?` restringe, `prefer?` = projeto aberto, ranqueia primeiro; content aceita `caseSensitive`)
 **WhatsApp inbox**: GET/PUT/DELETE /api/inbox (`{ url, token }`; o PUT ja testa com um sync), POST /api/inbox/sync
 **Shipyard Cloud**: GET /api/cloud/status, POST /api/cloud/signup|login|logout|sync
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
@@ -281,13 +284,43 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
 ### Tarefas: description vs prompt
 - **description**: O QUE fazer, visao usuario/produto, sem referencias a codigo
 - **prompt**: Analise tecnica — causas, arquivos, solucoes, checklist de implementacao
-- Para tarefas done: prompt contem resumo da implementacao
+- O desfecho de uma tarefa done NAO vai mais no prompt: mora em `rootCause` +
+  `resolution` (secao abaixo)
+
+### Resolucao da tarefa (`rootCause` + `resolution`)
+- Padrao desde a v1.30: toda tarefa done registra **o que foi feito**
+  (`resolution`, obrigatorio) e, se for bug ou problema, **por que aconteceu**
+  (`rootCause`: a causa, nao o sintoma). O usuario le isso depois para entender
+  a tarefa sem abrir o codigo
+- Quem grava: `complete_task` do MCP (`resolution` e required no schema;
+  `summary` virou alias legado; sem resolucao a task fecha mesmo assim e a
+  resposta traz `warning`), `update_task`, o curl final do "Run with AI"
+  (`aiResolvePrompt.ts`), os prompts de copiar (`promptBuilder.ts`, mesmas
+  frases) e o TaskEditor (bloco "Why it happened / What was done", visivel
+  quando status = done ou ja ha conteudo)
+- Quem le: `TaskOutcomeCard` no topo do TaskViewer, antes da descricao. Task
+  done sem nada mostra o aviso tracejado com "Add" (nao esconder a lacuna).
+  `getTaskOutcome` (`lib/taskOutcome.ts`) cai no formato antigo — ultima secao
+  `— Summary` do prompt ou `## What was done` da descricao — marcado "from the
+  task notes". O feed de atividade usa a 1a linha de `resolution`
+- Fica fora do sync (Trello/ClickUp/Sheets nao leem os campos; o parse do
+  pull jogaria qualquer secao nova dentro do prompt). Shipyard Cloud leva a
+  task inteira. `replaceTasks` copia os dois do `existing`
+- A busca (board, All Tasks, Ctrl+K e `search_tasks`) tambem procura neles
 
 ### Busca de tarefas (filtro do board)
 - `lib/taskSearch.ts` e a fonte unica do filtro por texto: `parseSearchTerms`
   quebra a query em termos e `taskMatchesTerms` casa **todos** eles (AND) contra
-  titulo + description + prompt (mais um campo `extra`, usado na TasksPage para
-  o nome do projeto). Nao escrever um filtro proprio por tela
+  titulo + description + rootCause + resolution + prompt + context (mais um
+  campo `extra`, usado na TasksPage para o nome do projeto). Nao escrever um
+  filtro proprio por tela
+- **Numero da tarefa**: `#378` casa so a tarefa 378 (nunca texto); `378` puro
+  casa o numero ou o texto. Combina com outros termos (`#378 login`). O
+  `search_tasks` do MCP segue a mesma regra
+- O minusculo de cada task e cacheado num `WeakMap` pelo objeto: o
+  structural sharing do react-query mantem a task estavel entre polls, entao
+  cada versao da task e baixada uma vez so — nao trocar por `toLowerCase` por
+  tecla
 - `TaskSearchBox` fica colapsado num icone de lupa na toolbar do board e so
   expande ao clicar; **nunca colapsa com texto dentro** — filtro ativo tem que
   estar visivel. Esc limpa e fecha, o X limpa e mantem o foco
@@ -298,6 +331,40 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   nunca pode ficar escondido atras de "Show N read"
 - A busca e efemera (nao vai pro localStorage) e zera ao trocar de projeto ou
   milestone
+
+### Busca global (Ctrl+K) e no conteudo (Ctrl+Shift+F)
+- **Contexto primeiro**: projeto aberto (aba ativa, `useTabs().activeTabId`),
+  depois os outros projetos do **mesmo cliente** (`category` = pasta-pai = pasta
+  do cliente) e por fim o resto. `lib/searchRanking.ts` (`makeContextRank`,
+  `rankTasks`, `rankProjects`) e a fonte unica no cliente — a paleta e a busca
+  do painel lateral (`SearchView`) usam as mesmas funcoes. No server,
+  `projectRanks` em `services/fileSearch.ts` faz o mesmo com `prefer`
+- Tarefas na paleta: sem query, so abertas do contexto, mais recentes; com
+  query, **todos os status** (done incluso, abaixo das abertas), por relevancia
+  (`scoreTask`: numero > titulo > descricao/resolucao > projeto > prompt) +
+  contexto + status. `#N` esconde projetos e arquivos
+- Enter numa tarefa abre a aba do projeto **e** a tarefa: evento
+  `shipyard:open-task` → `TaskViewerHost` (montado no Layout, como o
+  `AiResolveHost`, porque a paleta desmonta ao fechar; Viewer e Editor sao
+  `lazy()`)
+- Nomes de arquivo: indice em memoria por projeto (`fileSearch.ts`, profundidade
+  6, teto 40 mil entradas), TTL 60s com stale-while-revalidate — so a primeira
+  busca de um projeto espera o walk. Rotas de arquivo que criam/renomeiam/
+  copiam/apagam chamam `invalidateFileIndex`. Score: nome exato > stem > prefixo
+  > inicio de palavra/camelCase > contem > caminho; varios termos casam no
+  caminho
+- Conteudo: `git grep -F -I --untracked --max-count 20 -z` por repo (raiz +
+  cada `subRepos`, que o repo pai nao percorre), 6 projetos em paralelo, na
+  ordem de contexto. ~70ms por repo contra segundos do walk. Projeto sem git na
+  raiz ou git que falha (flag desconhecida em git antigo) cai no walk antigo,
+  que agora enche um `out` proprio por projeto. Ao bater o teto de arquivos o
+  processo e morto e a promise resolve na hora — esperar o `close` custava
+  ~500ms no Windows
+- Ctrl+Shift+F busca **todos** os projetos, ranqueados; o botao de pasta /
+  `Alt+P` restringe ao projeto aberto (`shipyard:content-search-only-project`)
+- Os dois palettes cancelam a requisicao anterior (`AbortController`) — uma
+  resposta lenta nunca sobrescreve uma nova. Debounce 150ms (nomes) e 250ms
+  (conteudo)
 
 ### Dialogo de tarefa (TaskEditor)
 - Um unico componente serve New Task e Edit Task. O caminho comum e so titulo:
@@ -361,7 +428,8 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   entrada propria. Nao ha rota nova nem segunda cadencia sobre
   `['tasks','all']` — a query mais cara do app continua com o poll de 30s
 - As notas so existem porque `appendPromptSection` grava
-  `— Note YYYY-MM-DD HH:MM` (UTC) e `— Summary`. **Mudar esse formato no
+  `— Note YYYY-MM-DD HH:MM` (UTC) e, nas tasks antigas, `— Summary` (desde a
+  v1.30 o "completed" mostra a 1a linha de `resolution`). **Mudar esse formato no
   server quebra o feed** — os dois lados tem que andar juntos. A task guarda
   um unico `updatedAt`, entao ler o prompt e a unica forma de ver uma nota
   como evento
@@ -415,6 +483,8 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - **Toda mutacao de task no MCP DEVE chamar `afterTaskMutation(projectId)`**
   (= `triggerAutoSync`). Sem isso o agente altera tarefas e o Trello/ClickUp
   fica desatualizado ate o usuario mexer na UI
+- `complete_task` grava `resolution` (+ `rootCause` em bug) — ver "Resolucao
+  da tarefa". Nao volta a anexar `— Summary` ao prompt
 - `create_task`/`create_tasks`/`update_task`/`bulk_update_tasks` aceitam `effort`
   Fibonacci (1/2/3/5/8). Agentes DEVEM sempre atribuir/revisar effort pelo tamanho
   tecnico, nunca inferi-lo da prioridade

@@ -21,6 +21,7 @@ import { useAllTasks, type Task } from '@/hooks/useTasks'
 import { useTabs } from '@/hooks/useTabs'
 import { FileIcon } from '@/components/files/FileIcon'
 import { api } from '@/lib/api'
+import { makeContextRank, rankProjects, rankTasks } from '@/lib/searchRanking'
 
 type FilterTab = 'all' | 'projects' | 'tasks' | 'files'
 
@@ -58,10 +59,14 @@ export function GlobalSearch() {
   const listRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
   const navigate = useNavigate()
-  const { openTab } = useTabs()
+  const { openTab, activeTabId } = useTabs()
   const { data: projects } = useProjects()
   // Mounted on every page, but only visible on Ctrl+K — don't poll while closed.
   const { data: tasks } = useAllTasks({ enabled: open })
+
+  // The open project and its client rank first everywhere in the palette.
+  const contextRank = useMemo(() => makeContextRank(projects, activeTabId), [projects, activeTabId])
+  const activeProject = useMemo(() => projects?.find(p => p.id === activeTabId), [projects, activeTabId])
 
   // Listen for Ctrl+K and the Electron menu action
   useEffect(() => {
@@ -98,32 +103,37 @@ export function GlobalSearch() {
     }
   }, [open])
 
-  // Debounced file search
+  // Debounced file search. The server answers from an in-memory index, so the
+  // wait is short; a newer query aborts the request still in flight.
+  const trimmedQuery = query.trim()
+  const isTaskNumber = /^#\d+$/.test(trimmedQuery)
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
 
-    if (!query || query.length < 2 || (activeFilter !== 'all' && activeFilter !== 'files')) {
+    if (trimmedQuery.length < 2 || isTaskNumber || (activeFilter !== 'all' && activeFilter !== 'files')) {
       setFileResults([])
       setFileSearching(false)
       return
     }
 
     setFileSearching(true)
+    const controller = new AbortController()
     debounceRef.current = setTimeout(async () => {
       try {
-        const data = await api.searchFiles(query)
-        setFileResults(data.results)
+        const data = await api.searchFiles(trimmedQuery, { prefer: activeTabId ?? undefined, signal: controller.signal })
+        if (!controller.signal.aborted) setFileResults(data.results)
       } catch {
-        setFileResults([])
+        if (!controller.signal.aborted) setFileResults([])
       } finally {
-        setFileSearching(false)
+        if (!controller.signal.aborted) setFileSearching(false)
       }
-    }, 300)
+    }, 150)
 
     return () => {
+      controller.abort()
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, activeFilter])
+  }, [trimmedQuery, isTaskNumber, activeFilter, activeTabId])
 
   // Build project name lookup
   const projectNameMap = useMemo(() => {
@@ -132,31 +142,27 @@ export function GlobalSearch() {
     return map
   }, [projects])
 
-  // Filter projects
-  const filteredProjects = useMemo(() => {
-    if (!projects || !query) return projects || []
-    const q = query.toLowerCase()
-    return projects.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      p.category?.toLowerCase().includes(q) ||
-      p.techStack?.some((t: string) => t.toLowerCase().includes(q))
-    )
-  }, [projects, query])
+  // A task number ("#378") names one task; projects would only be noise.
+  const filteredProjects = useMemo(
+    () => (isTaskNumber ? [] : rankProjects(projects, trimmedQuery, contextRank)),
+    [projects, trimmedQuery, isTaskNumber, contextRank],
+  )
 
-  // Filter tasks
-  const filteredTasks = useMemo(() => {
-    if (!tasks) return []
-    const activeTasks = tasks.filter((t: Task) => t.status !== 'done')
-    if (!query) return activeTasks.slice(0, 30)
-    const q = query.toLowerCase()
-    return activeTasks.filter((t: Task) =>
-      t.title.toLowerCase().includes(q) ||
-      t.description?.toLowerCase().includes(q) ||
-      (statusLabels[t.status] || t.status).toLowerCase().includes(q) ||
-      t.priority.toLowerCase().includes(q) ||
-      (projectNameMap.get(t.projectId) || '').toLowerCase().includes(q)
-    ).slice(0, 30)
-  }, [tasks, query, projectNameMap])
+  const filteredTasks = useMemo(
+    () => rankTasks(tasks, trimmedQuery, {
+      projectName: id => projectNameMap.get(id) || '',
+      contextRank,
+      limit: 30,
+    }),
+    [tasks, trimmedQuery, projectNameMap, contextRank],
+  )
+
+  // Opening a task shows it, not just its project: the dialog lives in
+  // TaskViewerHost because the palette unmounts on close.
+  const openTask = useCallback((task: Task) => {
+    openTab(task.projectId)
+    window.dispatchEvent(new CustomEvent('shipyard:open-task', { detail: task }))
+  }, [openTab])
 
   // Quick actions (only show when no query)
   const quickActions = useMemo(() => {
@@ -181,7 +187,7 @@ export function GlobalSearch() {
     }
 
     if (activeFilter === 'all' || activeFilter === 'tasks') {
-      filteredTasks.forEach((t: Task) => items.push({ id: `task-${t.id}`, type: 'task', action: () => openTab(t.projectId) }))
+      filteredTasks.forEach((t: Task) => items.push({ id: `task-${t.id}`, type: 'task', action: () => openTask(t) }))
     }
 
     if (activeFilter === 'all' || activeFilter === 'files') {
@@ -199,7 +205,7 @@ export function GlobalSearch() {
     }
 
     return items
-  }, [activeFilter, query, quickActions, filteredProjects, filteredTasks, fileResults, openTab])
+  }, [activeFilter, query, quickActions, filteredProjects, filteredTasks, fileResults, openTab, openTask])
 
   // Reset selection when results change
   useEffect(() => {
@@ -288,7 +294,7 @@ export function GlobalSearch() {
               ref={inputRef}
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder="Search projects, tasks, files..."
+              placeholder="Search projects, tasks, files… or #123 for a task"
               className="flex-1 h-14 bg-transparent text-base outline-none placeholder:text-muted-foreground/60"
               autoComplete="off"
               spellCheck={false}
@@ -317,7 +323,10 @@ export function GlobalSearch() {
                 )}
               </button>
             ))}
-            <span className="ml-auto text-[10px] text-muted-foreground">Tab to switch</span>
+            <span className="ml-auto text-[10px] text-muted-foreground truncate">
+              {activeProject ? <>Ranked for <span className="text-foreground/80">{activeProject.category || activeProject.name}</span> · </> : null}
+              Tab to switch
+            </span>
           </div>
 
           {/* Results */}
@@ -418,7 +427,10 @@ export function GlobalSearch() {
                       }`}
                     >
                       <PriorityIcon className={`h-4 w-4 shrink-0 ${pConfig?.color || 'text-muted-foreground'}`} />
-                      <span className="text-sm truncate flex-1">{task.title}</span>
+                      {task.number != null && (
+                        <span className="text-[11px] font-mono tabular-nums text-muted-foreground/70 shrink-0">#{task.number}</span>
+                      )}
+                      <span className={`text-sm truncate flex-1 ${task.status === 'done' ? 'text-muted-foreground' : ''}`}>{task.title}</span>
                       <button
                         title="Run with an agent"
                         className="shrink-0 rounded p-1 text-primary opacity-0 group-hover/task:opacity-100 hover:bg-primary/10 transition-opacity"

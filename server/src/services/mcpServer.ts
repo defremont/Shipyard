@@ -106,12 +106,14 @@ export async function getTask(projectId: string, taskId: string): Promise<McpToo
   const task = await taskStore.getTask(projectId, taskId);
   if (!task) return fail(`Task "${taskId}" not found`);
   // Full task details (this is the tool for getting description/prompt)
-  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, context, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks, attachments, comments } = task;
+  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, context, rootCause, resolution, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks, attachments, comments } = task;
   return { content: [{ type: 'text', text: compact({
     id, number, projectId, ...(milestoneId ? { milestoneId } : {}),
     title, description, priority, effort, effortSource, effortConfidence, status, prompt,
     // Private: the client board never gets this. Keep it out of description/prompt.
     ...(context ? { context } : {}),
+    ...(rootCause ? { rootCause } : {}),
+    ...(resolution ? { resolution } : {}),
     createdAt, updatedAt, inboxAt, inProgressAt, doneAt,
     ...(subtasks?.length ? { subtasks } : {}),
     // Metadata only — call get_task_attachment to actually see an image.
@@ -220,6 +222,8 @@ export async function updateTask(projectId: string, taskId: string, data: {
   status?: string;
   prompt?: string;
   milestoneId?: string;
+  rootCause?: string;
+  resolution?: string;
 }): Promise<McpToolResult> {
   const updates: Partial<Task> = {};
   if (data.title !== undefined) updates.title = data.title;
@@ -228,6 +232,8 @@ export async function updateTask(projectId: string, taskId: string, data: {
   if (data.effort !== undefined) { updates.effort = data.effort; updates.effortSource = 'claude'; }
   if (data.status !== undefined) updates.status = data.status as Task['status'];
   if (data.prompt !== undefined) updates.prompt = data.prompt;
+  if (data.rootCause !== undefined) updates.rootCause = data.rootCause;
+  if (data.resolution !== undefined) updates.resolution = data.resolution;
   // 'default' is the virtual General milestone — stored as an absent field.
   if (data.milestoneId !== undefined) {
     updates.milestoneId = data.milestoneId === 'default' ? undefined : data.milestoneId;
@@ -550,34 +556,45 @@ export async function logTaskProgress(projectId: string, taskId: string, note: s
   return { content: [{ type: 'text', text: compact({ ok: true, id: updated.id, promptLength: nextPrompt.length }) }] };
 }
 
-export async function completeTask(projectId: string, taskId: string, summary?: string): Promise<McpToolResult> {
+export async function completeTask(projectId: string, taskId: string, outcome: {
+  resolution?: string;
+  rootCause?: string;
+  /** Pre-1.30 name for `resolution`; agents with an old tool list still send it. */
+  summary?: string;
+} = {}): Promise<McpToolResult> {
   const existing = await taskStore.getTask(projectId, taskId);
   if (!existing) {
     return { content: [{ type: 'text', text: `Task "${taskId}" not found` }], isError: true };
   }
-  const nextPrompt = summary
-    ? taskStore.appendPromptSection(existing.prompt, '— Summary', summary)
-    : existing.prompt;
+  const resolution = (outcome.resolution || outcome.summary || '').trim();
+  const rootCause = (outcome.rootCause || '').trim();
   const updated = await taskStore.updateTask(projectId, taskId, {
     status: 'done',
-    ...(summary ? { prompt: nextPrompt } : {}),
+    ...(resolution ? { resolution } : {}),
+    ...(rootCause ? { rootCause } : {}),
   });
   if (!updated) {
     return { content: [{ type: 'text', text: `Failed to complete task "${taskId}"` }], isError: true };
   }
   afterTaskMutation(projectId);
-  return { content: [{ type: 'text', text: compact({ ok: true, id: updated.id, title: updated.title, status: updated.status, doneAt: updated.doneAt }) }] };
+  return { content: [{ type: 'text', text: compact({
+    ok: true, id: updated.id, title: updated.title, status: updated.status, doneAt: updated.doneAt,
+    // The task still closes: a missing write-up is fixable, a stuck task is not.
+    ...(updated.resolution ? {} : { warning: 'No resolution recorded. Call update_task with "resolution" (what was done) and, for a bug, "rootCause".' }),
+  }) }] };
 }
 
 export async function searchTasks(query: string, projectId?: string, status?: string): Promise<McpToolResult> {
   const all = projectId ? await taskStore.getTasks(projectId) : await taskStore.getAllTasks();
-  const q = query.toLowerCase();
+  const q = query.trim().toLowerCase();
+  // "#378" is the number people read off the board, never body text.
+  const byNumber = /^#(\d+)$/.exec(q);
   const matched = all.filter(t =>
-    (!status || t.status === status) && (
-      t.title.toLowerCase().includes(q) ||
-      t.description.toLowerCase().includes(q) ||
-      (t.prompt && t.prompt.toLowerCase().includes(q)) ||
-      (t.context && t.context.toLowerCase().includes(q))
+    (!status || t.status === status) && (byNumber
+      ? t.number === Number(byNumber[1])
+      : (/^\d+$/.test(q) && t.number === Number(q)) ||
+        [t.title, t.description, t.prompt, t.context, t.rootCause, t.resolution]
+          .some(field => field?.toLowerCase().includes(q))
     )
   );
   // Return slim matches — use get_task for full details
@@ -593,6 +610,8 @@ const STATUS = { type: 'string', enum: ['backlog', 'todo', 'in_progress', 'done'
 const PRIORITY = { type: 'string', enum: ['urgent', 'high', 'medium', 'low'] } as const;
 const EFFORT = { type: 'number', enum: [1, 2, 3, 5, 8], description: 'Required implementation-size estimate: 1 trivial, 2 small, 3 medium, 5 large/cross-layer, 8 very large or uncertain. Effort is not urgency.' } as const;
 const PROVIDER_ID = { type: 'string', enum: ['trello', 'clickup'], description: 'Sync provider' } as const;
+const ROOT_CAUSE = { type: 'string', description: 'Bugs and problems only: why it happened, the underlying cause and not the symptom (e.g. "the cache key ignored the milestone, so two lists shared one entry"). Leave out for features and chores.' } as const;
+const RESOLUTION = { type: 'string', description: 'What was done: the change, where it lives and how it was verified, in two to five plain sentences.' } as const;
 
 const readOnly = { readOnlyHint: true } as const;
 const destructive = { destructiveHint: true } as const;
@@ -775,7 +794,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'update_task',
-    description: 'Update a task: status, title, description, priority, prompt, or move it to another milestone.',
+    description: 'Update a task: status, title, description, priority, prompt, root cause/resolution, or move it to another milestone.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -788,6 +807,8 @@ export const MCP_TOOLS = [
         status: STATUS,
         prompt: { type: 'string' },
         milestoneId: { ...MILESTONE_ID, description: 'Move the task to this milestone. "default" moves it to General.' },
+        rootCause: ROOT_CAUSE,
+        resolution: RESOLUTION,
       },
       required: ['projectId', 'taskId'],
     },
@@ -919,20 +940,22 @@ export const MCP_TOOLS = [
   },
   {
     name: 'complete_task',
-    description: 'Move a task to done and optionally append an implementation summary to the prompt. Use this as the final call when the agent finishes work.',
+    description: 'Move a task to done and record its outcome. Use this as the final call when the agent finishes work. ALWAYS pass "resolution"; for a bug or problem ALSO pass "rootCause". The user reads both later to understand what broke and what changed, so write them for a person, not a log.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         projectId: { type: 'string', description: 'The project ID' },
         taskId: { type: 'string', description: 'The task ID' },
-        summary: { type: 'string', description: 'Optional summary of what was implemented' },
+        resolution: RESOLUTION,
+        rootCause: ROOT_CAUSE,
+        summary: { type: 'string', description: 'Deprecated alias of "resolution".' },
       },
-      required: ['projectId', 'taskId'],
+      required: ['projectId', 'taskId', 'resolution'],
     },
   },
   {
     name: 'search_tasks',
-    description: 'Search tasks by keyword across title, description and prompt (returns slim results, use get_task for details)',
+    description: 'Search tasks by keyword across title, description, prompt, root cause and resolution. "#378" finds task number 378. Returns slim results, use get_task for details.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -1027,7 +1050,7 @@ export async function handleToolCall(name: string, args: Record<string, any>): P
     case 'log_task_progress':
       return logTaskProgress(args.projectId, args.taskId, args.note);
     case 'complete_task':
-      return completeTask(args.projectId, args.taskId, args.summary);
+      return completeTask(args.projectId, args.taskId, { resolution: args.resolution, rootCause: args.rootCause, summary: args.summary });
     case 'search_tasks':
       return searchTasks(args.query, args.projectId, args.status);
     case 'list_sync_integrations':

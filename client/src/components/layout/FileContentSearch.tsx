@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
-import { Search, Loader2, FileText, CaseSensitive, ChevronRight } from 'lucide-react'
+import { Search, Loader2, CaseSensitive, ChevronRight, FolderDot } from 'lucide-react'
 import { useTabs } from '@/hooks/useTabs'
 import { useProjects } from '@/hooks/useProjects'
 import { FileIcon } from '@/components/files/FileIcon'
@@ -20,6 +20,8 @@ interface ContentResult {
   matches: ContentMatch[]
 }
 
+const ONLY_PROJECT_KEY = 'shipyard:content-search-only-project'
+
 export function FileContentSearch() {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -29,18 +31,26 @@ export function FileContentSearch() {
   const [searching, setSearching] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(0)
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
+  // Default is every project, ranked: the open one first, then the rest of
+  // its client. "Only this project" narrows it, and is remembered.
+  const [onlyProject, setOnlyProject] = useState(() => {
+    try { return localStorage.getItem(ONLY_PROJECT_KEY) === 'true' } catch { return false }
+  })
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
-  const { openTab } = useTabs()
+  const { openTab, activeTabId } = useTabs()
   const { data: projects } = useProjects()
 
-  // Get active project from current tab context
-  const activeProjectId = useMemo(() => {
-    const path = window.location.pathname
-    const match = path.match(/^\/project\/([^/]+)/)
-    return match?.[1] || undefined
-  }, [open])
+  const activeProjectId = activeTabId ?? undefined
+  const scopedToProject = onlyProject && !!activeProjectId
+
+  const toggleOnlyProject = useCallback(() => {
+    setOnlyProject(prev => {
+      try { localStorage.setItem(ONLY_PROJECT_KEY, String(!prev)) } catch { /* ignore */ }
+      return !prev
+    })
+  }, [])
 
   // Listen for Ctrl+Shift+F and the Electron menu action
   useEffect(() => {
@@ -90,35 +100,49 @@ export function FileContentSearch() {
     }
 
     setSearching(true)
+    // A newer query aborts the one in flight, so a slow answer never
+    // overwrites a fresh one.
+    const controller = new AbortController()
     debounceRef.current = setTimeout(async () => {
       try {
-        const data = await api.searchContent(query, activeProjectId, caseSensitive)
+        const data = await api.searchContent(query, {
+          projectId: scopedToProject ? activeProjectId : undefined,
+          prefer: activeProjectId,
+          caseSensitive,
+          signal: controller.signal,
+        })
+        if (controller.signal.aborted) return
         setResults(data.results)
         setTotalMatches(data.totalMatches)
       } catch {
+        if (controller.signal.aborted) return
         setResults([])
         setTotalMatches(0)
       } finally {
-        setSearching(false)
+        if (!controller.signal.aborted) setSearching(false)
       }
-    }, 400)
+    }, 250)
 
     return () => {
+      controller.abort()
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [query, caseSensitive, activeProjectId])
+  }, [query, caseSensitive, activeProjectId, scopedToProject])
 
-  // Build flat navigation items (file headers + visible matches)
-  const flatItems = useMemo(() => {
+  // Build flat navigation items (file headers + visible matches). `headerIndex`
+  // lets each row find its own position without scanning the whole list.
+  const { flatItems, headerIndex } = useMemo(() => {
     const items: Array<{
       type: 'file-header' | 'match'
       result: ContentResult
       match?: ContentMatch
       matchIdx?: number
     }> = []
+    const headers = new Map<ContentResult, number>()
 
     for (const result of results) {
       const fileKey = `${result.projectId}:${result.filePath}`
+      headers.set(result, items.length)
       items.push({ type: 'file-header', result })
       if (!collapsedFiles.has(fileKey)) {
         result.matches.forEach((m, i) => {
@@ -127,7 +151,7 @@ export function FileContentSearch() {
       }
     }
 
-    return items
+    return { flatItems: items, headerIndex: headers }
   }, [results, collapsedFiles])
 
   // Reset selection when results change
@@ -202,12 +226,15 @@ export function FileContentSearch() {
           openFileAtLine(item.result, item.result.matches[0]?.line)
         }
       }
+    } else if (e.altKey && (e.key === 'p' || e.key === 'P') && activeProjectId) {
+      e.preventDefault()
+      toggleOnlyProject()
     } else if (e.key === ' ' && flatItems[selectedIndex]?.type === 'file-header') {
       e.preventDefault()
       const item = flatItems[selectedIndex]
       toggleFileCollapse(`${item.result.projectId}:${item.result.filePath}`)
     }
-  }, [close, flatItems, selectedIndex, openFileAtLine, toggleFileCollapse])
+  }, [close, flatItems, selectedIndex, openFileAtLine, toggleFileCollapse, activeProjectId, toggleOnlyProject])
 
   // Highlight matching text in a line
   const highlightMatch = useCallback((text: string, matchQuery: string, isCaseSensitive: boolean) => {
@@ -216,9 +243,10 @@ export function FileContentSearch() {
       const escaped = matchQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       const regex = new RegExp(`(${escaped})`, isCaseSensitive ? 'g' : 'gi')
       const parts = text.split(regex)
+      // split() with a capture group puts the matches at the odd indexes.
       return parts.map((part, i) =>
-        regex.test(part)
-          ? <span key={i} className="bg-yellow-500/30 text-yellow-200 rounded-sm px-0.5">{part}</span>
+        i % 2 === 1
+          ? <span key={i} className="bg-warning/25 text-foreground rounded-sm px-0.5">{part}</span>
           : part
       )
     } catch {
@@ -227,7 +255,7 @@ export function FileContentSearch() {
   }, [])
 
   // Project name lookup
-  const multiProject = !activeProjectId
+  const multiProject = !scopedToProject
   const projectNameMap = useMemo(() => {
     const map = new Map<string, string>()
     projects?.forEach(p => map.set(p.id, p.name))
@@ -251,8 +279,8 @@ export function FileContentSearch() {
               ref={inputRef}
               value={query}
               onChange={e => setQuery(e.target.value)}
-              placeholder={activeProjectId
-                ? 'Search in file contents...'
+              placeholder={scopedToProject
+                ? 'Search in this project\'s files...'
                 : 'Search in file contents across all projects...'
               }
               className="flex-1 h-14 bg-transparent text-base outline-none placeholder:text-muted-foreground/60"
@@ -260,6 +288,20 @@ export function FileContentSearch() {
               spellCheck={false}
             />
             {searching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+            {activeProjectId && (
+              <button
+                onClick={toggleOnlyProject}
+                className={`p-1.5 rounded transition-colors ${
+                  scopedToProject
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground/40 hover:text-muted-foreground'
+                }`}
+                title={scopedToProject ? 'Searching only this project (Alt+P)' : 'Only this project (Alt+P)'}
+                aria-pressed={scopedToProject}
+              >
+                <FolderDot className="h-4 w-4" />
+              </button>
+            )}
             <button
               onClick={() => setCaseSensitive(prev => !prev)}
               className={`p-1.5 rounded transition-colors ${
@@ -286,7 +328,7 @@ export function FileContentSearch() {
                   <span>{totalMatches} result{totalMatches !== 1 ? 's' : ''} in {results.length} file{results.length !== 1 ? 's' : ''}</span>
                   {activeProjectId && (
                     <span className="text-muted-foreground/50">
-                      in {projectNameMap.get(activeProjectId) || 'current project'}
+                      {scopedToProject ? 'in' : 'ranked for'} {projectNameMap.get(activeProjectId) || 'current project'}
                     </span>
                   )}
                 </>
@@ -310,9 +352,7 @@ export function FileContentSearch() {
             {results.map((result) => {
               const fileKey = `${result.projectId}:${result.filePath}`
               const isCollapsed = collapsedFiles.has(fileKey)
-              const headerIdx = flatItems.findIndex(
-                i => i.type === 'file-header' && i.result === result
-              )
+              const headerIdx = headerIndex.get(result) ?? -1
 
               return (
                 <div key={fileKey} className="border-b border-border/50 last:border-b-0">
@@ -347,9 +387,7 @@ export function FileContentSearch() {
 
                   {/* Matches */}
                   {!isCollapsed && result.matches.map((match, matchIdx) => {
-                    const flatIdx = flatItems.findIndex(
-                      i => i.type === 'match' && i.result === result && i.matchIdx === matchIdx
-                    )
+                    const flatIdx = headerIdx + 1 + matchIdx
 
                     return (
                       <div
@@ -389,6 +427,12 @@ export function FileContentSearch() {
                 <kbd className="inline-flex h-4 items-center rounded border bg-muted px-1 font-mono text-[10px]">Space</kbd>
                 toggle group
               </span>
+              {activeProjectId && (
+                <span className="flex items-center gap-1">
+                  <kbd className="inline-flex h-4 items-center rounded border bg-muted px-1 font-mono text-[10px]">Alt+P</kbd>
+                  only this project
+                </span>
+              )}
               <span className="flex items-center gap-1">
                 <kbd className="inline-flex h-4 items-center rounded border bg-muted px-1 font-mono text-[10px]">Esc</kbd>
                 close

@@ -92,12 +92,13 @@ export function buildAiResolvePrompt(
   lines.push('```');
   lines.push(`curl -X PUT http://localhost:${serverPort}/api/projects/${project.id}/tasks/${task.id} \\`);
   lines.push(`  -H "Content-Type: application/json" \\`);
-  lines.push(`  -d '{"description": "<original description>\\n\\n## What was done\\n<brief user-friendly summary of what was accomplished>", "prompt": "<technical summary: files changed, approach taken, key decisions>", "status": "done"}'`);
+  lines.push(`  -d '{"status": "done", "rootCause": "<bugs/problems only: why it happened>", "resolution": "<what was done and how it was verified>"}'`);
   lines.push('```');
   lines.push('');
   lines.push('Rules:');
-  lines.push('- The "description" field MUST preserve the original description text and append a "## What was done" section with a brief, user-friendly summary of what was accomplished');
-  lines.push('- The "prompt" field should contain a concise technical summary of the implementation (files changed, approach, key decisions)');
+  lines.push('- "resolution" is REQUIRED: what was done to solve it — the change, where it lives and how it was verified, in two to five plain sentences. The user reads it later to understand the task without opening the code');
+  lines.push('- "rootCause" is REQUIRED for a bug or problem: why it happened — the underlying cause, not the symptom. Leave it out for features and chores');
+  lines.push('- Leave "description" and "prompt" as they are; the outcome lives in these two fields');
   lines.push('- Set status to "done" only when the task is fully complete');
   lines.push('- The server handles timestamps automatically, no need to set them');
   lines.push('- DO NOT skip this step — it is required for task tracking');

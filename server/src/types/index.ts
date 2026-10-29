@@ -67,6 +67,8 @@ export interface Task {
   prompt?: string;
   context?: string;       // Private: never pushed to Trello/ClickUp/Sheets (WhatsApp transcript, open questions)
   agent?: string;         // AgentDefinition.id — which CLI runs this task ('claude' when unset)
+  rootCause?: string;     // Done bug/problem: why it happened (the cause, not the symptom)
+  resolution?: string;    // Done task: what was done to solve it
   createdAt: string;
   updatedAt: string;
   order: number;

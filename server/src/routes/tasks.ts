@@ -143,7 +143,7 @@ export async function taskRoutes(app: FastifyInstance) {
     afterTaskMutation(request.params.projectId);
     return result;
   });
-  app.post<{ Params: { projectId: string }; Body: { title: string; description?: string; priority?: string; effort?: number; effortSource?: 'claude' | 'manual'; effortConfidence?: 'low' | 'medium' | 'high'; status?: string; prompt?: string; milestoneId?: string; subtasks?: { id?: string; title: string; done?: boolean }[] } }>(
+  app.post<{ Params: { projectId: string }; Body: { title: string; description?: string; priority?: string; effort?: number; effortSource?: 'claude' | 'manual'; effortConfidence?: 'low' | 'medium' | 'high'; status?: string; prompt?: string; rootCause?: string; resolution?: string; milestoneId?: string; subtasks?: { id?: string; title: string; done?: boolean }[] } }>(
     '/api/projects/:projectId/tasks',
     async (request, reply) => {
       try {
@@ -157,6 +157,8 @@ export async function taskRoutes(app: FastifyInstance) {
           ...(validEffort(request.body.effort) ? { effort: request.body.effort, effortSource: request.body.effortSource || 'manual', effortConfidence: request.body.effortConfidence } : {}),
           status: (request.body.status as any) || 'todo',
           prompt: request.body.prompt,
+          ...(request.body.rootCause?.trim() ? { rootCause: request.body.rootCause.trim() } : {}),
+          ...(request.body.resolution?.trim() ? { resolution: request.body.resolution.trim() } : {}),
           milestoneId: request.body.milestoneId,
           ...(sanitizeSubtasks(request.body.subtasks) ?? {}),
         });
@@ -170,7 +172,7 @@ export async function taskRoutes(app: FastifyInstance) {
     }
   );
 
-  app.put<{ Params: { projectId: string; taskId: string }; Body: Partial<{ title: string; description: string; priority: string; effort: number | null; effortSource: 'claude' | 'manual' | 'backfill' | null; effortConfidence: 'low' | 'medium' | 'high' | null; status: string; prompt: string; order: number }> }>(
+  app.put<{ Params: { projectId: string; taskId: string }; Body: Partial<{ title: string; description: string; priority: string; effort: number | null; effortSource: 'claude' | 'manual' | 'backfill' | null; effortConfidence: 'low' | 'medium' | 'high' | null; status: string; prompt: string; rootCause: string; resolution: string; order: number }> }>(
     '/api/projects/:projectId/tasks/:taskId',
     async (request, reply) => {
       if (request.body.effort !== undefined && request.body.effort !== null && !validEffort(request.body.effort)) {

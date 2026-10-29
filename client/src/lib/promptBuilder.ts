@@ -2,6 +2,11 @@ import type { Task } from '@/hooks/useTasks'
 
 const priorityLabel: Record<string, string> = { urgent: 'URGENT', high: 'HIGH', medium: 'MEDIUM', low: 'LOW' }
 
+// Every done task carries its outcome in these two fields (TaskOutcomeCard
+// shows them). Same wording as the "Run with AI" prompt on the server.
+const RESOLUTION_HINT = 'Set "resolution" (REQUIRED): what was done — the change, where it lives and how it was verified, in two to five plain sentences'
+const ROOT_CAUSE_HINT = 'Set "rootCause" for a bug or problem: why it happened — the underlying cause, not the symptom (omit for features)'
+
 function formatTaskBlock(t: Task, index?: number): string[] {
   const lines: string[] = []
   const prefix = index != null ? `## ${index + 1}. ` : '## '
@@ -69,6 +74,8 @@ export function buildInProgressPrompt(
   lines.push(`6. Update the tasks file (${tasksFilePath}) to mark the task as done:`)
   lines.push(`   - Set "effort" to the chosen Fibonacci value (1/2/3/5/8)`)
   lines.push(`   - Set "status": "done"`)
+  lines.push(`   - ${RESOLUTION_HINT}`)
+  lines.push(`   - ${ROOT_CAUSE_HINT}`)
   lines.push(`   - Set "doneAt" and "updatedAt" to the current ISO timestamp`)
   lines.push(`   - PRESERVE existing "inboxAt" and "inProgressAt" timestamps — never remove them`)
 
@@ -143,6 +150,8 @@ export function buildColumnPrompt(
     lines.push(`6. Update the tasks file (${tasksFilePath}) to mark the task as done:`)
     lines.push('   - Set "effort" to the chosen Fibonacci value (1/2/3/5/8)')
     lines.push('   - Set "status": "done"')
+    lines.push(`   - ${RESOLUTION_HINT}`)
+    lines.push(`   - ${ROOT_CAUSE_HINT}`)
     lines.push('   - Set "doneAt" and "updatedAt" to the current ISO timestamp')
     lines.push('   - PRESERVE existing "inboxAt" and "inProgressAt" timestamps — never remove them')
     const ids = sorted.map(t => `"${t.id}"`).join(', ')
@@ -162,6 +171,7 @@ export function buildColumnPrompt(
     lines.push('## Instructions')
     lines.push('Verify that each task above is truly complete:')
     lines.push('1. Confirm or assign Fibonacci effort (1/2/3/5/8) for every task and persist missing values')
+    lines.push(`   Also fill a missing "resolution" (and "rootCause" for bugs) from what the code shows was done`)
     lines.push('2. Check the codebase for each task — is the feature/fix actually implemented?')
     lines.push('3. Look for partial implementations, TODOs, or missing edge cases')
     lines.push('4. If a task is NOT actually done, move it back to in_progress in the tasks file:')
@@ -223,6 +233,8 @@ export function buildTaskPrompt(
     lines.push(`   - Find the task with id "${task.id}" and set:`)
     lines.push(`     - "effort": <chosen Fibonacci value 1|2|3|5|8>`)
     lines.push(`     - "status": "done"`)
+    lines.push(`     - ${RESOLUTION_HINT}`)
+    lines.push(`     - ${ROOT_CAUSE_HINT}`)
     lines.push(`     - "doneAt": "<current ISO timestamp>"`)
     lines.push(`     - "updatedAt": "<current ISO timestamp>"`)
     lines.push(`     - PRESERVE existing "inboxAt" and "inProgressAt" — never remove them`)

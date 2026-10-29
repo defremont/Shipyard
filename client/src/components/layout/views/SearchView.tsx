@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Search, FolderOpen, Loader2, AlertTriangle, ArrowUp, Minus, ArrowDown as ArrowDownIcon } from 'lucide-react'
 import { useProjects } from '@/hooks/useProjects'
 import { useAllTasks, type Task } from '@/hooks/useTasks'
@@ -8,6 +7,7 @@ import { FileIcon } from '@/components/files/FileIcon'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { makeContextRank, rankProjects, rankTasks } from '@/lib/searchRanking'
 
 interface FileResult {
   name: string
@@ -25,45 +25,47 @@ const priorityConfig: Record<string, { icon: typeof AlertTriangle; color: string
   low: { icon: ArrowDownIcon, color: 'text-muted-foreground/60' },
 }
 
-const statusLabels: Record<string, string> = {
-  backlog: 'Backlog', todo: 'To Do', in_progress: 'In Progress', done: 'Done',
-}
-
 export function SearchView() {
   const [query, setQuery] = useState('')
   const [fileResults, setFileResults] = useState<FileResult[]>([])
   const [searching, setSearching] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>()
   const inputRef = useRef<HTMLInputElement>(null)
-  const navigate = useNavigate()
-  const { openTab } = useTabs()
+  const { openTab, activeTabId } = useTabs()
   const editor = useEditorTabsContext()
   const { data: projects } = useProjects()
   const { data: tasks } = useAllTasks()
+  const contextRank = useMemo(() => makeContextRank(projects, activeTabId), [projects, activeTabId])
+  const trimmedQuery = query.trim()
+  const isTaskNumber = /^#\d+$/.test(trimmedQuery)
 
   useEffect(() => { inputRef.current?.focus() }, [])
 
   // Debounced file search
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current)
-    if (!query || query.length < 2) {
+    if (trimmedQuery.length < 2 || isTaskNumber) {
       setFileResults([])
       setSearching(false)
       return
     }
     setSearching(true)
+    const controller = new AbortController()
     debounceRef.current = setTimeout(async () => {
       try {
-        const data = await api.searchFiles(query)
-        setFileResults(data.results)
+        const data = await api.searchFiles(trimmedQuery, { prefer: activeTabId ?? undefined, signal: controller.signal })
+        if (!controller.signal.aborted) setFileResults(data.results)
       } catch {
-        setFileResults([])
+        if (!controller.signal.aborted) setFileResults([])
       } finally {
-        setSearching(false)
+        if (!controller.signal.aborted) setSearching(false)
       }
-    }, 300)
-    return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
-  }, [query])
+    }, 150)
+    return () => {
+      controller.abort()
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [trimmedQuery, isTaskNumber, activeTabId])
 
   const projectNameMap = useMemo(() => {
     const map = new Map<string, string>()
@@ -71,29 +73,19 @@ export function SearchView() {
     return map
   }, [projects])
 
-  const filteredProjects = useMemo(() => {
-    if (!projects || !query) return []
-    const q = query.toLowerCase()
-    return projects.filter(p =>
-      p.name.toLowerCase().includes(q) ||
-      p.category?.toLowerCase().includes(q) ||
-      p.techStack?.some((t: string) => t.toLowerCase().includes(q))
-    )
-  }, [projects, query])
+  const filteredProjects = useMemo(
+    () => (!trimmedQuery || isTaskNumber ? [] : rankProjects(projects, trimmedQuery, contextRank)),
+    [projects, trimmedQuery, isTaskNumber, contextRank],
+  )
 
-  const filteredTasks = useMemo(() => {
-    if (!tasks || !query) return []
-    const q = query.toLowerCase()
-    return tasks.filter((t: Task) =>
-      t.status !== 'done' && (
-        t.title.toLowerCase().includes(q) ||
-        t.description?.toLowerCase().includes(q) ||
-        (statusLabels[t.status] || t.status).toLowerCase().includes(q) ||
-        t.priority.toLowerCase().includes(q) ||
-        (projectNameMap.get(t.projectId) || '').toLowerCase().includes(q)
-      )
-    ).slice(0, 30)
-  }, [tasks, query, projectNameMap])
+  const filteredTasks = useMemo(
+    () => (!trimmedQuery ? [] : rankTasks(tasks, trimmedQuery, {
+      projectName: id => projectNameMap.get(id) || '',
+      contextRank,
+      limit: 30,
+    })),
+    [tasks, trimmedQuery, projectNameMap, contextRank],
+  )
 
   const total = filteredProjects.length + filteredTasks.length + fileResults.length
 
@@ -163,10 +155,16 @@ export function SearchView() {
               return (
                 <button
                   key={task.id}
-                  onClick={() => { openTab(task.projectId); navigate(`/project/${task.projectId}`) }}
+                  onClick={() => {
+                    openTab(task.projectId)
+                    window.dispatchEvent(new CustomEvent('shipyard:open-task', { detail: task }))
+                  }}
                   className="w-full flex items-center gap-2 px-2 py-1 rounded-md text-[12px] text-left text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
                 >
                   <PriorityIcon className={cn('h-3.5 w-3.5 shrink-0', pConfig?.color || 'text-muted-foreground')} />
+                  {task.number != null && (
+                    <span className="text-[10px] font-mono tabular-nums text-muted-foreground/50 shrink-0">#{task.number}</span>
+                  )}
                   <span className="truncate flex-1">{task.title}</span>
                   <span className="text-[9px] text-muted-foreground/50 truncate max-w-[60px]">
                     {projectNameMap.get(task.projectId) || ''}

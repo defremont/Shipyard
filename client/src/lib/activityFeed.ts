@@ -111,7 +111,10 @@ export function buildActivityEvents(
 
     const doneAt = time(task.doneAt)
     if (keep(doneAt)) {
-      push({ id: `${task.projectId}:${task.id}:done`, type: 'done', at: doneAt!, task, detail: sections.summary })
+      // The resolution field replaced the `— Summary` section in v1.30; older
+      // tasks still only have the section.
+      const resolution = task.resolution?.trim().split('\n').find(line => line.trim())?.trim()
+      push({ id: `${task.projectId}:${task.id}:done`, type: 'done', at: doneAt!, task, detail: resolution || sections.summary })
     }
 
     const startedAt = time(task.inProgressAt)

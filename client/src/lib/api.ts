@@ -270,6 +270,12 @@ export interface SyncOperationResult {
   milestoneId?: string;
 }
 
+function searchParams(params: Record<string, string | undefined>): string {
+  const qs = new URLSearchParams()
+  for (const [key, value] of Object.entries(params)) if (value) qs.set(key, value)
+  return qs.toString()
+}
+
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   const { timeout, ...fetchOptions } = options || {};
   const headers: Record<string, string> = {};
@@ -724,13 +730,17 @@ export const api = {
   clearLogs: () => request<{ ok: boolean }>('/logs', { method: 'DELETE' }),
 
   // Search
-  searchFiles: (query: string, projectId?: string) =>
+  // `prefer` is the open project: it and the rest of its client rank first.
+  // `projectId` restricts the search to that one project.
+  searchFiles: (query: string, opts: { projectId?: string; prefer?: string; signal?: AbortSignal } = {}) =>
     request<{ results: Array<{ name: string; path: string; projectId: string; projectName: string; type: 'file' | 'dir'; extension?: string }> }>(
-      `/search/files?q=${encodeURIComponent(query)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}`
+      `/search/files?${searchParams({ q: query, projectId: opts.projectId, prefer: opts.prefer })}`,
+      { signal: opts.signal },
     ),
-  searchContent: (query: string, projectId?: string, caseSensitive = false) =>
+  searchContent: (query: string, opts: { projectId?: string; prefer?: string; caseSensitive?: boolean; signal?: AbortSignal } = {}) =>
     request<{ results: Array<{ file: string; filePath: string; projectId: string; projectName: string; extension?: string; matches: Array<{ line: number; text: string; column: number }> }>; totalMatches: number }>(
-      `/search/content?q=${encodeURIComponent(query)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ''}${caseSensitive ? '&caseSensitive=true' : ''}`
+      `/search/content?${searchParams({ q: query, projectId: opts.projectId, prefer: opts.prefer, caseSensitive: opts.caseSensitive ? 'true' : undefined })}`,
+      { signal: opts.signal },
     ),
 
   // Files

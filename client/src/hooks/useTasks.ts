@@ -47,6 +47,10 @@ export interface Task {
   context?: string
   /** Which CLI runs this task — see useAgents(). Unset means Claude Code. */
   agent?: string
+  /** Done bug or problem: why it happened. */
+  rootCause?: string
+  /** Done task: what was done to solve it. */
+  resolution?: string
   createdAt: string
   updatedAt: string
   order: number
@@ -153,7 +157,7 @@ export function useTaskForecast(projectId: string | undefined, milestoneId?: str
 export function useCreateTask() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ projectId, ...data }: { projectId: string; title: string; description?: string; priority?: string; effort?: EffortPoints; effortSource?: 'claude' | 'manual'; status?: string; prompt?: string; milestoneId?: string; subtasks?: { id: string; title: string; done: boolean }[] }) =>
+    mutationFn: ({ projectId, ...data }: { projectId: string; title: string; description?: string; priority?: string; effort?: EffortPoints; effortSource?: 'claude' | 'manual'; status?: string; prompt?: string; rootCause?: string; resolution?: string; milestoneId?: string; subtasks?: { id: string; title: string; done: boolean }[] }) =>
       api.createTask(projectId, data),
     onSuccess: (_, variables) => {
       // Invalidate all task queries for this project (including milestone-scoped)

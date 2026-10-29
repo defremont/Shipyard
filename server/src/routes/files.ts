@@ -4,6 +4,7 @@ import { join, resolve, extname, relative, sep, dirname, basename } from 'path';
 import { getProjects } from '../services/projectDiscovery.js';
 import { openFolder } from '../services/terminalLauncher.js';
 import * as log from '../services/logService.js';
+import { searchFileNames, grepProject, projectRanks, orderByRank, mapLimit, snippet, invalidateFileIndex, type ContentResult, type ContentMatch } from '../services/fileSearch.js';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
@@ -258,6 +259,7 @@ export async function fileRoutes(app: FastifyInstance) {
           await unlink(targetPath);
           log.info('files', `File deleted: ${relPath}`, undefined, request.params.projectId);
         }
+        invalidateFileIndex(request.params.projectId);
         return { success: true };
       } catch (err: any) {
         log.error('files', `Failed to delete: ${relPath}`, err.message, request.params.projectId);
@@ -309,11 +311,12 @@ export async function fileRoutes(app: FastifyInstance) {
     }
   );
 
-  // Search files across projects by filename
-  app.get<{ Querystring: { q: string; projectId?: string; limit?: string } }>(
+  // Search files across projects by filename. `prefer` is the open project:
+  // it and the rest of its client rank first.
+  app.get<{ Querystring: { q: string; projectId?: string; prefer?: string; limit?: string } }>(
     '/api/search/files',
-    async (request, reply) => {
-      const query = (request.query.q || '').trim().toLowerCase();
+    async (request) => {
+      const query = (request.query.q || '').trim();
       if (!query || query.length < 2) {
         return { results: [] };
       }
@@ -325,58 +328,17 @@ export async function fileRoutes(app: FastifyInstance) {
         ? projects.filter(p => p.id === filterProjectId)
         : projects;
 
-      const results: Array<{
-        name: string;
-        path: string;
-        projectId: string;
-        projectName: string;
-        type: 'file' | 'dir';
-        extension?: string;
-      }> = [];
-
-      const MAX_DEPTH = 5;
-
-      async function walkDir(dirPath: string, relPath: string, projectId: string, projectName: string, depth: number) {
-        if (depth > MAX_DEPTH || results.length >= limit) return;
-        try {
-          const entries = await readdir(dirPath, { withFileTypes: true });
-          for (const entry of entries) {
-            if (results.length >= limit) break;
-            if (IGNORE_NAMES.has(entry.name)) continue;
-            if (entry.name.startsWith('.') && !isVisibleDotfile(entry.name)) continue;
-
-            const entryRelPath = relPath ? `${relPath}/${entry.name}` : entry.name;
-
-            if (entry.name.toLowerCase().includes(query)) {
-              results.push({
-                name: entry.name,
-                path: entryRelPath,
-                projectId,
-                projectName,
-                type: entry.isDirectory() ? 'dir' : 'file',
-                extension: entry.isFile() ? extname(entry.name).toLowerCase() || undefined : undefined,
-              });
-            }
-
-            if (entry.isDirectory()) {
-              await walkDir(join(dirPath, entry.name), entryRelPath, projectId, projectName, depth + 1);
-            }
-          }
-        } catch {
-          // Skip directories we can't read
-        }
-      }
-
-      await Promise.all(
-        targetProjects.map(p => walkDir(p.path, '', p.id, p.name, 0))
-      );
-
-      return { results: results.slice(0, limit) };
+      const results = await searchFileNames(targetProjects, query, {
+        limit,
+        preferId: request.query.prefer || filterProjectId,
+        filter: { ignore: IGNORE_NAMES, isVisibleDotfile },
+      });
+      return { results };
     }
   );
 
   // Search file contents across projects
-  app.get<{ Querystring: { q: string; projectId?: string; limit?: string; caseSensitive?: string } }>(
+  app.get<{ Querystring: { q: string; projectId?: string; prefer?: string; limit?: string; caseSensitive?: string } }>(
     '/api/search/content',
     async (request, reply) => {
       const query = (request.query.q || '').trim();
@@ -388,31 +350,16 @@ export async function fileRoutes(app: FastifyInstance) {
       const caseSensitive = request.query.caseSensitive === 'true';
       const filterProjectId = request.query.projectId;
       const projects = await getProjects();
-      const targetProjects = filterProjectId
-        ? projects.filter(p => p.id === filterProjectId)
-        : projects;
+      const ranks = projectRanks(projects, request.query.prefer || filterProjectId);
+      // The open project and its client are searched first and listed first.
+      const targetProjects = orderByRank(
+        filterProjectId ? projects.filter(p => p.id === filterProjectId) : projects,
+        ranks,
+      );
 
       const MAX_DEPTH = 6;
       const MAX_FILE_SIZE_SEARCH = 512 * 1024; // 512KB for content search
-      const MAX_CONTEXT_CHARS = 200;
 
-      interface ContentMatch {
-        line: number;
-        text: string;
-        column: number;
-      }
-
-      interface ContentResult {
-        file: string;
-        filePath: string;
-        projectId: string;
-        projectName: string;
-        extension?: string;
-        matches: ContentMatch[];
-      }
-
-      const results: ContentResult[] = [];
-      let totalMatches = 0;
       const MAX_TOTAL_MATCHES = 500;
       const MAX_MATCHES_PER_FILE = 20;
 
@@ -435,19 +382,22 @@ export async function fileRoutes(app: FastifyInstance) {
         '.sqlite', '.db',
       ]);
 
-      async function searchDir(dirPath: string, relPath: string, projectId: string, projectName: string, depth: number) {
-        if (depth > MAX_DEPTH || results.length >= limit || totalMatches >= MAX_TOTAL_MATCHES) return;
+      // Fallback for projects without git at the root. Each walk fills its own
+      // `out`, so walks running side by side never mix their results.
+      async function searchDir(dirPath: string, relPath: string, projectId: string, projectName: string, depth: number, out: { results: ContentResult[]; matches: number }) {
+        const { results } = out;
+        if (depth > MAX_DEPTH || results.length >= limit || out.matches >= MAX_TOTAL_MATCHES) return;
         try {
           const entries = await readdir(dirPath, { withFileTypes: true });
           for (const entry of entries) {
-            if (results.length >= limit || totalMatches >= MAX_TOTAL_MATCHES) break;
+            if (results.length >= limit || out.matches >= MAX_TOTAL_MATCHES) break;
             if (IGNORE_NAMES.has(entry.name)) continue;
             if (entry.name.startsWith('.') && !isVisibleDotfile(entry.name)) continue;
 
             const entryRelPath = relPath ? `${relPath}/${entry.name}` : entry.name;
 
             if (entry.isDirectory()) {
-              await searchDir(join(dirPath, entry.name), entryRelPath, projectId, projectName, depth + 1);
+              await searchDir(join(dirPath, entry.name), entryRelPath, projectId, projectName, depth + 1, out);
             } else if (entry.isFile()) {
               const ext = extname(entry.name).toLowerCase();
               if (CONTENT_IGNORE_EXT.has(ext)) continue;
@@ -470,12 +420,9 @@ export async function fileRoutes(app: FastifyInstance) {
                   searchRegex.lastIndex = 0;
                   const match = searchRegex.exec(lines[i]);
                   if (match) {
-                    const lineText = lines[i].length > MAX_CONTEXT_CHARS
-                      ? lines[i].substring(Math.max(0, match.index - 60), match.index + query.length + 60)
-                      : lines[i];
                     fileMatches.push({
                       line: i + 1,
-                      text: lineText.trimEnd(),
+                      text: snippet(lines[i], match.index, query.length),
                       column: match.index,
                     });
                   }
@@ -490,7 +437,7 @@ export async function fileRoutes(app: FastifyInstance) {
                     extension: ext || undefined,
                     matches: fileMatches,
                   });
-                  totalMatches += fileMatches.length;
+                  out.matches += fileMatches.length;
                 }
               } catch {
                 // Skip files we can't read (binary, permissions, etc)
@@ -502,11 +449,30 @@ export async function fileRoutes(app: FastifyInstance) {
         }
       }
 
-      await Promise.all(
-        targetProjects.map(p => searchDir(p.path, '', p.id, p.name, 0))
-      );
+      // git grep answers a repo in milliseconds and already skips ignored and
+      // binary files. Projects without git at the root fall back to the walk.
+      const perProject = await mapLimit(targetProjects, 6, async project => {
+        const grepped = await grepProject(project, query, {
+          caseSensitive,
+          maxFiles: limit,
+          maxPerFile: MAX_MATCHES_PER_FILE,
+        });
+        if (grepped) return grepped;
+        const out = { results: [] as ContentResult[], matches: 0 };
+        await searchDir(project.path, '', project.id, project.name, 0, out);
+        return out.results;
+      });
 
-      return { results: results.slice(0, limit), totalMatches };
+      const ordered: ContentResult[] = [];
+      let total = 0;
+      for (const list of perProject) {
+        for (const result of list) {
+          if (ordered.length >= limit || total >= MAX_TOTAL_MATCHES) break;
+          ordered.push(result);
+          total += result.matches.length;
+        }
+      }
+      return { results: ordered, totalMatches: total };
     }
   );
 
@@ -566,6 +532,7 @@ export async function fileRoutes(app: FastifyInstance) {
         await rename(targetPath, newPath);
         const newRelPath = relative(projectPath, newPath).replace(/\\/g, '/');
         log.info('files', `Renamed: ${relPath} → ${newRelPath}`, undefined, request.params.projectId);
+        invalidateFileIndex(request.params.projectId);
         return { success: true, newPath: newRelPath };
       } catch (err: any) {
         if (err.statusCode) return reply.status(err.statusCode).send({ error: err.message });
@@ -624,6 +591,7 @@ export async function fileRoutes(app: FastifyInstance) {
 
         const newRelPath = relative(projectPath, newPath).replace(/\\/g, '/');
         log.info('files', `Created ${type}: ${newRelPath}`, undefined, request.params.projectId);
+        invalidateFileIndex(request.params.projectId);
         return { success: true, path: newRelPath };
       } catch (err: any) {
         log.error('files', `Failed to create ${type}: ${trimmedName}`, err.message, request.params.projectId);
@@ -724,6 +692,7 @@ export async function fileRoutes(app: FastifyInstance) {
         await copyRecursive(sourceResolved, destResolved);
         const newRelPath = relative(projectPath, destResolved).replace(/\\/g, '/');
         log.info('files', `Copied: ${sourcePath} → ${newRelPath}`, undefined, request.params.projectId);
+        invalidateFileIndex(request.params.projectId);
         return { success: true, path: newRelPath };
       } catch (err: any) {
         log.error('files', `Failed to copy: ${sourcePath}`, err.message, request.params.projectId);

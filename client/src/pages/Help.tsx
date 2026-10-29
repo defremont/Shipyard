@@ -191,7 +191,9 @@ function SectionDashboard() {
       <P>
         Filter projects by name or tech stack. Sort by name, recent commit, last opened,
         category, or task count. Category badges filter by parent folder. Use <Kbd>Ctrl + K</Kbd>
-        for global search across projects, tasks, and files.
+        for global search across projects, tasks, and files. Results from the project you have open
+        come first, then the other projects of the same client. Type <Kbd>#123</Kbd> to jump to a task
+        by its number.
       </P>
     </>
   )
@@ -247,10 +249,11 @@ function SectionWorkspace() {
 
       <H3>File Content Search</H3>
       <P>
-        Press <Kbd>Ctrl + Shift + F</Kbd> to open the file content search. This searches inside
-        file contents across the current project (or all projects if on the home page). Results show
+        Press <Kbd>Ctrl + Shift + F</Kbd> to open the file content search. It searches inside
+        every project, listing the one you have open first, then the rest of its client. Results show
         matching lines with highlighted text, grouped by file.
       </P>
+      <Bullet title="Only this project">Narrow the search to the open project with the folder button or <Kbd>Alt + P</Kbd>. The choice is remembered.</Bullet>
       <Bullet title="Case sensitive">Toggle case-sensitive matching with the Aa button.</Bullet>
       <Bullet title="Navigation">Use <Kbd>Arrow Up/Down</Kbd> to move between results, <Kbd>Enter</Kbd> to open the file at that line, <Kbd>Space</Kbd> to collapse/expand a file group.</Bullet>
       <Bullet title="Editor integration">Selecting a result opens the file in the code editor at the matching line.</Bullet>
@@ -420,6 +423,7 @@ function SectionTasks() {
       <H3>Task Actions</H3>
       <Bullet title="Edit">Click the edit button to open the editor dialog.</Bullet>
       <Bullet title="View">Click the task title to open the read-only viewer.</Bullet>
+      <Bullet title="Resolution">A done task opens with what was done and, for a bug, why it happened. Agents fill both when they finish; you can add or fix them in Edit.</Bullet>
       <Bullet title="Copy as prompt">Copies task title, description, and prompt to clipboard for AI tools.</Bullet>
       <Bullet title="Duplicate">Create a copy of the task.</Bullet>
       <Bullet title="Delete">Remove the task permanently.</Bullet>
@@ -468,7 +472,7 @@ function SectionTasks() {
         Navigate to <strong>All Tasks</strong> in the sidebar to see every task across all projects.
         This view supports both Kanban and List modes with the same toggle buttons.
       </P>
-      <Bullet title="Search">Filter by title, description, or project name.</Bullet>
+      <Bullet title="Search">Filter by title, description, resolution or project name. <Kbd>#123</Kbd> finds task 123.</Bullet>
       <Bullet title="Priority filters">Toggle buttons for Urgent, High, Medium, Low (multi-select).</Bullet>
       <Bullet title="Sort options">Sort by Priority, Newest, Oldest, or Recently Updated.</Bullet>
       <Bullet title="Clear filters">Reset all filters with one click.</Bullet>
@@ -768,7 +772,8 @@ function SectionShortcuts() {
       <div className="border rounded-lg p-3">
         <ShortcutRow keys="Tab / Shift + Tab" description="Cycle through filter tabs (All, Projects, Tasks, Files)" />
         <ShortcutRow keys="Arrow Up / Down" description="Navigate through results" />
-        <ShortcutRow keys="Enter" description="Open selected result" />
+        <ShortcutRow keys="Enter" description="Open selected result (a task opens directly)" />
+        <ShortcutRow keys="#123" description="Find a task by its number" />
         <ShortcutRow keys="Esc" description="Close search" />
       </div>
 
@@ -777,6 +782,7 @@ function SectionShortcuts() {
         <ShortcutRow keys="Arrow Up / Down" description="Navigate through results" />
         <ShortcutRow keys="Enter" description="Open file at matching line" />
         <ShortcutRow keys="Space" description="Collapse / expand file group" />
+        <ShortcutRow keys="Alt + P" description="Only the open project / all projects" />
         <ShortcutRow keys="Esc" description="Close search" />
       </div>
 
@@ -1046,7 +1052,7 @@ function SectionMcp() {
       <Bullet title="get_task">Full task details, including the comments and attachment list from the synced Trello card</Bullet>
       <Bullet title="get_task_attachment">Fetch an attachment from the card — an image comes back inline, so the agent can look at a screenshot the client sent</Bullet>
       <Bullet title="get_git_status / get_git_log">Read-only git information</Bullet>
-      <Bullet title="search_tasks">Search tasks by keyword across all projects</Bullet>
+      <Bullet title="search_tasks">Search tasks by keyword across all projects (<Kbd>#123</Kbd> finds a task by number)</Bullet>
 
       <H3>Security</H3>
       <Bullet title="OAuth 2.1 + PKCE">Secure authorization flow with dynamic client registration</Bullet>

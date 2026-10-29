@@ -2,6 +2,7 @@ import { Outlet } from 'react-router-dom'
 import { SidePanel } from './SidePanel'
 import { GlobalSearch } from './GlobalSearch'
 import { AiResolveHost } from '@/components/tasks/AiResolveHost'
+import { TaskViewerHost } from '@/components/tasks/TaskViewerHost'
 import { FileContentSearch } from './FileContentSearch'
 import { TabsProvider } from '@/hooks/useTabs'
 import { ActivityProvider, useActivity } from '@/hooks/useActivity'
@@ -52,6 +53,7 @@ function LayoutInner() {
       </div>
       <GlobalSearch />
       <AiResolveHost />
+      <TaskViewerHost />
       <FileContentSearch />
       <ShortcutsOverlay />
     </div>
