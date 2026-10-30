@@ -298,7 +298,8 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   tarefas (incl. `create_tasks`/`bulk_update_tasks`/`bulk_delete_tasks`/`reorder_tasks`),
   git (status/log/diff) e sync (`list_sync_integrations`/`sync_push`/`sync_pull`)
 - `get_task` devolve tambem os comentarios e os metadados de anexo vindos do
-  Trello; `get_task_attachment` baixa um anexo e retorna a imagem inline
+  Trello e do WhatsApp inbox; `get_task_attachment` grava qualquer anexo em
+  `data/task-attachments/`, devolve o caminho e retorna a imagem inline
   (bloco `image` em base64, teto de 5 MB) — e assim que o agente enxerga o
   print que o cliente anexou no card. `McpToolResult.content` aceita blocos
   `text` e `image`

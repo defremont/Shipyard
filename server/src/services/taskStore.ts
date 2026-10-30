@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { nanoid } from 'nanoid';
-import type { Task, Milestone, TasksFile, EffortPoints, EffortConfidence } from '../types/index.js';
+import type { Task, TaskAttachment, Milestone, TasksFile, EffortPoints, EffortConfidence } from '../types/index.js';
 import { DATA_DIR } from './dataDir.js';
 import { writeJsonAtomic } from './atomicJson.js';
 
@@ -232,6 +232,24 @@ export function updateTask(projectId: string, taskId: string, data: Partial<Omit
     }
     await writeTasks(projectId, tasks);
     return tasks[idx];
+  });
+}
+
+/**
+ * Adds attachments a task does not have yet. Keeps `updatedAt`: the board sync
+ * compares it with the card, and a file arriving here is no edit to the task.
+ */
+export function addAttachments(projectId: string, taskId: string, attachments: TaskAttachment[]): Promise<Task | null> {
+  return withLock(projectId, async () => {
+    const tasks = await readTasks(projectId);
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) return null;
+    const known = new Set(task.attachments?.map(a => a.id));
+    const fresh = attachments.filter(a => !known.has(a.id));
+    if (fresh.length === 0) return task;
+    task.attachments = [...(task.attachments ?? []), ...fresh];
+    await writeTasks(projectId, tasks);
+    return task;
   });
 }
 

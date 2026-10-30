@@ -660,7 +660,7 @@ function SectionSync() {
       </P>
       <Bullet title="Client screenshots">Images a client attaches to a Trello card show up on the task — thumbnails in the task dialog, click for full size — and a paperclip count appears on the card in the board.</Bullet>
       <Bullet title="Client comments">Comments written on the card are pulled into the task and shown as a thread, newest last.</Bullet>
-      <Bullet title="Agents see them too">Claude reads the comments through the MCP server and can open an attached screenshot with <Kbd>get_task_attachment</Kbd>, so a request made entirely in Trello can be worked on without you retyping it.</Bullet>
+      <Bullet title="Agents see them too">Claude reads the comments through the MCP server and can open any attached file with <Kbd>get_task_attachment</Kbd>, so a request made entirely in Trello can be worked on without you retyping it.</Bullet>
       <Bullet title="One direction">Attachments and comments are read-only in Shipyard — write them on the card, and they arrive on the next pull.</Bullet>
 
       <H3>JSON Export</H3>
@@ -1050,7 +1050,7 @@ function SectionMcp() {
       <Bullet title="update_task">Update any task field (title, status, priority, etc.)</Bullet>
       <Bullet title="delete_task">Delete a task</Bullet>
       <Bullet title="get_task">Full task details, including the comments and attachment list from the synced Trello card</Bullet>
-      <Bullet title="get_task_attachment">Fetch an attachment from the card — an image comes back inline, so the agent can look at a screenshot the client sent</Bullet>
+      <Bullet title="get_task_attachment">Open a task's attachment, from the Trello card or the WhatsApp inbox — the file is saved on this machine and the agent gets its path, and an image also comes back inline</Bullet>
       <Bullet title="get_git_status / get_git_log">Read-only git information</Bullet>
       <Bullet title="search_tasks">Search tasks by keyword across all projects (<Kbd>#123</Kbd> finds a task by number)</Bullet>
 

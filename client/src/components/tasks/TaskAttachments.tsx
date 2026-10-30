@@ -10,8 +10,8 @@ interface TaskAttachmentsProps {
   attachments: TaskAttachment[]
 }
 
-/** Trello requires an OAuth header to serve an attachment, so every image goes
- *  through the server proxy instead of straight to trello.com. */
+/** Trello requires an OAuth header to serve an attachment and the WhatsApp
+ *  inbox its token, so every image goes through the server proxy. */
 function attachmentUrl(
   projectId: string,
   taskId: string,
@@ -69,7 +69,7 @@ export function TaskAttachments({ projectId, taskId, milestoneId, attachments }:
       {files.map(attachment => (
         <a
           key={attachment.id}
-          href={attachment.url}
+          href={attachment.source === 'inbox' ? attachmentUrl(projectId, taskId, attachment.id, { milestoneId }) : attachment.url}
           target="_blank"
           rel="noopener noreferrer"
           className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -97,15 +97,17 @@ export function TaskAttachments({ projectId, taskId, milestoneId, attachments }:
                 alt={preview.name}
                 className="max-h-[65vh] w-full rounded-md object-contain"
               />
-              <a
-                href={preview.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
-              >
-                <ExternalLink className="h-3 w-3" />
-                Open original on Trello
-              </a>
+              {preview.source === 'trello' && (
+                <a
+                  href={preview.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Open original on Trello
+                </a>
+              )}
             </>
           )}
         </DialogContent>

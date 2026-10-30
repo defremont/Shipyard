@@ -7,6 +7,14 @@ const priorityLabel: Record<string, string> = { urgent: 'URGENT', high: 'HIGH', 
 const RESOLUTION_HINT = 'Set "resolution" (REQUIRED): what was done — the change, where it lives and how it was verified, in two to five plain sentences'
 const ROOT_CAUSE_HINT = 'Set "rootCause" for a bug or problem: why it happened — the underlying cause, not the symptom (omit for features)'
 
+function attachmentLines(t: Task): string[] {
+  if (!t.attachments?.length) return []
+  return [
+    'Attachments (open with the MCP tool get_task_attachment):',
+    ...t.attachments.map(a => `- ${a.name} (${a.mimeType || 'unknown type'}), attachmentId: ${a.id}`),
+  ]
+}
+
 function formatTaskBlock(t: Task, index?: number): string[] {
   const lines: string[] = []
   const prefix = index != null ? `## ${index + 1}. ` : '## '
@@ -26,6 +34,8 @@ function formatTaskBlock(t: Task, index?: number): string[] {
     lines.push('### Private context')
     lines.push(t.context)
   }
+  const attachments = attachmentLines(t)
+  if (attachments.length) lines.push('', ...attachments)
   lines.push('')
   return lines
 }
@@ -212,6 +222,8 @@ export function buildTaskPrompt(
     lines.push(task.context)
     lines.push('')
   }
+  const attachments = attachmentLines(task)
+  if (attachments.length) lines.push(...attachments, '')
   lines.push(`Priority: ${priorityLabel[task.priority]}`)
   lines.push(`Effort: ${task.effort ? `${task.effort} points` : 'unclassified'}`)
   if (projectName) lines.push(`Project: ${projectName}`)

@@ -1,9 +1,10 @@
+import { readFile } from 'fs/promises';
 import { getProjects, updateProject as updateProjectRecord } from './projectDiscovery.js';
 import * as taskStore from './taskStore.js';
 import * as gitService from './gitService.js';
 import * as syncStore from './syncStore.js';
 import * as syncEngine from './sync/syncEngine.js';
-import * as trelloSync from './sync/trelloSync.js';
+import * as taskAttachments from './taskAttachments.js';
 import * as worktreeService from './worktreeService.js';
 import type { Project, Task, EffortPoints } from '../types/index.js';
 
@@ -71,6 +72,13 @@ function slimProject(p: Project) {
   };
 }
 
+// Metadata only — get_task_attachment is what actually opens a file.
+function attachmentList(t: Task) {
+  return t.attachments?.length
+    ? { attachments: t.attachments.map(a => ({ id: a.id, name: a.name, mimeType: a.mimeType, bytes: a.bytes, source: a.source })) }
+    : {};
+}
+
 // ── Tool Implementations ────────────────────────────────
 
 export async function listProjects(): Promise<McpToolResult> {
@@ -106,7 +114,7 @@ export async function getTask(projectId: string, taskId: string): Promise<McpToo
   const task = await taskStore.getTask(projectId, taskId);
   if (!task) return fail(`Task "${taskId}" not found`);
   // Full task details (this is the tool for getting description/prompt)
-  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, context, rootCause, resolution, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks, attachments, comments } = task;
+  const { id, number, title, description, priority, effort, effortSource, effortConfidence, status, prompt, context, rootCause, resolution, milestoneId, createdAt, updatedAt, inboxAt, inProgressAt, doneAt, subtasks, comments } = task;
   return { content: [{ type: 'text', text: compact({
     id, number, projectId, ...(milestoneId ? { milestoneId } : {}),
     title, description, priority, effort, effortSource, effortConfidence, status, prompt,
@@ -116,19 +124,29 @@ export async function getTask(projectId: string, taskId: string): Promise<McpToo
     ...(resolution ? { resolution } : {}),
     createdAt, updatedAt, inboxAt, inProgressAt, doneAt,
     ...(subtasks?.length ? { subtasks } : {}),
-    // Metadata only — call get_task_attachment to actually see an image.
-    ...(attachments?.length ? { attachments: attachments.map(a => ({ id: a.id, name: a.name, mimeType: a.mimeType, bytes: a.bytes, isImage: a.isImage })) } : {}),
+    ...attachmentList(task),
     ...(comments?.length ? { comments: comments.map(c => ({ author: c.author, text: c.text, date: c.date })) } : {}),
   }) }] };
 }
 
 // The API caps an image block at 5 MB and base64 inflates by ~4/3, so the raw
-// file has to stay under about 3.7 MB.
-const MAX_ATTACHMENT_BYTES = 3_700_000;
+// file has to stay under about 3.7 MB. It also accepts only these four types:
+// one other block (HEIC, BMP, SVG) would fail the agent's whole next request.
+const MAX_INLINE_IMAGE_BYTES = 3_700_000;
+const INLINE_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
+
+function attachmentHint(id: string, mimeType: string): string {
+  if (mimeType.startsWith('audio/') || mimeType.startsWith('video/')) {
+    return `You cannot hear or watch this file directly. If it came from WhatsApp, its transcript and description are in the task context, under [id=${id}]. For anything they miss, work on the file at "path" (ffmpeg, if installed, can extract video frames).`;
+  }
+  return 'Open the file at "path" with your file-reading tool.';
+}
 
 /**
- * Hand an agent the actual bytes of a client's screenshot. Trello requires an
- * OAuth header for this, so the agent cannot fetch the URL itself.
+ * Hand an agent an attachment. Neither source can be reached from outside
+ * Shipyard (Trello requires an OAuth header, the inbox its token), so every
+ * file lands on this machine and the agent gets the path. Images that fit also
+ * come back inline.
  */
 export async function getTaskAttachment(projectId: string, taskId: string, attachmentId: string): Promise<McpToolResult> {
   const task = await taskStore.getTask(projectId, taskId);
@@ -137,34 +155,24 @@ export async function getTaskAttachment(projectId: string, taskId: string, attac
   const meta = task.attachments?.find(a => a.id === attachmentId);
   if (!meta) return fail(`Attachment "${attachmentId}" not found on task ${taskId}`);
 
-  // Bail before downloading when the card already told us the size.
-  if (meta.bytes && meta.bytes > MAX_ATTACHMENT_BYTES) {
-    return { content: [{ type: 'text', text: `${compact({ id: meta.id, name: meta.name, mimeType: meta.mimeType, bytes: meta.bytes })}\nToo large to inline (limit ${MAX_ATTACHMENT_BYTES} bytes). Ask the user to describe it or to share a smaller version.` }] };
-  }
-
-  const link = await syncEngine.resolveTrelloCard(projectId, taskId, task.milestoneId);
-  if (!link) return fail('This task is not linked to a Trello card, so its attachments cannot be fetched');
-
-  let file: Awaited<ReturnType<typeof trelloSync.fetchAttachmentBytes>>;
+  let file: taskAttachments.SavedAttachment;
   try {
-    file = await trelloSync.fetchAttachmentBytes(link.config, link.cardId, attachmentId);
+    file = await taskAttachments.saveAttachment(task, meta);
   } catch (err: any) {
     return fail(`Could not download the attachment: ${err?.message ?? err}`);
   }
-  if (!file) return fail('The attachment is no longer available on Trello');
 
-  const info = compact({ id: meta.id, name: file.name, mimeType: file.mimeType, bytes: file.data.length });
-
-  if (!file.mimeType.startsWith('image/')) {
-    return { content: [{ type: 'text', text: `${info}\nThis attachment is not an image, so its contents are not included. Ask the user if you need it.` }] };
-  }
-  if (file.data.length > MAX_ATTACHMENT_BYTES) {
-    return { content: [{ type: 'text', text: `${info}\nImage is too large to inline (limit ${MAX_ATTACHMENT_BYTES} bytes).` }] };
-  }
+  const inline = INLINE_IMAGE_TYPES.has(file.mimeType) && file.bytes <= MAX_INLINE_IMAGE_BYTES;
+  const info = compact({
+    id: meta.id,
+    ...file,
+    ...(inline ? {} : { hint: attachmentHint(meta.id, file.mimeType) }),
+  });
+  if (!inline) return { content: [{ type: 'text', text: info }] };
 
   return { content: [
     { type: 'text', text: info },
-    { type: 'image', data: file.data.toString('base64'), mimeType: file.mimeType },
+    { type: 'image', data: (await readFile(file.path)).toString('base64'), mimeType: file.mimeType },
   ] };
 }
 
@@ -493,6 +501,7 @@ export async function nextTask(projectId?: string, milestoneId?: string): Promis
           description: t.description,
           prompt: t.prompt,
           ...(t.context ? { context: t.context } : {}),
+          ...attachmentList(t),
           status: t.status,
           priority: t.priority,
         },
@@ -531,6 +540,7 @@ export async function startTask(projectId: string, taskId: string): Promise<McpT
           description: updated.description,
           prompt: updated.prompt,
           ...(updated.context ? { context: updated.context } : {}),
+          ...attachmentList(updated),
           status: updated.status,
           priority: updated.priority,
           ...(cwd ? { cwd } : {}),
@@ -723,7 +733,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'get_task',
-    description: 'Get full task details: description, prompt, effort estimate, subtasks, status timestamps (inboxAt/inProgressAt/doneAt), plus any comments and attachment metadata the client added on the synced Trello card. Use get_task_attachment to see an attached image.',
+    description: 'Get full task details: description, prompt, effort estimate, subtasks, status timestamps (inboxAt/inProgressAt/doneAt), plus any comments from the synced Trello card and the metadata of every attachment (Trello card or WhatsApp inbox). Use get_task_attachment to open a file.',
     inputSchema: {
       type: 'object' as const,
       properties: { projectId: PROJECT_ID, taskId: TASK_ID },
@@ -733,7 +743,7 @@ export const MCP_TOOLS = [
   },
   {
     name: 'get_task_attachment',
-    description: 'Fetch one attachment from the task\'s Trello card. Images come back inline so you can look at the screenshot a client attached. Get the attachmentId from get_task.',
+    description: 'Open one attachment of a task: image, audio, video, PDF or any other file, from the Trello card or the WhatsApp inbox. The file is saved on this machine and its path comes back; images up to 3.7 MB also come back inline. Get the attachmentId from get_task.',
     inputSchema: {
       type: 'object' as const,
       properties: {

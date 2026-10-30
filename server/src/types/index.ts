@@ -37,7 +37,7 @@ export interface TaskAttachment {
   bytes?: number;
   isImage?: boolean;
   date?: string;
-  source: 'trello';
+  source: 'trello' | 'inbox';
 }
 
 export interface TaskComment {
@@ -78,7 +78,7 @@ export interface Task {
   doneAt?: string;        // When moved to done
   needsReview?: boolean;  // True when AI resolved — cleared when user views the task
   subtasks?: Subtask[];
-  attachments?: TaskAttachment[];  // Pulled from the remote board — remote is authoritative
+  attachments?: TaskAttachment[];  // Trello's are pulled (remote is authoritative); the WhatsApp inbox's live here
   comments?: TaskComment[];        // Pulled from the remote board — remote is authoritative
   worktreePath?: string;   // Isolated git worktree the agent runs in (worktree-per-task)
   worktreeBranch?: string; // Branch checked out in that worktree

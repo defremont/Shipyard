@@ -1,6 +1,9 @@
+import { Readable } from 'stream';
 import { FastifyInstance } from 'fastify';
 import * as log from '../services/logService.js';
 import * as store from '../services/syncStore.js';
+import * as taskStore from '../services/taskStore.js';
+import * as inbox from '../services/inboxService.js';
 import type { SyncProviderId } from '../services/syncStore.js';
 import * as engine from '../services/sync/syncEngine.js';
 import * as trello from '../services/sync/trelloSync.js';
@@ -14,6 +17,15 @@ function pickMilestoneId(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
   const trimmed = value.trim();
   return trimmed.length === 0 ? undefined : trimmed;
+}
+
+// Never echo a remote content-type back as-is: anything else would be served as
+// that type from the app's own origin. SVG counts as "anything else" — it is a
+// document that can carry script, and the uploader chooses its declared type.
+function safeContentType(mimeType: string): { type: string; inline: boolean } {
+  const type = mimeType.split(';')[0].trim().toLowerCase();
+  const inline = /^(image|audio|video)\//.test(type) && type !== 'image/svg+xml';
+  return { type: inline ? type : 'application/octet-stream', inline };
 }
 
 export async function syncRoutes(app: FastifyInstance) {
@@ -361,7 +373,8 @@ export async function syncRoutes(app: FastifyInstance) {
   // Trello locks attachment downloads behind an OAuth header, so an <img> tag
   // pointing at the raw card URL gets a 401. This proxies the bytes with the
   // stored credentials — it is the only way the UI can show a screenshot a
-  // client attached to their card.
+  // client attached to their card. The WhatsApp inbox is the same story behind
+  // its token, and hands over Range so a player can seek.
   app.get<{
     Params: { projectId: string; taskId: string; attachmentId: string };
     Querystring: { milestoneId?: string; preview?: string };
@@ -369,6 +382,30 @@ export async function syncRoutes(app: FastifyInstance) {
     '/api/projects/:projectId/tasks/:taskId/attachment/:attachmentId',
     async (request, reply) => {
       const { projectId, taskId, attachmentId } = request.params;
+      const task = await taskStore.getTask(projectId, taskId);
+      const meta = task?.attachments?.find(a => a.id === attachmentId);
+      if (meta?.source === 'inbox') {
+        try {
+          const res = await inbox.openMedia(attachmentId, request.headers.range);
+          const { type, inline } = safeContentType(res.headers.get('content-type') || meta.mimeType || '');
+          for (const header of ['content-length', 'content-range', 'accept-ranges']) {
+            const value = res.headers.get(header);
+            if (value) reply.header(header, value);
+          }
+          return reply
+            .status(res.status)
+            .header('content-type', type)
+            .header('content-disposition', inline ? 'inline' : 'attachment')
+            .header('x-content-type-options', 'nosniff')
+            .header('cache-control', 'private, max-age=3600')
+            .send(Readable.fromWeb(res.body as any));
+        } catch (err: any) {
+          const message = err?.message ?? 'Attachment download failed';
+          log.warn('sync', `Inbox attachment fetch failed: ${message}`, undefined, projectId);
+          return reply.status(502).send({ error: message });
+        }
+      }
+
       const milestoneId = pickMilestoneId(request.query?.milestoneId);
       const link = await engine.resolveTrelloCard(projectId, taskId, milestoneId);
       if (!link) return reply.status(404).send({ error: 'Task is not linked to a Trello card' });
@@ -378,15 +415,10 @@ export async function syncRoutes(app: FastifyInstance) {
           preview: request.query?.preview === '1',
         });
         if (!file) return reply.status(404).send({ error: 'Attachment not found or not viewable' });
-        // Never echo a remote content-type back as-is: anything but an image
-        // would be served as that type from the app's own origin. SVG counts as
-        // "anything else" — it is a document that can carry script, and the
-        // uploader chooses its declared type.
-        const type = file.mimeType.split(';')[0].trim().toLowerCase();
-        const isImage = type.startsWith('image/') && type !== 'image/svg+xml';
+        const { type, inline } = safeContentType(file.mimeType);
         return reply
-          .header('content-type', isImage ? type : 'application/octet-stream')
-          .header('content-disposition', isImage ? 'inline' : 'attachment')
+          .header('content-type', type)
+          .header('content-disposition', inline ? 'inline' : 'attachment')
           .header('x-content-type-options', 'nosniff')
           .header('cache-control', 'private, max-age=3600')
           .send(file.data);

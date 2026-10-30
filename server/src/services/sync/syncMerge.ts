@@ -23,9 +23,8 @@ export interface RemoteTask {
   status: Task['status'];
   priority: Task['priority'];
   updatedAt: string;
-  // Attachments and comments only ever exist on the remote board, so the
-  // remote copy is authoritative. Undefined means "the provider didn't report
-  // them this pull" — keep whatever we already had.
+  // The board is authoritative for its own attachments and comments. Undefined
+  // means "the provider didn't report them this pull" — keep what we had.
   attachments?: TaskAttachment[];
   comments?: TaskComment[];
 }
@@ -105,13 +104,15 @@ export function mergeRemoteIntoLocal(
     if (localIdx >= 0) {
       const local = result[localIdx];
 
-      // Attachments and comments only ever exist on the board — Shipyard never
-      // writes them — so the remote copy always wins, no timestamp gate. Left
-      // inside the gate below, a client's new comment would stay invisible
-      // whenever a local edit happened to be more recent.
+      // Attachments and comments on the board are never written by Shipyard, so
+      // the remote copy always wins, no timestamp gate. Left inside the gate
+      // below, a client's new comment would stay invisible whenever a local
+      // edit happened to be more recent. What came from the WhatsApp inbox was
+      // never on the board: a pull must not read it as deleted.
       const remoteMedia: Partial<Task> = {};
-      if (r.attachments !== undefined && fingerprint(r.attachments) !== fingerprint(local.attachments)) {
-        remoteMedia.attachments = r.attachments;
+      if (r.attachments !== undefined) {
+        const attachments = [...(local.attachments ?? []).filter(a => a.source === 'inbox'), ...r.attachments];
+        if (fingerprint(attachments) !== fingerprint(local.attachments)) remoteMedia.attachments = attachments;
       }
       if (r.comments !== undefined && fingerprint(r.comments) !== fingerprint(local.comments)) {
         remoteMedia.comments = r.comments;

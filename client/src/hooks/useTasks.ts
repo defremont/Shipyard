@@ -19,7 +19,7 @@ export interface TaskAttachment {
   bytes?: number
   isImage?: boolean
   date?: string
-  source: 'trello'
+  source: 'trello' | 'inbox'
 }
 
 export interface TaskComment {

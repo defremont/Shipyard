@@ -198,8 +198,9 @@ export async function fetchAttachmentBytes(
   config: SyncConfig,
   cardId: string,
   attachmentId: string,
-  opts: { preview?: boolean } = {},
+  opts: { preview?: boolean; maxBytes?: number; timeoutMs?: number } = {},
 ): Promise<{ data: Buffer; mimeType: string; name: string } | null> {
+  const maxBytes = opts.maxBytes ?? MAX_ATTACHMENT_DOWNLOAD_BYTES;
   // The id lands in the request path; '../..' would walk us onto a different
   // Trello endpoint once the URL parser normalises it.
   if (!ATTACHMENT_ID_RE.test(attachmentId)) return null;
@@ -224,7 +225,7 @@ export async function fetchAttachmentBytes(
 
   const { apiKey, token } = credentials(config);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), ATTACHMENT_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? ATTACHMENT_TIMEOUT_MS);
   let res: Response;
   try {
     res = await fetch(target, {
@@ -242,12 +243,12 @@ export async function fetchAttachmentBytes(
     if (!res.ok) throw new Error(`Trello: attachment download failed (status ${res.status})`);
 
     const declared = Number(res.headers.get('content-length'));
-    if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_DOWNLOAD_BYTES) {
+    if (Number.isFinite(declared) && declared > maxBytes) {
       throw new Error('Trello: attachment is too large to load');
     }
 
     const data = Buffer.from(await res.arrayBuffer());
-    if (data.length > MAX_ATTACHMENT_DOWNLOAD_BYTES) {
+    if (data.length > maxBytes) {
       throw new Error('Trello: attachment is too large to load');
     }
 

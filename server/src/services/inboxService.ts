@@ -6,6 +6,7 @@ import * as taskStore from './taskStore.js';
 import { getProjects } from './projectDiscovery.js';
 import { triggerAutoSync } from './sync/syncEngine.js';
 import * as log from './logService.js';
+import type { TaskAttachment } from '../types/index.js';
 
 /**
  * WhatsApp inbox: a hosted service (`C:\Code\dcoder\whatsapp-inbox`, Railway) reads the
@@ -41,6 +42,8 @@ interface InboxConfig {
   lastCreated?: number;
   /** Set once the tasks made before `context` existed had their prompt split. */
   contextSplitAt?: string;
+  /** Set once the tasks made before media became attachments got theirs. */
+  attachmentsBackfilledAt?: string;
 }
 
 const EMPTY: InboxConfig = { url: '', token: '', imported: {} };
@@ -168,6 +171,8 @@ interface InboxDemand {
   priority: 'urgent' | 'high' | 'medium' | 'low';
   effort: number | null;
   parentTaskId: string | null;
+  /** The client's audio, photos, videos and files, downloaded through `openMedia`. */
+  attachments?: TaskAttachment[];
 }
 
 async function call<T>(c: InboxConfig, path: string, body: unknown): Promise<T> {
@@ -180,6 +185,28 @@ async function call<T>(c: InboxConfig, path: string, body: unknown): Promise<T> 
   if (res.status === 401) throw new Error('The inbox refused the token');
   if (!res.ok) throw new Error(`Inbox answered ${res.status}`);
   return (await res.json()) as T;
+}
+
+// A video is slow to come down and a player holds its request open, so this
+// ceiling is far above the 30 s of a sync call.
+const MEDIA_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * One file the inbox holds. The web area's /api/media sits behind its password;
+ * this route takes the sync token, which is how an agent gets to a client's
+ * audio or photo. `range` lets a player seek.
+ */
+export async function openMedia(attachmentId: string, range?: string): Promise<Response> {
+  const c = await load();
+  if (!c.url || !c.token) throw new Error('The WhatsApp inbox is not connected');
+  const res = await fetch(`${c.url}/api/shipyard/media/${encodeURIComponent(attachmentId)}`, {
+    headers: { Authorization: `Bearer ${c.token}`, ...(range ? { Range: range } : {}) },
+    signal: AbortSignal.timeout(MEDIA_TIMEOUT_MS),
+  });
+  if (res.status === 401) throw new Error('The inbox refused the token');
+  if (res.status === 404) throw new Error('The inbox no longer has this file');
+  if (!res.ok || !res.body) throw new Error(`Inbox answered ${res.status}`);
+  return res;
 }
 
 const EFFORTS = [1, 2, 3, 5, 8] as const;
@@ -249,6 +276,7 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
         ...(d.context ? { context: taskStore.appendPromptSection(parent.context, `— Follow-up ${ts}`, d.context) } : {}),
         ...(parent.status === 'done' ? { status: 'todo' as const } : {}),
       });
+      if (d.attachments?.length) await taskStore.addAttachments(d.projectId, parent.id, d.attachments);
       return { taskId: parent.id, taskNumber: task?.number, asNote: true };
     }
   }
@@ -259,6 +287,7 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
     description: d.description || '',
     prompt: d.prompt || '',
     ...(d.context ? { context: d.context } : {}),
+    ...(d.attachments?.length ? { attachments: d.attachments } : {}),
     priority: d.priority || 'medium',
     status: 'todo',
     ...(d.milestoneId && d.milestoneId !== 'default' ? { milestoneId: d.milestoneId } : {}),
@@ -320,6 +349,26 @@ async function splitExistingContext(): Promise<void> {
   });
   for (const projectId of touched) triggerAutoSync(projectId);
   if (touched.size) log.info('tasks', `WhatsApp context moved out of the prompt in ${touched.size} project(s)`);
+}
+
+// ── Attachments of older tasks ────────────────────────────────────────────
+//
+// Until v1.31 a client's media reached the task only as a link to the web area,
+// which an agent cannot open. This asks the inbox for the media of every demand
+// imported so far, once. Runs inside the sync because the inbox may be deployed
+// after this version: if it refuses, the next cycle tries again.
+
+async function backfillAttachments(c: InboxConfig): Promise<void> {
+  const { attachments } = await call<{ attachments: Record<string, TaskAttachment[]> }>(c, '/api/shipyard/attachments', {
+    demandIds: Object.keys(c.imported),
+  });
+  for (const [demandId, list] of Object.entries(attachments)) {
+    const ref = c.imported[demandId];
+    if (ref) await taskStore.addAttachments(ref.projectId, ref.taskId, list);
+  }
+  await mutate(next => {
+    next.attachmentsBackfilledAt = new Date().toISOString();
+  });
 }
 
 let inFlight: Promise<{ created: number }> | null = null;
@@ -428,6 +477,9 @@ async function runSync(): Promise<{ created: number }> {
     });
     for (const projectId of touched) triggerAutoSync(projectId);
     if (results.length) await call(c, '/api/shipyard/ack', { results });
+    if (!c.attachmentsBackfilledAt) {
+      await backfillAttachments(await load()).catch(err => log.warn('server', 'WhatsApp attachments not backfilled', err.message));
+    }
     return { created };
   } catch (err: any) {
     await mutate(next => {

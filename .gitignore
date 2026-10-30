@@ -17,6 +17,7 @@ data/server.log
 data/agent-prompts/
 data/claude-hooks/
 data/terminal-clipboard/
+data/task-attachments/
 data/worktrees/
 data/ai-config.json
 data/deploy-config.json

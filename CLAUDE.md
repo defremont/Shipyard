@@ -82,14 +82,14 @@ interface Task {
   inboxAt?: string;         // quando entrou em backlog/todo
   inProgressAt?: string;    // quando moveu para in_progress
   doneAt?: string;          // quando foi concluida
-  attachments?: TaskAttachment[];  // vem do card do Trello (pull-only)
+  attachments?: TaskAttachment[];  // card do Trello (pull-only) + midia do WhatsApp inbox
   comments?: TaskComment[];        // vem do card do Trello (pull-only)
 }
 
 interface TaskAttachment {
   id: string;  name: string;  url: string;
   mimeType?: string;  bytes?: number;  isImage?: boolean;  date?: string;
-  source: 'trello';
+  source: 'trello' | 'inbox';
 }
 
 interface TaskComment {
@@ -132,7 +132,8 @@ interface Project {
   POST /api/projects/:id/sync/{trello,clickup}/link (body: { milestoneId?, ... })
   GET /api/projects/:id/tasks/:tid/attachment/:aid?milestoneId=&preview=1
     (proxy autenticado — a URL do anexo no Trello exige header OAuth, um `<img>`
-     apontando direto para ela recebe 401)
+     apontando direto para ela recebe 401; anexo `inbox` vem do WhatsApp inbox,
+     com Range para o player avancar)
 **Deploys (Railway)**:
   GET /api/deploy/providers, POST/DELETE /api/deploy/providers/railway (token da conta;
     o POST ja devolve o que foi vinculado sozinho)
@@ -475,11 +476,18 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `mcpServer.ts` expoe 29 tools. Cobertura: projetos, milestones (CRUD),
   tarefas (incl. `create_tasks`/`bulk_update_tasks`/`bulk_delete_tasks`/`reorder_tasks`),
   git (status/log/diff) e sync (`list_sync_integrations`/`sync_push`/`sync_pull`)
-- `get_task` devolve tambem os comentarios e os metadados de anexo vindos do
-  Trello; `get_task_attachment` baixa um anexo e retorna a imagem inline
-  (bloco `image` em base64, teto de 5 MB) — e assim que o agente enxerga o
-  print que o cliente anexou no card. `McpToolResult.content` aceita blocos
-  `text` e `image`
+- `get_task` devolve tambem os comentarios e os metadados de anexo
+  (`next_task` e `start_task` tambem levam os metadados);
+  `get_task_attachment` abre **qualquer** anexo, de qualquer origem: grava o
+  arquivo em `data/task-attachments/{projeto}/{task}/` (`taskAttachments.ts`) e
+  devolve `path`. Imagem PNG/JPEG/GIF/WebP de ate 3,7 MB vem tambem inline
+  (bloco `image`); outro tipo nesse bloco derrubaria a requisicao seguinte do
+  agente, entao HEIC/BMP/SVG ficam so no caminho. Audio e video trazem `hint`:
+  a transcricao e a descricao ja estao em `context`, sob `[id=...]`
+- `data/task-attachments/` e cache: o original continua no Trello ou no inbox.
+  Arquivo sai depois de 7 dias (varredura a cada download novo) e volta quando
+  pedirem. Baixa em `.part` e renomeia, para download cortado nao passar por
+  arquivo. Fora do Shipyard Cloud (`WATCHED`) e do `workspace-export`
 - **Toda mutacao de task no MCP DEVE chamar `afterTaskMutation(projectId)`**
   (= `triggerAutoSync`). Sem isso o agente altera tarefas e o Trello/ClickUp
   fica desatualizado ate o usuario mexer na UI
@@ -1139,6 +1147,8 @@ Shipyard so le):
 - Ver imagem: proxy `GET /api/projects/:id/tasks/:tid/attachment/:aid`
   (`fetchAttachmentBytes` em trelloSync.ts monta o header
   `Authorization: OAuth ...`). A URL crua do Trello devolve 401
+- O merge so substitui os anexos do proprio board: `source: 'inbox'` nunca
+  esteve no card e nao pode ser lido como apagado a cada pull
 
 **Migracao v2 → v3**: integracoes Trello/ClickUp pre-existentes sao descartadas (creds
 globais sao mantidas) — usuarios reconectam cada milestone manualmente.
@@ -1166,6 +1176,15 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   re-confirmada, nunca criada duas vezes
 - Complemento de demanda ja entregue (`parentTaskId`) vira `— Note` na task
   existente (formato do feed de atividade) e reabre a task se estava done
+- **Midia vira anexo da task** (`source: 'inbox'`): audio, foto, video e arquivo
+  vem na demanda como `attachments` e os bytes sao pedidos a
+  `GET {url}/api/shipyard/media/:id` (Bearer, com Range) por `openMedia`. O link
+  do registro exige o login da area web, que o agente nao tem. O id do anexo e
+  o id da mensagem, o mesmo do `[id=...]` em `context`. Complemento soma os
+  anexos na task-mae (`taskStore.addAttachments`, que preserva `updatedAt`: a
+  comparacao com o card usa esse campo). Task importada antes disso recebe os
+  seus uma vez (`backfillAttachments`, marca `attachmentsBackfilledAt`), dentro
+  do sync: se o inbox ainda nao tem a rota, tenta de novo no ciclo seguinte
 - Task criada entra em `todo`, com `effortSource: 'manual'` (passou por revisao
   humana) e `effortConfidence: 'low'` (a triagem nao ve o codigo), e chama
   `triggerAutoSync`

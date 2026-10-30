@@ -50,6 +50,16 @@ export function buildAiResolvePrompt(
     lines.push('');
   }
 
+  if (task.attachments?.length) {
+    lines.push('## Attachments');
+    lines.push('Files that came with this task. Open any of them with the MCP tool get_task_attachment: images come back inline, and every file is saved on this machine with its path in the response.');
+    lines.push('');
+    for (const a of task.attachments) {
+      lines.push(`- ${a.name.replace(/\s+/g, ' ')} (${a.mimeType || 'unknown type'}), attachmentId: ${a.id}`);
+    }
+    lines.push('');
+  }
+
   if (feedback) {
     lines.push('## User decision feedback');
     lines.push(feedback);
