@@ -1057,7 +1057,7 @@ function SectionMcp() {
       <H3>Security</H3>
       <Bullet title="OAuth 2.1 + PKCE">Secure authorization flow with dynamic client registration</Bullet>
       <Bullet title="JWT Tokens">Access tokens expire in 1 hour, refresh tokens in 30 days</Bullet>
-      <Bullet title="Localhost Only">Server binds to localhost by default</Bullet>
+      <Bullet title="Localhost Only">The server only listens on this machine and refuses requests from any web page other than Shipyard itself</Bullet>
       <Bullet title="Read-only Git">No push/commit/stage operations exposed — git info is read-only</Bullet>
       <Bullet title="Revoke Access">Revoke any client from Settings &gt; MCP Server</Bullet>
 

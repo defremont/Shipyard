@@ -40,6 +40,11 @@ function jsonRpcError(id: any, code: number, message: string) {
   return { jsonrpc: '2.0', id, error: { code, message } };
 }
 
+// The consent page prints what a client said about itself.
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+}
+
 export async function mcpRoutes(app: FastifyInstance) {
   // Load config on startup
   await loadMcpConfig();
@@ -143,6 +148,11 @@ export async function mcpRoutes(app: FastifyInstance) {
     if (!client) {
       return reply.status(400).send('Unknown client');
     }
+    if (!mcpAuth.isRegisteredRedirect(client, redirect_uri)) {
+      return reply.status(400).send('Unknown redirect_uri');
+    }
+
+    const field = (value: string | undefined) => escapeHtml(value || '');
 
     // Return a simple HTML consent page
     const html = `<!DOCTYPE html>
@@ -167,7 +177,7 @@ export async function mcpRoutes(app: FastifyInstance) {
 </head><body>
 <h1>Authorize Connection</h1>
 <div class="card">
-  <p><span class="client">${client.clientName}</span> wants to connect to your Shipyard dashboard.</p>
+  <p><span class="client">${field(client.clientName)}</span> wants to connect to your Shipyard dashboard.</p>
   <p style="font-size: 13px; color: #888;">Permissions requested:</p>
   <ul class="perms">
     <li>View projects, git status, history and diffs</li>
@@ -179,19 +189,19 @@ export async function mcpRoutes(app: FastifyInstance) {
   </ul>
   <div class="actions">
     <form method="POST" action="/authorize">
-      <input type="hidden" name="client_id" value="${client_id}" />
-      <input type="hidden" name="redirect_uri" value="${redirect_uri}" />
-      <input type="hidden" name="scope" value="${scope || 'shipyard:read shipyard:write'}" />
-      <input type="hidden" name="state" value="${state || ''}" />
-      <input type="hidden" name="code_challenge" value="${code_challenge}" />
-      <input type="hidden" name="code_challenge_method" value="${code_challenge_method}" />
+      <input type="hidden" name="client_id" value="${field(client_id)}" />
+      <input type="hidden" name="redirect_uri" value="${field(redirect_uri)}" />
+      <input type="hidden" name="scope" value="${field(scope || 'shipyard:read shipyard:write')}" />
+      <input type="hidden" name="state" value="${field(state)}" />
+      <input type="hidden" name="code_challenge" value="${field(code_challenge)}" />
+      <input type="hidden" name="code_challenge_method" value="${field(code_challenge_method)}" />
       <input type="hidden" name="approved" value="true" />
       <button type="submit" class="approve">Approve</button>
     </form>
     <form method="POST" action="/authorize">
-      <input type="hidden" name="client_id" value="${client_id}" />
-      <input type="hidden" name="redirect_uri" value="${redirect_uri}" />
-      <input type="hidden" name="state" value="${state || ''}" />
+      <input type="hidden" name="client_id" value="${field(client_id)}" />
+      <input type="hidden" name="redirect_uri" value="${field(redirect_uri)}" />
+      <input type="hidden" name="state" value="${field(state)}" />
       <input type="hidden" name="approved" value="false" />
       <button type="submit" class="deny">Deny</button>
     </form>
@@ -216,6 +226,12 @@ export async function mcpRoutes(app: FastifyInstance) {
   }>('/authorize', async (request, reply) => {
     // Parse form-encoded body
     const body = request.body;
+
+    // The redirect carries the code, so it can only go where the client registered.
+    const client = mcpAuth.getClient(body.client_id);
+    if (!client || !mcpAuth.isRegisteredRedirect(client, body.redirect_uri)) {
+      return reply.status(400).send('Unknown client or redirect_uri');
+    }
 
     if (body.approved !== 'true') {
       const redirectUri = new URL(body.redirect_uri);

@@ -5,6 +5,7 @@ import * as jose from 'jose';
 import type { McpAuthData, OAuthClient } from '../types/index.js';
 import { DATA_DIR } from './dataDir.js';
 import { writeJsonAtomic } from './atomicJson.js';
+import { isLoopbackHost } from './localAccess.js';
 
 const AUTH_FILE = join(DATA_DIR, 'mcp-auth.json');
 
@@ -63,6 +64,23 @@ export async function registerClient(
 
 export function getClient(clientId: string): OAuthClient | undefined {
   return authData.clients.find(c => c.clientId === clientId);
+}
+
+/** A native client picks its loopback port at run time (RFC 8252, 7.3), so that one part may differ. */
+export function isRegisteredRedirect(client: OAuthClient, redirectUri: string): boolean {
+  if (client.redirectUris.includes(redirectUri)) return true;
+  try {
+    const target = new URL(redirectUri);
+    return client.redirectUris.some(registered => {
+      const allowed = new URL(registered);
+      return isLoopbackHost(allowed.hostname)
+        && target.protocol === allowed.protocol
+        && target.hostname === allowed.hostname
+        && target.pathname === allowed.pathname;
+    });
+  } catch {
+    return false;
+  }
 }
 
 export function listClients(): OAuthClient[] {

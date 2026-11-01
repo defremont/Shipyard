@@ -551,6 +551,24 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - Editor (CodeMirror), terminal (xterm) e markdown sao `lazy()`. **Nao** usar
   `manualChunks`: agrupar vendors puxa modulos compartilhados para o entry chunk
 
+### Acesso local (seguranca)
+- A API le arquivos e abre terminal: alcancar o server equivale a rodar codigo na
+  maquina. **A fronteira e a propria maquina**: `SHIPYARD_HOST` default
+  `127.0.0.1`, e o server recusa subir em host que nao seja loopback. Nao ha
+  login nem token na API: processo do mesmo usuario ja le `data/`
+- Sobra uma porta de entrada, a pagina aberta no navegador. `localAccess.ts`
+  (`rejectionReason`) fecha, num hook `onRequest` registrado antes das rotas e do
+  CORS, entao vale para preflight e upgrade de WebSocket:
+  **Host** so loopback (DNS rebinding), **Origin** so a da propria porta (mais
+  a do Vite quando a porta e 5420; `null`, do iframe sandbox do preview, cai
+  aqui) e **Sec-Fetch-Site** so `same-origin`/`none`, com excecao de navegacao
+  de topo (`<img src>` nao manda Origin). Sem Origin passa: agente, hook e curl
+- Nao reabrir o CORS para cliente MCP de navegador nem por rota: a spec do MCP
+  exige checar Origin. Cliente MCP em Node nao manda Origin
+- `POST /authorize` e a tela de consentimento so aceitam `redirect_uri`
+  registrado (`isRegisteredRedirect`; porta loopback pode variar, RFC 8252), e a
+  tela escapa tudo que o cliente declarou
+
 ### Terminais (multiplataforma)
 - **Windows**: `wt.exe` + `cmd.exe /k` (NAO bash — causa erro WSL)
 - **Linux**: `gnome-terminal --title --working-directory` + `bash -c "cmd; exec bash"`

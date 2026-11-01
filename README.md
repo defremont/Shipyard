@@ -222,6 +222,8 @@ data/
 
 Third-party features communicate only with the provider you configure, such as Anthropic, OpenAI, Google, Trello, ClickUp, or Railway. Review those providers' privacy policies before enabling an integration.
 
+The local server can read files and open terminals, so it stays on this machine: it listens on `127.0.0.1` only, refuses to start on a network interface, and rejects requests from any web page other than Shipyard itself. Do not put it behind a proxy or tunnel: it has no login.
+
 ## Architecture
 
 ```text

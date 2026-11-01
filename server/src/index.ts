@@ -28,33 +28,36 @@ import { initCloudSync } from './services/cloud/cloudSync.js';
 import { startInboxSync } from './services/inboxService.js';
 import { isAvailable as isTerminalAvailable } from './services/terminalService.js';
 import { getCliStatus as isClaudeCliAvailable } from './services/claudeCliService.js';
+import { isLoopbackHost, localOrigins, rejectionReason } from './services/localAccess.js';
 import * as log from './services/logService.js';
 
 // Read config from env (set by Electron) or use defaults
 const PORT = parseInt(process.env.SHIPYARD_PORT || '5420', 10);
-const HOST = process.env.SHIPYARD_HOST || '0.0.0.0';
+const HOST = process.env.SHIPYARD_HOST || '127.0.0.1';
 const STATIC_DIR = process.env.SHIPYARD_STATIC_DIR || '';
 const IS_ELECTRON = !!process.env.SHIPYARD_ELECTRON;
 
+// The API opens terminals and has no login: on a network interface, anyone on
+// the same Wi-Fi could run commands here.
+if (!isLoopbackHost(HOST)) {
+  console.error(`Refusing to listen on ${HOST}: Shipyard has no login and must stay on this machine. Use 127.0.0.1.`);
+  process.exit(1);
+}
+
 const app = Fastify({ logger: !IS_ELECTRON });
 
-// CORS: allow Vite dev server and Electron
-const origins = IS_ELECTRON
-  ? [`http://localhost:${PORT}`, `http://127.0.0.1:${PORT}`]
-  : ['http://localhost:5421'];
+const origins = localOrigins(PORT);
 
-await app.register(cors, {
-  origin: (origin, cb) => {
-    // Allow dashboard origins
-    if (!origin || origins.includes(origin)) {
-      cb(null, true);
-    } else {
-      // Allow MCP client origins (OAuth flow)
-      cb(null, true);
-    }
-  },
-  credentials: true,
+// Registered before the routes and before CORS, so it also covers preflights
+// and WebSocket upgrades.
+app.addHook('onRequest', async (request, reply) => {
+  const reason = rejectionReason(request.method, request.headers, origins);
+  if (!reason) return;
+  log.warn('server', `Blocked request: ${reason}`, `${request.method} ${request.url} from ${request.headers.origin || request.headers.host}`);
+  return reply.status(403).send({ error: 'Forbidden' });
 });
+
+await app.register(cors, { origin: origins, credentials: true });
 await app.register(websocket);
 
 // Support form-encoded bodies (for OAuth consent form)
