@@ -726,6 +726,34 @@ function mapAttachment(a: TrelloAttachment): TaskAttachment {
   };
 }
 
+/**
+ * The board's comments, at most once every COMMENTS_TTL_MS per board. Every
+ * pull (each 30s, per milestone, sometimes two projects on one board) asked
+ * for them again, and the token lived at Trello's rate limit. A comment
+ * showing up two minutes late costs nothing. On failure the last good list
+ * is reused, or null (the pull goes on without comments).
+ */
+const COMMENTS_TTL_MS = 2 * 60_000;
+const commentsCache = new Map<string, { at: number; actions: TrelloCommentAction[] }>();
+
+async function boardComments(config: SyncConfig, boardId: string): Promise<TrelloCommentAction[] | null> {
+  const hit = commentsCache.get(boardId);
+  if (hit && Date.now() - hit.at < COMMENTS_TTL_MS) return hit.actions;
+  try {
+    const actions = await trelloRequest<TrelloCommentAction[]>(config, `/boards/${boardId}/actions`, 'GET', {
+      filter: 'commentCard',
+      limit: String(COMMENT_ACTIONS_LIMIT),
+      fields: 'data,date',
+      memberCreator_fields: 'fullName,username',
+    });
+    commentsCache.set(boardId, { at: Date.now(), actions });
+    return actions;
+  } catch (err: any) {
+    log.warnThrottled(`trello-comments:${boardId}`, 'sync', `Trello comments fetch failed — pulling without comments: ${err?.message ?? err}`, undefined, config.projectId);
+    return hit?.actions ?? null;
+  }
+}
+
 export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
   const state: TrelloState = config.state ?? {};
   if (!state.boardId) return [];
@@ -745,15 +773,7 @@ export async function pullCards(config: SyncConfig): Promise<PulledTask[]> {
     }),
     trelloRequest<Array<{ id: string; name: string; color: string }>>(config, `/boards/${state.boardId}/labels`),
     trelloRequest<Array<{ id: string; name: string; closed: boolean }>>(config, `/boards/${state.boardId}/lists`, 'GET', { fields: 'name,closed' }),
-    trelloRequest<TrelloCommentAction[]>(config, `/boards/${state.boardId}/actions`, 'GET', {
-      filter: 'commentCard',
-      limit: String(COMMENT_ACTIONS_LIMIT),
-      fields: 'data,date',
-      memberCreator_fields: 'fullName,username',
-    }).catch((err: any): null => {
-      log.warn('sync', `Trello comments fetch failed — pulling without comments: ${err?.message ?? err}`, undefined, config.projectId);
-      return null;
-    }),
+    boardComments(config, state.boardId),
   ]);
 
   // 1000 is Trello's per-request ceiling. On a board with more comment actions

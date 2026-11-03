@@ -118,6 +118,21 @@ export function warn(category: LogCategory, message: string, details?: string, p
   return addEntry('warn', category, message, details, projectId);
 }
 
+const lastWarnAt = new Map<string, number>();
+
+/**
+ * A warning that repeats on every poll (a throttled Trello, a meter answering
+ * 429) is one fact, not thousands: until 2026-11 it was 58% of server.log.
+ * Logs `key` at most once per `windowMs`.
+ */
+export function warnThrottled(key: string, category: LogCategory, message: string, details?: string, projectId?: string, windowMs = 10 * 60_000): LogEntry | null {
+  const now = Date.now();
+  const last = lastWarnAt.get(key) ?? 0;
+  if (now - last < windowMs) return null;
+  lastWarnAt.set(key, now);
+  return addEntry('warn', category, message, details, projectId);
+}
+
 export function error(category: LogCategory, message: string, details?: string, projectId?: string): LogEntry {
   return addEntry('error', category, message, details, projectId);
 }

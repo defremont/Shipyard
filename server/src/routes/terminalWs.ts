@@ -20,7 +20,11 @@ import * as worktreeService from '../services/worktreeService.js';
 import { triggerAutoSync } from '../services/sync/syncEngine.js';
 import * as log from '../services/logService.js';
 import { mkdir, readdir, stat, unlink, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { isAbsolute, join, relative, resolve } from 'path';
+import { fileURLToPath } from 'url';
+import { openFolder } from '../services/terminalLauncher.js';
+import { searchFileNames } from '../services/fileSearch.js';
+import { IGNORE_NAMES, isVisibleDotfile } from './files.js';
 import { randomUUID } from 'crypto';
 import { DATA_DIR } from '../services/dataDir.js';
 
@@ -59,6 +63,58 @@ export async function terminalWsRoutes(app: FastifyInstance) {
   app.get('/api/terminal/status', async () => {
     return { available: isAvailable() };
   });
+
+  // A path the terminal printed and the user clicked: a file of a known project
+  // opens in the editor (the client does it with the answer), anything else
+  // with the system's default app. Relative paths are read from the session's
+  // working directory. Opening a path is no more than the session itself can do.
+  app.post<{ Params: { sessionId: string }; Body: { path?: string; system?: boolean } }>(
+    '/api/terminal/sessions/:sessionId/open-path',
+    async (request, reply) => {
+      const session = getSession(request.params.sessionId);
+      if (!session) return reply.status(404).send({ error: 'Session not found' });
+      let raw = String(request.body?.path || '').trim();
+      if (!raw) return reply.status(400).send({ error: 'path is required' });
+      if (raw.startsWith('file:')) {
+        try { raw = fileURLToPath(raw); } catch { return reply.status(400).send({ error: 'bad file URL' }); }
+      }
+      // ~ is the user's home, as in the shell that printed it.
+      if (raw === '~' || raw.startsWith('~/') || raw.startsWith('~\\')) raw = join(process.env.USERPROFILE || process.env.HOME || '', raw.slice(1));
+      const full = isAbsolute(raw) ? resolve(raw) : resolve(session.cwd, raw);
+      let isDirectory: boolean;
+      try {
+        isDirectory = (await stat(full)).isDirectory();
+      } catch {
+        // "TaskRail.tsx:121" names a file, not where it is: look it up in the
+        // session's project by exact name.
+        if (!/[\\/]/.test(raw)) {
+          const project = (await getProjects()).find(p => p.id === session.projectId);
+          const hits = project
+            ? (await searchFileNames([project], raw, { limit: 10, filter: { ignore: IGNORE_NAMES, isVisibleDotfile } }))
+                .filter(r => r.type === 'file' && r.name.toLowerCase() === raw.toLowerCase())
+            : [];
+          if (hits[0]) return { opened: 'editor', projectId: hits[0].projectId, path: hits[0].path, ...(hits.length > 1 ? { ambiguous: hits.length } : {}) };
+        }
+        return reply.status(404).send({ error: `Not found: ${full}` });
+      }
+      // Ctrl/Cmd+click asks for the system's app (VS Code, the PDF reader) even inside a project.
+      if (!isDirectory && !request.body?.system) {
+        const same = (a: string, b: string) => (process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b);
+        // The deepest project that holds the file wins (a client folder holds a dozen repos).
+        const projects = (await getProjects())
+          .filter(p => p.path)
+          .sort((a, b) => b.path.length - a.path.length);
+        for (const p of projects) {
+          const rel = relative(p.path, full);
+          if (rel && !rel.startsWith('..') && !isAbsolute(rel) && same(resolve(p.path, rel), full)) {
+            return { opened: 'editor', projectId: p.id, path: rel.split('\\').join('/') };
+          }
+        }
+      }
+      await openFolder(full);
+      return { opened: 'system', path: full };
+    }
+  );
 
   // A PTY cannot transport an OS clipboard image. Persist it briefly so the
   // client can paste a local path that Claude CLI can read.

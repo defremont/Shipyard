@@ -138,6 +138,9 @@ function parseUsage(body: any, plan: string | null): ClaudeUsage {
 
 let cached: ClaudeUsage | null = null;
 let cachedAt = 0;
+/** After a 429 the meter is left alone for a while: asking every minute kept it throttled. */
+let backoffUntil = 0;
+const BACKOFF_MS = 10 * 60_000;
 let inFlight: Promise<UsageResult> | null = null;
 
 async function fetchUsage(): Promise<UsageResult> {
@@ -154,6 +157,7 @@ async function fetchUsage(): Promise<UsageResult> {
     if (!res.ok) {
       // A 429 here is the meter endpoint throttling us, not the plan running
       // out. Never let it read as "limit reached".
+      if (res.status === 429) backoffUntil = Date.now() + BACKOFF_MS;
       throw new Error(`HTTP ${res.status}`);
     }
     const body = await res.json();
@@ -163,7 +167,7 @@ async function fetchUsage(): Promise<UsageResult> {
     return usage;
   } catch (err: any) {
     const detail = err?.name === 'AbortError' ? 'timeout' : err?.message;
-    log.warn('claude', 'Usage lookup failed', detail);
+    log.warnThrottled(`usage:${detail}`, 'claude', 'Usage lookup failed', detail);
     // Serve the last good reading for a while so the meter does not flicker.
     if (cached && Date.now() - cachedAt < STALE_TTL) {
       return { ...cached, stale: true };
@@ -176,6 +180,9 @@ async function fetchUsage(): Promise<UsageResult> {
 
 export async function getUsage(): Promise<UsageResult> {
   if (cached && Date.now() - cachedAt < CACHE_TTL) return cached;
+  if (Date.now() < backoffUntil) {
+    return cached && Date.now() - cachedAt < STALE_TTL ? { ...cached, stale: true } : { available: false, reason: 'request-failed' };
+  }
   // Collapse concurrent callers onto one request.
   if (!inFlight) {
     inFlight = fetchUsage().finally(() => { inFlight = null; });

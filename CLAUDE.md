@@ -121,7 +121,7 @@ interface Project {
 **Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
 **Git**: GET /:id/git/pending (todos os repos do projeto), GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
-**Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba; POST aceita `resume` + `resumeTitle`), GET /api/terminal/conversations?projectId= (conversas do Claude para retomar), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
+**Terminais**: POST /api/terminals/launch|folder (nativos), POST /api/terminal/sessions/:id/open-path (caminho clicado no terminal), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba; POST aceita `resume` + `resumeTitle`), GET /api/terminal/conversations?projectId= (conversas do Claude para retomar), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **AI (multi-provedor)**: GET /api/ai/status, POST /api/ai/preferred, POST/DELETE /api/ai/config/:provider, POST /api/ai/config/:provider/test
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
@@ -569,6 +569,14 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   git status daquele projeto (cooldown de 10s). As chaves tem que espelhar
   `useTasks`/`useGitStatus` — chave diferente enche cache que ninguem le
 - `logService`: escritas em disco sao bufferizadas (flush 200ms / 64 linhas)
+- **Aviso que se repete a cada ciclo usa `log.warnThrottled(chave, ...)`**:
+  uma linha por chave a cada 10 min (push ao Trello, 5 min). Ate 2026-11, 58%
+  do `server.log` eram as mesmas falhas do Trello e do medidor de uso
+- Medidor de uso: depois de um 429, 10 min sem perguntar (`backoffUntil`),
+  servindo a ultima leitura como `stale`
+- Comentarios do Trello: no maximo uma busca a cada 2 min por board
+  (`boardComments`, cache por `boardId`, compartilhado entre projetos que
+  apontam para o mesmo board); falha reaproveita a ultima lista
 - Componentes de lista (`TaskItem`, `SortableTaskItem`, `TaskRow`) sao `React.memo` —
   o structural sharing do react-query mantem `task` estavel entre polls
 - Editor (CodeMirror), terminal (xterm) e markdown sao `lazy()`. **Nao** usar
@@ -603,6 +611,17 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   os marcadores de bracketed paste (`\x1b[200~`…`\x1b[201~`) quando o programa os
   pediu. Enviar o texto cru pelo WebSocket faz o Claude CLI ler cada `\n` como
   Enter e submeter linha a linha
+- **Caminho de arquivo impresso e clicavel** (`lib/terminalLinks.ts`,
+  `registerLinkProvider`): `C:\x\y.ts`, `src/a.ts:12`, `./x`, `~/x`, `file://` e
+  nome solto com linha (`TaskRail.tsx:121`). Linhas quebradas pela largura
+  sao juntadas antes de procurar; URL web fica com o `WebLinksAddon`. O clique
+  chama `POST /api/terminal/sessions/:id/open-path`: relativo parte do `cwd`
+  da sessao, nome solto e procurado no indice do projeto da sessao, arquivo
+  dentro de um projeto conhecido (o mais fundo vence) volta como `editor` e
+  abre no Editor (`openFileForProject`); pasta, arquivo fora de projeto ou
+  **Ctrl/Cmd+clique** abrem no app do sistema (`openFolder`). Hyperlink OSC 8
+  passa pelo `linkHandler` do xterm: `file://` vai pela mesma rota, http no
+  navegador. Ainda nao pula para a linha
 - Botao direito: copia se ha selecao, senao cola. Botao do meio cola.
   Com mouse tracking ligado (Claude CLI), selecionar exige **Shift**+arrastar
 - Imagens coladas com Ctrl+V sao salvas temporariamente em `data/terminal-clipboard/`

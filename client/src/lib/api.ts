@@ -597,6 +597,12 @@ export const api = {
       body: JSON.stringify({ mimeType, data }),
       timeout: 20_000,
     }),
+  /** A path the terminal printed: `editor` means open it here, `system` means the OS already did. */
+  openTerminalPath: (sessionId: string, path: string, system = false) =>
+    request<{ opened: 'editor' | 'system'; projectId?: string; path: string }>(`/terminal/sessions/${sessionId}/open-path`, {
+      method: 'POST',
+      body: JSON.stringify({ path, system }),
+    }),
   getAiResolvePrompt: (projectId: string, taskId: string, feedback?: string) =>
     request<{ prompt: string }>(`/projects/${projectId}/tasks/${taskId}/ai-resolve`, {
       method: 'POST',

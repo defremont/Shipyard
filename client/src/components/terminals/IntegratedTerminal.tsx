@@ -6,6 +6,8 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { getWebSocketUrl } from '@/hooks/useTerminal'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
+import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
+import { filePathLinkProvider } from '@/lib/terminalLinks'
 import '@xterm/xterm/css/xterm.css'
 
 /** `finished` is idle with a history: the CLI was given work and is done. */
@@ -86,6 +88,23 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
   // Use ref for onExit to avoid re-creating WS on every render
   const onExitRef = useRef(onExit)
   onExitRef.current = onExit
+
+  // A file path printed in the terminal, clicked: a file of a known project
+  // opens in the editor; Ctrl/Cmd+click, folders and files outside every
+  // project open with the system's app. A ref, so the xterm wiring made once
+  // at mount always reaches the current editor context.
+  const { openFileForProject } = useEditorTabsContext()
+  const openPathRef = useRef<(path: string, system: boolean) => void>(() => {})
+  openPathRef.current = (path, system) => {
+    api.openTerminalPath(sessionId, path, system)
+      .then(result => {
+        if (result.opened !== 'editor' || !result.projectId) return
+        const name = result.path.split('/').pop() || result.path
+        const dot = name.lastIndexOf('.')
+        openFileForProject(result.projectId, result.path, name, dot > 0 ? name.slice(dot).toLowerCase() : '')
+      })
+      .catch((err: any) => toast.error(err.message || `Could not open ${path}`))
+  }
 
   const connectWs = useCallback(() => {
     if (disposedRef.current || !termRef.current) return
@@ -170,6 +189,15 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
       // Tell xterm.js about the ConPTY backend so it can optimize escape
       // sequence handling (arrow keys, cursor movement, line wrapping)
       ...(isWindows && { windowsPty: { backend: 'conpty' as const } }),
+      // OSC 8 hyperlinks (a program can print text that links elsewhere):
+      // web pages in the browser, file:// through the same path as a printed path.
+      linkHandler: {
+        allowNonHttpProtocols: true,
+        activate: (event, uri) => {
+          if (uri.startsWith('file:')) openPathRef.current(uri, event.ctrlKey || event.metaKey)
+          else if (/^https?:/i.test(uri)) window.open(uri, '_blank', 'noopener,noreferrer')
+        },
+      },
     })
 
     const fitAddon = new FitAddon()
@@ -179,6 +207,9 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
 
     term.loadAddon(fitAddon)
     term.loadAddon(webLinksAddon)
+    const pathLinks = term.registerLinkProvider(
+      filePathLinkProvider(term, (match, event) => openPathRef.current(match.path, event.ctrlKey || event.metaKey)),
+    )
     term.open(containerRef.current)
     // Must run after open() — the renderer needs the screen element to exist.
     const disposeRenderer = attachRenderer(term)
@@ -335,6 +366,7 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
         ws.close()
       }
       disposeRenderer()
+      pathLinks.dispose()
       term.dispose()
       termRef.current = null
       fitAddonRef.current = null

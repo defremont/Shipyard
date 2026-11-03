@@ -433,7 +433,7 @@ async function runAutoSync(projectId: string, providerId: SyncProviderId, milest
   try {
     const result = await pushAll(projectId, providerId, milestoneId);
     if (!result.success) {
-      log.warn('sync', `auto-sync push (${providerId}/${milestoneId}) failed: ${result.message}`, undefined, projectId);
+      log.warnThrottled(`push:${projectId}:${providerId}:${milestoneId}:${String(result.message).replace(/\d+/g, '#').slice(0, 40)}`, 'sync', `auto-sync push (${providerId}/${milestoneId}) failed: ${result.message}`, undefined, projectId, 5 * 60_000);
     }
   } catch (err: any) {
     log.error('sync', `auto-sync error (${providerId}/${milestoneId})`, err?.message ?? String(err), projectId);

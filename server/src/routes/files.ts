@@ -8,7 +8,7 @@ import { searchFileNames, grepProject, projectRanks, orderByRank, mapLimit, snip
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
-const IGNORE_NAMES = new Set([
+export const IGNORE_NAMES = new Set([
   '.git', 'node_modules', '__pycache__', '.next', 'dist', 'build',
   '.cache', 'vendor', '.turbo', '.nuxt', '.output', 'coverage',
   '.parcel-cache', '.svelte-kit',
@@ -32,7 +32,7 @@ const VISIBLE_DOTFILES = new Set([
   '.lintstagedrc',
 ]);
 
-function isVisibleDotfile(name: string): boolean {
+export function isVisibleDotfile(name: string): boolean {
   if (VISIBLE_DOTFILES.has(name)) return true;
   // Allow any .env.* variant
   if (name.startsWith('.env.')) return true;
