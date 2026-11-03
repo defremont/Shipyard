@@ -30,7 +30,8 @@ export function useElectronMenu() {
         action === 'toggle-terminal' ||
         action === 'toggle-shortcuts' ||
         action === 'close-tab' ||
-        action === 'new-task-request'
+        action === 'new-task-request' ||
+        action === 'next-waiting-agent'
       ) {
         window.dispatchEvent(new CustomEvent(`shipyard:${action}`))
       }

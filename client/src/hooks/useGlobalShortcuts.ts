@@ -2,6 +2,29 @@ import { useEffect } from 'react'
 import { useTabs } from '@/hooks/useTabs'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { PENDING_NEW_TASK_KEY } from '@/lib/shortcuts'
+import { terminalTabsStore } from '@/hooks/useTerminalTabs'
+import { toast } from 'sonner'
+
+/** The session the last Alt+A went to, so pressing it again moves on. */
+let lastJumpId: string | null = null
+
+/**
+ * Alt+A: the next agent waiting for an answer, in any project; with none
+ * waiting, the next one that finished. Pressing again walks through the rest.
+ */
+export function jumpToNextWaitingAgent() {
+  const tabs = terminalTabsStore.get()
+  const asking = tabs.filter(t => t.status === 'question')
+  const pool = asking.length ? asking : tabs.filter(t => t.status === 'finished')
+  if (!pool.length) {
+    toast('No agent is waiting', { duration: 2000 })
+    return
+  }
+  const at = pool.findIndex(t => t.sessionId === lastJumpId)
+  const next = pool[(at + 1) % pool.length]
+  lastJumpId = next.sessionId
+  window.dispatchEvent(new CustomEvent('shipyard:focus-terminal', { detail: { sessionId: next.sessionId } }))
+}
 
 /** Typing somewhere should never trigger a bare-key shortcut. */
 function isTypingTarget(target: EventTarget | null): boolean {
@@ -75,6 +98,13 @@ export function useGlobalShortcuts() {
         return
       }
 
+      // event.code, not event.key: on macOS Option+A types "å".
+      if (event.altKey && !mod && !event.shiftKey && event.code === 'KeyA') {
+        event.preventDefault()
+        jumpToNextWaitingAgent()
+        return
+      }
+
       if (event.key === '?' && !mod && !isTypingTarget(event.target)) {
         event.preventDefault()
         window.dispatchEvent(new CustomEvent('shipyard:toggle-shortcuts'))
@@ -85,7 +115,9 @@ export function useGlobalShortcuts() {
     window.addEventListener('keydown', handler)
     window.addEventListener('shipyard:close-tab', closeActiveTab)
     window.addEventListener('shipyard:new-task-request', newTask)
+    window.addEventListener('shipyard:next-waiting-agent', jumpToNextWaitingAgent)
     return () => {
+      window.removeEventListener('shipyard:next-waiting-agent', jumpToNextWaitingAgent)
       window.removeEventListener('keydown', handler)
       window.removeEventListener('shipyard:close-tab', closeActiveTab)
       window.removeEventListener('shipyard:new-task-request', newTask)

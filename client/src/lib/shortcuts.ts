@@ -22,6 +22,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
       { keys: 'Ctrl+K', label: 'Search projects, tasks and files' },
       { keys: 'Ctrl+Shift+F', label: 'Search in file contents' },
       { keys: 'Ctrl+`', label: 'Toggle the terminal panel' },
+      { keys: 'Alt+A', label: 'Next agent waiting for an answer (then the finished ones)' },
       { keys: '?', label: 'Show this shortcut list' },
     ],
   },
@@ -39,7 +40,7 @@ export const SHORTCUTS: ShortcutGroup[] = [
     items: [
       { keys: 'Ctrl+N', label: 'New task in the active project', desktopOnly: true },
       { keys: 'Ctrl+Enter', label: 'Save the task dialog from any field' },
-      { keys: 'Shift+click', label: 'Run with AI without the feedback dialog' },
+      { keys: 'Shift+click', label: 'Run with AI with context or another agent' },
     ],
   },
   {

@@ -283,6 +283,10 @@ export function IntegratedTerminal({ sessionId, isActive, onExit }: IntegratedTe
       // Returning false stops xterm from consuming the key; the event still
       // bubbles to the document/window listeners that implement each shortcut.
       // Ctrl+K (global search), Ctrl+Shift+F (file content search), Ctrl+` (toggle terminal)
+      // Alt+A (next waiting agent) — the terminal is where it is pressed most.
+      if (ev.type === 'keydown' && ev.altKey && !ev.ctrlKey && !ev.metaKey && !ev.shiftKey && ev.code === 'KeyA') {
+        return false
+      }
       if (ev.ctrlKey && ev.type === 'keydown') {
         const key = ev.key.toLowerCase()
         if ((key === 'k' && !ev.shiftKey) || (key === 'f' && ev.shiftKey) || ev.key === '`') {

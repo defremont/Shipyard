@@ -142,6 +142,7 @@ export function AgentsPage() {
           <span className="text-xs text-muted-foreground">
             {tabs.length ? `${tabs.length} session${tabs.length === 1 ? '' : 's'} in ${new Set(tabs.map(t => t.projectId)).size} project(s)` : 'No terminal open'}
           </span>
+          <span className="ml-auto text-[11px] text-muted-foreground/60">Alt+A jumps to the next one waiting, from anywhere</span>
         </div>
         {groups.length === 0 && (
           <p className="text-sm text-muted-foreground">Open Claude YOLO or a shell in any project and it shows up here.</p>

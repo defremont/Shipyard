@@ -424,6 +424,7 @@ function createApplicationMenu() {
         { label: 'Global Search', accelerator: 'CmdOrCtrl+K', registerAccelerator: false, click: () => sendMenuAction('toggle-search') },
         { label: 'Search in Files', accelerator: 'CmdOrCtrl+Shift+F', registerAccelerator: false, click: () => sendMenuAction('toggle-file-search') },
         { label: 'Toggle Terminal', accelerator: 'CmdOrCtrl+`', registerAccelerator: false, click: () => sendMenuAction('toggle-terminal') },
+        { label: 'Next Waiting Agent', accelerator: 'Alt+A', registerAccelerator: false, click: () => sendMenuAction('next-waiting-agent') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'forceReload' },

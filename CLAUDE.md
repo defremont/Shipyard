@@ -280,8 +280,12 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   (Enter retoma a primeira). Substitui abrir o Claude e digitar `/resume`. As
   conversas sao achadas pela pasta onde o Claude abriu — a pasta do cliente,
   que e o projeto
-- **Ainda nao feito**: o atalho de "proximo agente esperando". O simulado de
-  referencia esta em `~/Desktop/shipyard-novo-layout.html`
+- **Alt+A** (`jumpToNextWaitingAgent` em `useGlobalShortcuts`): vai para o
+  proximo agente que espera resposta, de qualquer projeto; sem nenhum, para o
+  proximo que terminou. Apertar de novo passa para o seguinte. O terminal
+  repassa a tecla (`attachCustomKeyEventHandler`) e o menu View tem o item.
+  Usa `event.code` (no macOS Option+A digita "å"). O simulado de referencia
+  esta em `~/Desktop/shipyard-novo-layout.html`
 
 ### Layout de paineis (foco vs split)
 - `hooks/useLayoutMode.ts` e a fonte unica: `mode` (`focus` | `split`, em
