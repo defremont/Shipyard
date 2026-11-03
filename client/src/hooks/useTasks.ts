@@ -58,6 +58,8 @@ export interface Task {
   inProgressAt?: string
   doneAt?: string
   needsReview?: boolean
+  /** Last client follow-up from the WhatsApp inbox appended to this task. */
+  followUpAt?: string
   subtasks?: { id: string; title: string; done: boolean }[]
   /** Pulled from the remote board (Trello) — read-only in Shipyard. */
   attachments?: TaskAttachment[]
@@ -186,9 +188,11 @@ export function useUpdateTask() {
       const previousAllTasks = queryClient.getQueryData<Task[]>(['tasks', 'all'])
 
       // Optimistically update project tasks
+      // Clearing the unseen mark is no edit: the server keeps updatedAt too.
+      const onlySeen = Object.keys(data).every(k => k === 'needsReview') && data.needsReview === false
       const updater = (old: Task[] | undefined) => {
         if (!old) return old
-        return old.map(t => t.id === taskId ? { ...t, ...data, updatedAt: new Date().toISOString() } : t)
+        return old.map(t => t.id === taskId ? { ...t, ...data, ...(onlySeen ? {} : { updatedAt: new Date().toISOString() }) } : t)
       }
       queryClient.setQueryData<Task[]>(['tasks', projectId], updater)
       queryClient.setQueryData<Task[]>(['tasks', 'all'], updater)

@@ -82,6 +82,8 @@ interface Task {
   inboxAt?: string;         // quando entrou em backlog/todo
   inProgressAt?: string;    // quando moveu para in_progress
   doneAt?: string;          // quando foi concluida
+  needsReview?: boolean;    // marca "nao vista": IA terminou ou chegou complemento do cliente
+  followUpAt?: string;      // ultimo complemento do cliente (WhatsApp inbox) anexado a task
   attachments?: TaskAttachment[];  // card do Trello (pull-only) + midia do WhatsApp inbox
   comments?: TaskComment[];        // vem do card do Trello (pull-only)
 }
@@ -1194,6 +1196,17 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   re-confirmada, nunca criada duas vezes
 - Complemento de demanda ja entregue (`parentTaskId`) vira `— Note` na task
   existente (formato do feed de atividade) e reabre a task se estava done
+- **Complemento tem que aparecer como atualizacao**: `deliver` grava
+  `followUpAt` e `needsReview: true` junto com a nota (o `updateTask` ja renova
+  `updatedAt`, que poe a task no topo de "Recently updated" e manda o push ao
+  Trello). O cartao, a linha da lista e a TaskRail mostram "updated ha X" em
+  `primary` e o ponto de "nao vista" ate a task ser aberta; o TaskViewer
+  mostra "Client follow-up ha X". `latestFollowUp` (`lib/taskFollowUp.ts`)
+  so troca a data da coluna pela do complemento quando ele e o fato mais novo
+- Abrir a task limpa `needsReview` **sem** renovar `updatedAt` (no server, em
+  `updateTask`, e na atualizacao otimista do `useUpdateTask`): ler nao e
+  editar, e antes cada abertura jogava a task para o topo da ordenacao
+- `replaceTasks` copia `followUpAt` do `existing` (senao todo pull apaga)
 - **Midia vira anexo da task** (`source: 'inbox'`): audio, foto, video e arquivo
   vem na demanda como `attachments` e os bytes sao pedidos a
   `GET {url}/api/shipyard/media/:id` (Bearer, com Range) por `openMedia`. O link

@@ -267,14 +267,17 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
     const parent = await taskStore.getTask(d.projectId, d.parentTaskId);
     if (parent) {
       // A follow-up from the client is more work on the same task: a dated
-      // note (the shape the activity feed reads) and, if it was closed, back
-      // to the inbox.
-      const ts = new Date().toISOString().replace('T', ' ').slice(0, 16);
+      // note (the shape the activity feed reads), flagged as unseen so the
+      // board shows it changed, and, if it was closed, back to the inbox.
+      const now = new Date().toISOString();
+      const ts = now.replace('T', ' ').slice(0, 16);
       const note = [`Client follow-up (WhatsApp): ${d.title}`, d.description, d.prompt].filter(Boolean).join('\n\n');
       const task = await taskStore.updateTask(d.projectId, parent.id, {
         prompt: taskStore.appendPromptSection(parent.prompt, `— Note ${ts}`, note),
         ...(d.context ? { context: taskStore.appendPromptSection(parent.context, `— Follow-up ${ts}`, d.context) } : {}),
         ...(parent.status === 'done' ? { status: 'todo' as const } : {}),
+        needsReview: true,
+        followUpAt: now,
       });
       if (d.attachments?.length) await taskStore.addAttachments(d.projectId, parent.id, d.attachments);
       return { taskId: parent.id, taskNumber: task?.number, asNote: true };

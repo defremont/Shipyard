@@ -244,6 +244,7 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
         {task.createdAt && <span>Created {formatDate(task.createdAt)}</span>}
         {task.inProgressAt && <span>Started {formatDate(task.inProgressAt)}</span>}
         {task.doneAt && <span>Done {formatDate(task.doneAt)}</span>}
+        {task.followUpAt && <span className="text-foreground/80">Client follow-up {formatDate(task.followUpAt)}</span>}
       </div>
     </>
   )

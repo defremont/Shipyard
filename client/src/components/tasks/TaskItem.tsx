@@ -10,6 +10,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from '@/components/ui/alert-dialog'
 import { cn } from '@/lib/utils'
+import { latestFollowUp } from '@/lib/taskFollowUp'
 import { useCreateTask, useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
 import { buildTaskPrompt } from '@/lib/promptBuilder'
 import { useAiSessions } from '@/hooks/useAiSessions'
@@ -148,6 +149,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
     if (isNaN(d.getTime())) return null
     return d
   }, [task.status, task.doneAt, task.inProgressAt, task.inboxAt, task.createdAt])
+  const followUp = useMemo(() => latestFollowUp(task, columnDate), [task.followUpAt, columnDate])
 
   return (
     <div
@@ -303,7 +305,14 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
       <div className="flex items-center mt-0.5 gap-1 leading-none">
         <span className="text-[10px] text-muted-foreground/50 font-mono select-all">#{task.number || '?'}</span>
         <span className="flex-1" />
-        {columnDate && (
+        {followUp ? (
+          <span
+            className={cn('text-[10px]', task.needsReview ? 'text-primary font-medium' : 'text-muted-foreground/60')}
+            title="Client follow-up from WhatsApp"
+          >
+            updated {formatDistanceToNow(followUp, { addSuffix: true })}
+          </span>
+        ) : columnDate && (
           <span className="text-[10px] text-muted-foreground/40">
             {formatDistanceToNow(columnDate, { addSuffix: true })}
           </span>

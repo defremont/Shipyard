@@ -76,7 +76,8 @@ export interface Task {
   inboxAt?: string;       // When moved to backlog/todo
   inProgressAt?: string;  // When moved to in_progress
   doneAt?: string;        // When moved to done
-  needsReview?: boolean;  // True when AI resolved — cleared when user views the task
+  needsReview?: boolean;  // True when AI resolved or a client follow-up arrived — cleared when user views the task
+  followUpAt?: string;    // Last client follow-up (WhatsApp inbox) appended to this task
   subtasks?: Subtask[];
   attachments?: TaskAttachment[];  // Trello's are pulled (remote is authoritative); the WhatsApp inbox's live here
   comments?: TaskComment[];        // Pulled from the remote board — remote is authoritative

@@ -118,7 +118,7 @@ const RailTask = memo(function RailTask({ task, session, onOpen, onRun, onMove, 
       <span className="mt-0.5 shrink-0 whitespace-nowrap text-[10px] tabular-nums text-muted-foreground/60 transition-opacity group-hover:opacity-0">
         {task.number != null && `#${task.number}`}
         {task.effort ? ` · ${task.effort}p` : ''}
-        {done && task.needsReview && <span className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-foreground/70 align-middle" />}
+        {task.needsReview && <span title={task.followUpAt ? 'Client follow-up not seen yet' : 'Not reviewed yet'} className="ml-1 inline-block h-1.5 w-1.5 rounded-full bg-foreground/70 align-middle" />}
       </span>
       {!done && (
         <div className="absolute right-1.5 top-1.5 flex translate-x-1 items-center gap-1 opacity-0 transition-all duration-150 focus-within:translate-x-0 focus-within:opacity-100 group-hover:translate-x-0 group-hover:opacity-100">

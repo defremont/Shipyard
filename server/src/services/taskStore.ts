@@ -219,11 +219,14 @@ export function updateTask(projectId: string, taskId: string, data: Partial<Omit
     const idx = tasks.findIndex(t => t.id === taskId);
     if (idx === -1) return null;
     const now = new Date().toISOString();
+    // Opening a task clears its unseen mark; reading is no edit, so it must
+    // not push the task to the top of "Recently updated" nor to the board.
+    const onlySeen = Object.keys(data).every(k => k === 'needsReview') && data.needsReview === false;
     tasks[idx] = {
       ...tasks[idx],
       ...data,
       ...applyStatusTimestamps(tasks[idx], data.status, now),
-      updatedAt: now,
+      updatedAt: onlySeen ? tasks[idx].updatedAt : now,
     };
     if ((data as any).effort === null) {
       delete tasks[idx].effort;
@@ -458,6 +461,7 @@ export function replaceTasks(projectId: string, incoming: Partial<Task>[], miles
         // them.
         subtasks: t.subtasks ?? existing?.subtasks,
         needsReview: t.needsReview ?? existing?.needsReview,
+        followUpAt: t.followUpAt ?? existing?.followUpAt,
         agent: t.agent ?? existing?.agent,
         context: t.context ?? existing?.context,
         rootCause: t.rootCause ?? existing?.rootCause,
