@@ -417,12 +417,16 @@ export function TerminalPanel() {
   // The rest of the app (project tabs, the task rail) reads session status
   // from here.
   useEffect(() => {
-    terminalTabsStore.set(tabs.map(tab => ({
-      sessionId: tab.sessionId,
-      projectId: tab.projectId,
-      taskId: tab.taskId,
-      status: tabStatus(tab),
-    })))
+    terminalTabsStore.set(tabs.map(tab => {
+      const { number, detail } = describeTab(tab)
+      return {
+        sessionId: tab.sessionId,
+        projectId: tab.projectId,
+        taskId: tab.taskId,
+        status: tabStatus(tab),
+        label: [number, detail].filter(Boolean).join(' '),
+      }
+    }))
   }, [tabs])
 
   // Persist panel state

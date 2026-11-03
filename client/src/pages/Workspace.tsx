@@ -18,6 +18,7 @@ import {
   DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { ProjectContextMenu } from '@/components/projects/ProjectContextMenu'
+import { ResumePicker } from '@/components/terminals/ResumePicker'
 import { useProjectLaunch } from '@/hooks/useProjectLaunch'
 import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { useActiveMilestone } from '@/hooks/useMilestones'
@@ -260,6 +261,7 @@ export function Workspace() {
               </Tooltip>
             </span>
           </ProjectContextMenu>
+          <ResumePicker projectId={project.id} />
         </div>
 
         {/* Everything secondary lives in one overflow menu */}

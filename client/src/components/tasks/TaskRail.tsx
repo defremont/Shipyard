@@ -1,4 +1,4 @@
-import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
+import { lazy, memo, Suspense, useCallback, useMemo, useRef, useState } from 'react'
 import { ArrowDownUp, ArrowRight, Check, ChevronDown, ChevronRight, Play, Plus, SquareTerminal } from 'lucide-react'
 import { useTasks, useUpdateTask, type Task } from '@/hooks/useTasks'
 import { useProjects } from '@/hooks/useProjects'
@@ -228,20 +228,23 @@ export function TaskRail({ projectId }: { projectId: string }) {
     return map
   }, [sessions, projectId])
 
-  const handleOpen = (task: Task) => {
-    const session = sessionByTask.get(task.id)
+  // Stable callbacks: RailTask is memo'd, and every session event re-renders the rail.
+  const sessionByTaskRef = useRef(sessionByTask)
+  sessionByTaskRef.current = sessionByTask
+  const handleOpen = useCallback((task: Task) => {
+    const session = sessionByTaskRef.current.get(task.id)
     if (session && session.status !== 'exited') {
       window.dispatchEvent(new CustomEvent('shipyard:focus-terminal', { detail: { sessionId: session.sessionId } }))
       return
     }
     setViewing(task)
-  }
+  }, [])
 
   // Running straight away is the common case; Shift adds context or picks the agent.
-  const handleRun = (task: Task, withDialog: boolean) => {
+  const handleRun = useCallback((task: Task, withDialog: boolean) => {
     if (withDialog) window.dispatchEvent(new CustomEvent('shipyard:run-task-with-agent', { detail: task }))
     else runAiResolve(task)
-  }
+  }, [runAiResolve])
 
   const handleMove = useCallback((task: Task, status: SectionKey) => {
     mutateTask({ projectId: task.projectId, taskId: task.id, status })

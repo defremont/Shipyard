@@ -787,6 +787,37 @@ function looksLikeClaude(clean: string): boolean {
   return CLAUDE_SCREEN_RE.test(clean) || lastLines(clean).some(line => IDLE_PROMPT_RE.test(line));
 }
 
+// ── Previews ──────────────────────────────────────────────────────────
+//
+// The last lines each session settled on, for the grid of agents. Taken from
+// the text the output watcher already cleaned at each pause, so a preview
+// costs nothing extra; nothing is read on request.
+
+const previews = new Map<string, { at: number; lines: string[] }>();
+const PREVIEW_LINES = 5;
+// Claude Code's chrome around the answer: the input box, rulers, the footer.
+const PREVIEW_NOISE = /^(?:[─━═\-_\s╭╮╰╯│|]+|[>❯›]\s*.{0,2}|.*(?:bypass permissions|shift\+tab|esc to interrupt|\? for shortcuts|ctrl\+t to|accept edits on).*)$/i;
+
+function setPreview(id: string, clean: string): void {
+  const lines = clean
+    .split('\n')
+    .map(line => line.replace(/\s+$/, ''))
+    .filter(line => line.trim() && !PREVIEW_NOISE.test(line.trim()))
+    .slice(-PREVIEW_LINES)
+    .map(line => line.slice(0, 200));
+  if (lines.length) previews.set(id, { at: Date.now(), lines });
+}
+
+/** Last settled lines of every live session, keyed by session id. */
+export function getPreviews(): Record<string, { at: number; lines: string[] }> {
+  const out: Record<string, { at: number; lines: string[] }> = {};
+  for (const [id, preview] of previews) {
+    if (sessions.has(id)) out[id] = preview;
+    else previews.delete(id);
+  }
+  return out;
+}
+
 function lastLines(clean: string): string[] {
   return clean
     .split('\n')
@@ -1080,6 +1111,7 @@ function startOutputWatcher(sessionId: string, options?: { hold?: boolean }): vo
     const clean = cleanTerminalOutput(tail);
     tail = '';
     sawOutput = false;
+    setPreview(sessionId, clean);
 
     // Once the CLI has shown itself, the session is a Claude session until it
     // dies — a later frame that draws only the spinner still belongs to it.

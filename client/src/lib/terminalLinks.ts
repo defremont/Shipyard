@@ -18,7 +18,8 @@ export interface PathMatch {
 }
 
 const EXT = '[A-Za-z0-9]{1,8}'
-const SEG = "[\\w.@()+\\-\\[\\]~]+"
+// Bounded so a long run of word characters cannot make the match backtrack for long.
+const SEG = "[\\w.@()+\\-\\[\\]~]{1,120}"
 const PATTERNS: RegExp[] = [
   // file:///C:/x/y.ts
   /file:\/\/\/?[^\s"'<>`]+/g,
@@ -98,7 +99,8 @@ export function filePathLinkProvider(
   return {
     provideLinks(y, callback) {
       const logical = logicalLine(term, y)
-      if (!logical || !logical.text.trim()) return callback(undefined)
+      // Pasted blobs (base64, minified JS) are not where paths are printed.
+      if (!logical || !logical.text.trim() || logical.text.length > 2000) return callback(undefined)
       const links: ILink[] = []
       for (const match of findPaths(logical.text)) {
         const range = toRange(term, logical.firstRow, match.start, match.end)

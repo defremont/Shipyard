@@ -734,11 +734,22 @@ function mapAttachment(a: TrelloAttachment): TaskAttachment {
  * is reused, or null (the pull goes on without comments).
  */
 const COMMENTS_TTL_MS = 2 * 60_000;
-const commentsCache = new Map<string, { at: number; actions: TrelloCommentAction[] }>();
+const commentsCache = new Map<string, { at: number; actions: TrelloCommentAction[] | null }>();
+const commentsInFlight = new Map<string, Promise<TrelloCommentAction[] | null>>();
 
-async function boardComments(config: SyncConfig, boardId: string): Promise<TrelloCommentAction[] | null> {
+function boardComments(config: SyncConfig, boardId: string): Promise<TrelloCommentAction[] | null> {
   const hit = commentsCache.get(boardId);
-  if (hit && Date.now() - hit.at < COMMENTS_TTL_MS) return hit.actions;
+  if (hit && Date.now() - hit.at < COMMENTS_TTL_MS) return Promise.resolve(hit.actions);
+  // Two milestones (or two projects) pulling the same board at once share one request.
+  const pending = commentsInFlight.get(boardId);
+  if (pending) return pending;
+  const request = fetchBoardComments(config, boardId, hit?.actions ?? null)
+    .finally(() => commentsInFlight.delete(boardId));
+  commentsInFlight.set(boardId, request);
+  return request;
+}
+
+async function fetchBoardComments(config: SyncConfig, boardId: string, previous: TrelloCommentAction[] | null): Promise<TrelloCommentAction[] | null> {
   try {
     const actions = await trelloRequest<TrelloCommentAction[]>(config, `/boards/${boardId}/actions`, 'GET', {
       filter: 'commentCard',
@@ -750,7 +761,10 @@ async function boardComments(config: SyncConfig, boardId: string): Promise<Trell
     return actions;
   } catch (err: any) {
     log.warnThrottled(`trello-comments:${boardId}`, 'sync', `Trello comments fetch failed — pulling without comments: ${err?.message ?? err}`, undefined, config.projectId);
-    return hit?.actions ?? null;
+    // A failure waits out the same window as a success: retrying on every pull
+    // is what kept the token at the rate limit.
+    commentsCache.set(boardId, { at: Date.now(), actions: previous });
+    return previous;
   }
 }
 

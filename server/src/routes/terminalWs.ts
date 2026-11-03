@@ -12,6 +12,7 @@ import {
   handleClaudeHook,
   onSessionEvent,
   terminalModePreamble,
+  getPreviews,
 } from '../services/terminalService.js';
 import { getProjects, updateProject } from '../services/projectDiscovery.js';
 import { findOpenConversation, forgetConversation, listConversations } from '../services/claudeConversations.js';
@@ -22,7 +23,10 @@ import * as log from '../services/logService.js';
 import { mkdir, readdir, stat, unlink, writeFile } from 'fs/promises';
 import { isAbsolute, join, relative, resolve } from 'path';
 import { fileURLToPath } from 'url';
-import { openFolder } from '../services/terminalLauncher.js';
+import { openFolder, revealInFolder } from '../services/terminalLauncher.js';
+
+/** Files the system would run, not show: these are only revealed in their folder. */
+const RUNNABLE_EXT = /\.(?:exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|lnk|url|msi|msp|scr|cpl|jar|reg|pif|appref-ms|sh|app|command)$/i;
 import { searchFileNames } from '../services/fileSearch.js';
 import { IGNORE_NAMES, isVisibleDotfile } from './files.js';
 import { randomUUID } from 'crypto';
@@ -64,6 +68,9 @@ export async function terminalWsRoutes(app: FastifyInstance) {
     return { available: isAvailable() };
   });
 
+  // The last lines each session settled on — the grid of agents.
+  app.get('/api/terminal/previews', async () => ({ previews: getPreviews() }));
+
   // A path the terminal printed and the user clicked: a file of a known project
   // opens in the editor (the client does it with the answer), anything else
   // with the system's default app. Relative paths are read from the session's
@@ -81,6 +88,9 @@ export async function terminalWsRoutes(app: FastifyInstance) {
       // ~ is the user's home, as in the shell that printed it.
       if (raw === '~' || raw.startsWith('~/') || raw.startsWith('~\\')) raw = join(process.env.USERPROFILE || process.env.HOME || '', raw.slice(1));
       const full = isAbsolute(raw) ? resolve(raw) : resolve(session.cwd, raw);
+      // A network path is never touched: even a stat makes Windows try SMB and
+      // hand the account's NTLM hash to whoever runs that server.
+      if (/^[\\/]{2}/.test(full)) return reply.status(400).send({ error: 'Network paths are not opened' });
       let isDirectory: boolean;
       try {
         isDirectory = (await stat(full)).isDirectory();
@@ -110,6 +120,13 @@ export async function terminalWsRoutes(app: FastifyInstance) {
             return { opened: 'editor', projectId: p.id, path: rel.split('\\').join('/') };
           }
         }
+      }
+      // Opening runs whatever the file is: a printed "setup.exe" — or an OSC 8
+      // link whose visible text says README — would start a program on one
+      // click. Anything that can execute is only shown in its folder.
+      if (!isDirectory && RUNNABLE_EXT.test(full)) {
+        await revealInFolder(full);
+        return { opened: 'revealed', path: full };
       }
       await openFolder(full);
       return { opened: 'system', path: full };
@@ -199,17 +216,19 @@ export async function terminalWsRoutes(app: FastifyInstance) {
   // REST: Claude Code conversations to pick up again — the ones left open on a
   // tab when Shipyard closed, then the newest of each project. Without
   // projectId it covers every project, for the Dashboard.
-  app.get<{ Querystring: { projectId?: string } }>(
+  app.get<{ Querystring: { projectId?: string; limit?: string } }>(
     '/api/terminal/conversations',
     async (request) => {
       const { projectId } = request.query;
+      // The project's "Resume" picker asks for more than the empty-state list.
+      const wanted = Math.min(Math.max(Number(request.query.limit) || 0, 0), 40);
       const projects = (await getProjects()).filter(p => !projectId || p.id === projectId);
       const liveIds = new Set(listSessions().map(s => s.claudeSessionId).filter((id): id is string => !!id));
       const conversations = await listConversations({
         projects,
         liveIds,
-        perProject: projectId ? 5 : 2,
-        limit: projectId ? 5 : 8,
+        perProject: projectId ? wanted || 5 : 2,
+        limit: projectId ? wanted || 5 : 8,
       });
       return { conversations };
     }

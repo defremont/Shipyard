@@ -7,8 +7,10 @@ import { useActivity } from '@/hooks/useActivity'
 import { useTerminalTabs } from '@/hooks/useTerminalTabs'
 import { cn } from '@/lib/utils'
 
+// A branch without upstream is not flagged: a repo with no remote at all would
+// read "not pushed" forever.
 function pending(r: GitPendingRepo): boolean {
-  return r.uncommitted > 0 || r.ahead > 0 || (!r.upstream && !!r.branch)
+  return r.uncommitted > 0 || r.ahead > 0
 }
 
 /**
@@ -84,9 +86,6 @@ export function RailGitStatus({ project }: { project: Project }) {
                     <span className="inline-flex items-center gap-0.5" title={`${r.ahead} to push`}>
                       <ArrowUp className="h-2.5 w-2.5" />{r.ahead}
                     </span>
-                  )}
-                  {!r.upstream && r.branch && r.uncommitted === 0 && r.ahead === 0 && (
-                    <span title={`${r.branch} has no upstream`}>no upstream</span>
                   )}
                 </span>
               </button>

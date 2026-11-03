@@ -3,7 +3,12 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
   DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ChevronDown, FolderKanban, MessageSquare, Search, Settings } from 'lucide-react'
+import { ChevronDown, FolderKanban, Inbox, LayoutGrid, MessageSquare, Search, Settings } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
+import { useInboxStatus } from '@/hooks/useInbox'
+import { useLocation } from 'react-router-dom'
+import { useTerminalTabs } from '@/hooks/useTerminalTabs'
 import { TabBar } from './TabBar'
 import { useActivity } from '@/hooks/useActivity'
 import { ClaudeUsageBadge } from '@/components/claude/ClaudeUsageBadge'
@@ -122,6 +127,8 @@ export function AppTitleBar() {
 
       <TabBar embedded />
 
+      <InboxButton className={iconButton} />
+      <AgentsButton className={iconButton} />
       <button className={iconButton} onClick={() => dispatch('toggle-search')} title="Search (Ctrl+K)" aria-label="Search">
         <Search className="h-3.5 w-3.5" />
       </button>
@@ -157,5 +164,61 @@ export function AppTitleBar() {
           stays free to drag the window by. */}
       {desktop && <div className="h-full w-8 shrink-0" />}
     </div>
+  )
+}
+
+/** Opens the grid of every agent; the count is the agents waiting for an answer. */
+function AgentsButton({ className }: { className: string }) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const tabs = useTerminalTabs()
+  const waiting = tabs.filter(t => t.status === 'question').length
+  const here = location.pathname === '/agents'
+  return (
+    <button
+      className={cn(className, 'relative', here && 'bg-accent text-foreground')}
+      onClick={() => (here ? navigate(-1) : navigate('/agents'))}
+      title={waiting ? `Agents — ${waiting} waiting for you` : 'Agents (all projects)'}
+      aria-label="All agents"
+    >
+      <LayoutGrid className="h-3.5 w-3.5" />
+      {waiting > 0 && (
+        <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-warning px-0.5 text-[9px] font-semibold tabular-nums text-background">
+          {waiting}
+        </span>
+      )}
+    </button>
+  )
+}
+
+/** The WhatsApp review; shown only with the inbox connected. The count is what waits for review. */
+function InboxButton({ className }: { className: string }) {
+  const navigate = useNavigate()
+  const location = useLocation()
+  const { data: status } = useInboxStatus()
+  const { data } = useQuery({
+    queryKey: ['inbox-review-count'],
+    queryFn: api.getInboxReviewCount,
+    enabled: !!status?.configured,
+    refetchInterval: 60_000,
+    retry: false,
+  })
+  if (!status?.configured) return null
+  const here = location.pathname === '/inbox'
+  const count = data?.count ?? 0
+  return (
+    <button
+      className={cn(className, 'relative', here && 'bg-accent text-foreground')}
+      onClick={() => (here ? navigate(-1) : navigate('/inbox'))}
+      title={count ? `WhatsApp review — ${count} waiting` : 'WhatsApp review'}
+      aria-label="WhatsApp review"
+    >
+      <Inbox className="h-3.5 w-3.5" />
+      {count > 0 && (
+        <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-primary px-0.5 text-[9px] font-semibold tabular-nums text-primary-foreground">
+          {count > 99 ? '99' : count}
+        </span>
+      )}
+    </button>
   )
 }

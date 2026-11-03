@@ -182,6 +182,31 @@ export interface InboxStatus {
   imported: number
 }
 
+/** A demand waiting for review in the WhatsApp inbox (GET /inbox/review). */
+export interface InboxReviewDemand {
+  id: string
+  seq: number
+  title: string
+  description: string
+  priority: 'urgent' | 'high' | 'medium' | 'low'
+  effort: number | null
+  kind: 'code' | 'admin'
+  project_id: string | null
+  contact_name: string
+  created_at: string
+  merged_at: string | null
+  doubts: { q: string; answer?: string; dismissed?: boolean }[]
+  target: { taskId: string | null; number: number | null; title: string | null; status: string | null } | null
+  duplicate_of: { id: string; seq: number; status: string } | null
+  messages: { id: string; from_me: boolean; kind: string; body: string; sent_at: string }[]
+}
+
+export interface InboxReview {
+  count: number
+  url: string
+  demands: InboxReviewDemand[]
+}
+
 /** A demand the last syncs turned into a task or a note (GET /inbox/deliveries). */
 export interface InboxDelivery {
   demandId: string
@@ -574,9 +599,9 @@ export const api = {
       '/terminal/sessions',
       { method: 'POST', body: JSON.stringify({ projectId, type, cols, rows, ...(taskId ? { taskId } : {}), ...(prompt ? { prompt } : {}), ...(agent ? { agent } : {}), ...(resume ? { resume: resume.id, resumeTitle: resume.title } : {}) }) }
     ),
-  getClaudeConversations: (projectId?: string) =>
+  getClaudeConversations: (projectId?: string, limit?: number) =>
     request<{ conversations: ClaudeConversation[] }>(
-      '/terminal/conversations' + (projectId ? `?projectId=${encodeURIComponent(projectId)}` : '')
+      '/terminal/conversations' + (projectId ? `?projectId=${encodeURIComponent(projectId)}${limit ? `&limit=${limit}` : ''}` : '')
     ),
   killTerminalSession: (sessionId: string) =>
     request('/terminal/sessions/' + sessionId, { method: 'DELETE' }),
@@ -589,6 +614,8 @@ export const api = {
     request<{ sessions: { id: string; projectId: string; type: string; taskId: string; createdAt: string }[] }>(
       '/terminal/ai-sessions'
     ),
+  getTerminalPreviews: () =>
+    request<{ previews: Record<string, { at: number; lines: string[] }> }>('/terminal/previews'),
   writeToTerminalSession: (sessionId: string, data: string) =>
     request<{ success: boolean }>(`/terminal/sessions/${sessionId}/write`, { method: 'POST', body: JSON.stringify({ data }) }),
   uploadTerminalClipboardImage: (sessionId: string, mimeType: string, data: string) =>
@@ -599,7 +626,7 @@ export const api = {
     }),
   /** A path the terminal printed: `editor` means open it here, `system` means the OS already did. */
   openTerminalPath: (sessionId: string, path: string, system = false) =>
-    request<{ opened: 'editor' | 'system'; projectId?: string; path: string }>(`/terminal/sessions/${sessionId}/open-path`, {
+    request<{ opened: 'editor' | 'system' | 'revealed'; projectId?: string; path: string }>(`/terminal/sessions/${sessionId}/open-path`, {
       method: 'POST',
       body: JSON.stringify({ path, system }),
     }),
@@ -665,6 +692,12 @@ export const api = {
 
   // WhatsApp inbox
   getInboxStatus: () => request<InboxStatus>('/inbox'),
+  getInboxReview: () => request<InboxReview>('/inbox/review'),
+  getInboxReviewCount: () => request<{ count: number }>('/inbox/review?summary=1'),
+  updateInboxDemand: (id: string, body: Partial<{ title: string; description: string; priority: string; effort: number | null; projectId: string | null; kind: 'code' | 'admin'; targetTaskId: string | null }>) =>
+    request<{ ok: boolean }>(`/inbox/review/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  approveInboxDemand: (id: string) => request<{ ok: boolean }>(`/inbox/review/${encodeURIComponent(id)}/approve`, { method: 'POST', body: '{}' }),
+  discardInboxDemand: (id: string) => request<{ ok: boolean }>(`/inbox/review/${encodeURIComponent(id)}/discard`, { method: 'POST', body: '{}' }),
   getInboxDeliveries: (since?: string) => request<{ deliveries: InboxDelivery[] }>(`/inbox/deliveries${since ? `?since=${encodeURIComponent(since)}` : ''}`),
   configureInbox: (url: string, token: string) =>
     request<InboxStatus & { created: number }>('/inbox', {

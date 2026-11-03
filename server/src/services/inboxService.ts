@@ -209,6 +209,40 @@ export async function openMedia(attachmentId: string, range?: string): Promise<R
   return res;
 }
 
+// ── Review from inside Shipyard ───────────────────────────────────────────
+//
+// The demands waiting for review, edited, sent or discarded without leaving
+// the app. The inbox runs the same handlers its web area uses; this only
+// carries the token, which never reaches the window.
+
+async function relay<T>(method: 'GET' | 'PATCH' | 'POST', path: string, body?: unknown): Promise<T> {
+  const c = await load();
+  if (!c.url || !c.token) throw new Error('The WhatsApp inbox is not connected');
+  const res = await fetch(`${c.url}${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${c.token}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(20_000),
+  });
+  if (res.status === 401) throw new Error('The inbox refused the token');
+  const data = await res.json().catch(() => ({}));
+  if (res.status === 404 && path.startsWith('/api/shipyard/review')) throw new Error('This inbox does not offer review yet — deploy the new version');
+  if (!res.ok) throw new Error((data as any)?.error || `Inbox answered ${res.status}`);
+  return data as T;
+}
+
+export const review = {
+  list: (summary = false) => relay<any>('GET', `/api/shipyard/review${summary ? '?summary=1' : ''}`),
+  update: (id: string, body: Record<string, unknown>) => relay<any>('PATCH', `/api/shipyard/demands/${encodeURIComponent(id)}`, body),
+  approve: async (id: string) => {
+    const result = await relay<any>('POST', `/api/shipyard/demands/${encodeURIComponent(id)}/approve`, {});
+    // The inbox wakes us through the live channel; without it, sync now.
+    syncNow().catch(() => {});
+    return result;
+  },
+  discard: (id: string) => relay<any>('POST', `/api/shipyard/demands/${encodeURIComponent(id)}/discard`, {}),
+};
+
 const EFFORTS = [1, 2, 3, 5, 8] as const;
 
 // ── Catalog ───────────────────────────────────────────────────────────────

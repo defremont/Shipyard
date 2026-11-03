@@ -21,6 +21,8 @@ export interface TerminalTabInfo {
   projectId: string
   taskId?: string
   status: SessionStatus
+  /** What the tab says: "#12 Title", the topic Claude named, or the type. */
+  label?: string
 }
 
 /**
@@ -42,7 +44,7 @@ export const terminalTabsStore = {
     const same = next.length === tabs.length && next.every((tab, i) => {
       const old = tabs[i]
       return old.sessionId === tab.sessionId && old.projectId === tab.projectId
-        && old.taskId === tab.taskId && old.status === tab.status
+        && old.taskId === tab.taskId && old.status === tab.status && old.label === tab.label
     })
     if (same) return
     tabs = next

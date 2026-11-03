@@ -121,7 +121,7 @@ interface Project {
 **Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
 **Git**: GET /:id/git/pending (todos os repos do projeto), GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
-**Terminais**: POST /api/terminals/launch|folder (nativos), POST /api/terminal/sessions/:id/open-path (caminho clicado no terminal), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba; POST aceita `resume` + `resumeTitle`), GET /api/terminal/conversations?projectId= (conversas do Claude para retomar), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
+**Terminais**: POST /api/terminals/launch|folder (nativos), POST /api/terminal/sessions/:id/open-path (caminho clicado no terminal), GET /api/terminal/previews (ultimas linhas de cada sessao), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba; POST aceita `resume` + `resumeTitle`), GET /api/terminal/conversations?projectId= (conversas do Claude para retomar), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
 **AI (multi-provedor)**: GET /api/ai/status, POST /api/ai/preferred, POST/DELETE /api/ai/config/:provider, POST /api/ai/config/:provider/test
 **MCP**: POST /mcp (JSON-RPC), GET /mcp (SSE), OAuth em /register, /authorize, /token
@@ -147,7 +147,7 @@ interface Project {
     nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Busca**: GET /api/search/files|content (`q`, `projectId?` restringe, `prefer?` = projeto aberto, ranqueia primeiro; content aceita `caseSensitive`)
-**WhatsApp inbox**: GET/PUT/DELETE /api/inbox (`{ url, token }`; o PUT ja testa com um sync), POST /api/inbox/sync, GET /api/inbox/deliveries (`?since=`)
+**WhatsApp inbox**: GET/PUT/DELETE /api/inbox (`{ url, token }`; o PUT ja testa com um sync), POST /api/inbox/sync, GET /api/inbox/deliveries (`?since=`), GET /api/inbox/review (`?summary=1` = so a contagem), PATCH /api/inbox/review/:id, POST /api/inbox/review/:id/approve|discard
 **Shipyard Cloud**: GET /api/cloud/status, POST /api/cloud/signup|login|logout|sync
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
@@ -261,10 +261,27 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   e **Editor** (com a arvore de arquivos — `ExplorerView` — como coluna
   esquerda propria). "Agents" emite `shipyard:show-terminal`; sem sessao no
   projeto o painel mostra o estado vazio com "Open Claude YOLO"
-- **Ainda nao feito**: modo Grade (um cartao por agente) e o atalho de
-  "proximo agente esperando". O simulado de referencia esta em
-  `~/Desktop/shipyard-novo-layout.html` — a aparencia do app deve seguir a
-  dele
+- **Grade de agentes** (`/agents`, `pages/AgentsPage.tsx`, botao de grade na
+  barra do topo com a contagem de quem espera resposta): um cartao por sessao
+  de **todos** os projetos, YOLO e shell incluidos, agrupados em Waiting for
+  you / Finished / Working / Idle. Cada cartao: estado, rotulo da aba
+  (`label` no `terminalTabsStore`, montado por `describeTab`), as ultimas
+  linhas e o git do projeto (`['git-pending', id]`, mesma chave do rodape da
+  TaskRail). Clique abre o terminal (`shipyard:focus-terminal`); sessao em
+  `question` tem campo de resposta (texto, Enter 150 ms depois — junto, o Enter
+  podia ser lido como paste)
+- As linhas vem de `GET /api/terminal/previews`: o output watcher guarda as
+  ultimas 5 linhas do texto que ele **ja limpou** a cada pausa
+  (`setPreview`, sem a caixa de input, reguas e rodape do Claude Code). A rota
+  so le um Map; a pagina consulta a cada 3 s e so enquanto esta aberta
+- **Resume** na toolbar do projeto (`ResumePicker`, ao lado do Claude): as 25
+  ultimas conversas do Claude Code do projeto (`?limit=` na rota de
+  conversas), com titulo, ultimo pedido, YOLO e idade, filtro por texto
+  (Enter retoma a primeira). Substitui abrir o Claude e digitar `/resume`. As
+  conversas sao achadas pela pasta onde o Claude abriu — a pasta do cliente,
+  que e o projeto
+- **Ainda nao feito**: o atalho de "proximo agente esperando". O simulado de
+  referencia esta em `~/Desktop/shipyard-novo-layout.html`
 
 ### Layout de paineis (foco vs split)
 - `hooks/useLayoutMode.ts` e a fonte unica: `mode` (`focus` | `split`, em
@@ -619,7 +636,11 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
   da sessao, nome solto e procurado no indice do projeto da sessao, arquivo
   dentro de um projeto conhecido (o mais fundo vence) volta como `editor` e
   abre no Editor (`openFileForProject`); pasta, arquivo fora de projeto ou
-  **Ctrl/Cmd+clique** abrem no app do sistema (`openFolder`). Hyperlink OSC 8
+  **Ctrl/Cmd+clique** abrem no app do sistema (`openFolder`). **Arquivo que
+  executa** (`RUNNABLE_EXT`: exe, bat, cmd, ps1, js, vbs, lnk, msi...) so e
+  mostrado na pasta (`revealInFolder`), nunca aberto: um link OSC 8 pode
+  esconder um `setup.exe` atras de "README". Caminho de rede (`\\servidor`)
+  e recusado antes do `stat` (o Windows mandaria o hash NTLM). Hyperlink OSC 8
   passa pelo `linkHandler` do xterm: `file://` vai pela mesma rota, http no
   navegador. Ainda nao pula para a linha
 - Botao direito: copia se ha selecao, senao cola. Botao do meio cola.
@@ -1279,6 +1300,17 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   e enviado via `POST /api/shipyard/catalog` so quando o hash difere do
   `catalogHash` que o sync devolve. E com ele que a IA do inbox liga um pedido a
   task #N que ja existe (vira nota nela) em vez de duplicar
+- **Revisao dentro do Shipyard** (`/inbox`, `pages/InboxReviewPage.tsx`,
+  botao de caixa na barra do topo com a contagem, so com o inbox conectado):
+  cada demanda em revisao com o que o cliente disse, projeto, prioridade,
+  esforco, codigo/administrativo e destino ("a new task" ou "a note on #N",
+  pelas tasks do projeto daqui), aviso de repetida e duvidas abertas (essas
+  se respondem na area web, link no cartao). Send/Discard. O server repassa
+  (`review` em inboxService; `GET/PATCH /api/inbox/review[/:id]`,
+  `POST .../approve|discard`) para `/api/shipyard/review` e
+  `/api/shipyard/demands/:id` do inbox, que usam os mesmos handlers da area
+  web. O PATCH so deixa passar os campos da revisao. Contagem a cada 60 s,
+  lista a cada 30 s com a pagina aberta
 - Token cifrado com `.claude-key`, nunca volta ao client. Card em
   Settings > AI & Integrations (`InboxSettingsCard`)
 

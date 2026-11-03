@@ -11,6 +11,8 @@ const Workspace = lazy(() => import('@/pages/Workspace').then(m => ({ default: m
 const TasksPage = lazy(() => import('@/pages/TasksPage').then(m => ({ default: m.TasksPage })))
 const Settings = lazy(() => import('@/pages/Settings').then(m => ({ default: m.Settings })))
 const Help = lazy(() => import('@/pages/Help').then(m => ({ default: m.Help })))
+const InboxReviewPage = lazy(() => import('@/pages/InboxReviewPage').then(m => ({ default: m.InboxReviewPage })))
+const AgentsPage = lazy(() => import('@/pages/AgentsPage').then(m => ({ default: m.AgentsPage })))
 const LogsPage = lazy(() => import('@/pages/LogsPage').then(m => ({ default: m.LogsPage })))
 
 // The boundary must sit *below* Layout, where the Outlet renders. A Suspense
@@ -26,6 +28,8 @@ export default function App() {
           <Route element={<Layout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/tasks" element={page(<TasksPage />)} />
+            <Route path="/agents" element={page(<AgentsPage />)} />
+            <Route path="/inbox" element={page(<InboxReviewPage />)} />
             <Route path="/project/:projectId" element={page(<Workspace />)} />
             <Route path="/settings" element={page(<Settings />)} />
             <Route path="/help" element={page(<Help />)} />

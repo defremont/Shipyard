@@ -172,3 +172,15 @@ export async function openFolder(projectPath: string): Promise<void> {
     spawnDetached('explorer.exe', [projectPath]);
   }
 }
+
+/** Shows a file selected in its folder without opening (running) it. */
+export async function revealInFolder(filePath: string): Promise<void> {
+  if (os === 'linux') {
+    const { dirname } = await import('path');
+    spawnDetached('xdg-open', [dirname(filePath)]);
+  } else if (os === 'darwin') {
+    spawnDetached('open', ['-R', filePath]);
+  } else {
+    spawnDetached('explorer.exe', [`/select,${filePath}`]);
+  }
+}
