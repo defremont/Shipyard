@@ -7,7 +7,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Pencil, Copy, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2, GitCommit, GitBranch } from 'lucide-react'
+import { Pencil, Copy, Inbox, Loader, CheckCircle2, Trash2, Check, Wand2, Loader2, GitCommit, GitBranch, History } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useUpdateTask, useDeleteTask, type Task } from '@/hooks/useTasks'
 import { buildTaskPrompt } from '@/lib/promptBuilder'
@@ -19,6 +19,7 @@ import { TaskComments } from '@/components/tasks/TaskComments'
 import { AgentSelect } from '@/components/tasks/AgentSelect'
 import { TaskReviewPanel } from '@/components/tasks/TaskReviewPanel'
 import { TaskOutcomeCard } from '@/components/tasks/TaskOutcomeCard'
+import { TaskHistory } from '@/components/tasks/TaskHistory'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
 import { playAiCompleteSound } from '@/lib/sounds'
@@ -46,7 +47,9 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
   const { data: claudeStatus } = useClaudeStatus()
   const analyzeTask = useAnalyzeTask()
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const [tab, setTab] = useState<'details' | 'review'>('details')
+  const [tab, setTab] = useState<'details' | 'history' | 'review'>('details')
+  // Set when the task was opened with a client follow-up not seen yet.
+  const [unseenSince, setUnseenSince] = useState<number | undefined>()
   const canAiImprove = !!(claudeStatus?.configured || claudeStatus?.cliAvailable)
 
   // The caller passes a snapshot captured when the dialog opened, so a comment
@@ -83,8 +86,14 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
     task = projectTasks.find(t => t.id === taskProp!.id) ?? task
   }
 
+  // A task opened because a client follow-up arrived starts on its history:
+  // the question is "what changed?", not "what is this task?". Read before
+  // the effect below clears the mark.
   useEffect(() => {
-    if (open) setTab('details')
+    if (!open) return
+    const unseen = !!task?.needsReview && !!task?.followUpAt
+    setTab(unseen ? 'history' : 'details')
+    setUnseenSince(unseen ? Date.parse(task!.followUpAt!) - 60_000 : undefined)
   }, [open, taskProp?.id])
 
   // Clear "needs review" indicator when the user opens/views the task
@@ -277,25 +286,32 @@ export function TaskViewer({ task: taskProp, projectName, projectPath, open, onO
           </div>
         </DialogHeader>
 
-        {showReview ? (
-          <Tabs value={tab} onValueChange={v => setTab(v as 'details' | 'review')} className="flex flex-col min-h-0 flex-1">
-            <TabsList className="h-8 p-0.5 self-start shrink-0">
-              <TabsTrigger value="details" className="h-7 text-xs px-2.5">Details</TabsTrigger>
+        <Tabs value={tab} onValueChange={v => setTab(v as 'details' | 'history' | 'review')} className="flex flex-col min-h-0 flex-1">
+          <TabsList className="h-8 p-0.5 self-start shrink-0">
+            <TabsTrigger value="details" className="h-7 text-xs px-2.5">Details</TabsTrigger>
+            <TabsTrigger value="history" className="h-7 text-xs px-2.5 gap-1.5">
+              <History className="h-3 w-3" />
+              History
+            </TabsTrigger>
+            {showReview && (
               <TabsTrigger value="review" className="h-7 text-xs px-2.5 gap-1.5">
                 <GitCommit className="h-3 w-3" />
                 Review
               </TabsTrigger>
-            </TabsList>
-            <TabsContent value="details" className="space-y-4 py-2 overflow-y-auto min-h-0 flex-1">
-              {detailsBody}
-            </TabsContent>
+            )}
+          </TabsList>
+          <TabsContent value="details" className="space-y-4 py-2 overflow-y-auto min-h-0 flex-1">
+            {detailsBody}
+          </TabsContent>
+          <TabsContent value="history" className="py-3 overflow-y-auto min-h-0 flex-1">
+            <TaskHistory task={task} seenBefore={unseenSince} />
+          </TabsContent>
+          {showReview && (
             <TabsContent value="review" className="py-2 overflow-y-auto min-h-0 flex-1">
               <TaskReviewPanel task={task} onDone={() => onOpenChange(false)} />
             </TabsContent>
-          </Tabs>
-        ) : (
-          <div className="space-y-4 py-2 overflow-y-auto min-h-0">{detailsBody}</div>
-        )}
+          )}
+        </Tabs>
 
         {/* Status actions */}
         <div className="flex items-center gap-2 pt-2 border-t shrink-0">

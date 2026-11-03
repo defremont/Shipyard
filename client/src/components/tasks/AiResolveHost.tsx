@@ -8,7 +8,8 @@ import type { Task } from '@/hooks/useTasks'
  *
  * The kanban owns its own dialog, but the command palette unmounts the moment
  * it dispatches, so the dialog has to live somewhere that is always mounted.
- * Fire `shipyard:run-task-with-agent` with the task in `detail`.
+ * Fire `shipyard:run-task-with-agent` with the task in `detail` to open the
+ * dialog (context, agent), or `shipyard:run-task` to run it straight away.
  */
 export function AiResolveHost() {
   const [task, setTask] = useState<Task | null>(null)
@@ -19,9 +20,17 @@ export function AiResolveHost() {
       const detail = (e as CustomEvent<Task>).detail
       if (detail) setTask(detail)
     }
+    const direct = (e: Event) => {
+      const detail = (e as CustomEvent<Task>).detail
+      if (detail) runAiResolve(detail)
+    }
     window.addEventListener('shipyard:run-task-with-agent', handler)
-    return () => window.removeEventListener('shipyard:run-task-with-agent', handler)
-  }, [])
+    window.addEventListener('shipyard:run-task', direct)
+    return () => {
+      window.removeEventListener('shipyard:run-task-with-agent', handler)
+      window.removeEventListener('shipyard:run-task', direct)
+    }
+  }, [runAiResolve])
 
   return (
     <AiResolveDialog

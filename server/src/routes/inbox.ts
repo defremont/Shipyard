@@ -25,6 +25,11 @@ export async function inboxRoutes(app: FastifyInstance) {
     }
   });
 
+  // What the last syncs delivered, for the "landed on task #N" toast.
+  app.get<{ Querystring: { since?: string } }>('/api/inbox/deliveries', async request => ({
+    deliveries: inbox.getDeliveries(request.query.since),
+  }));
+
   app.delete('/api/inbox', async () => {
     await inbox.disconnect();
     return inbox.getStatus();

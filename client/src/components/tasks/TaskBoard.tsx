@@ -443,12 +443,13 @@ export function TaskBoard({ projectId, projectName, projectPath, milestoneId, on
       toast.error('Integrated terminal required for AI resolution')
       return
     }
-    // Shift-click skips the feedback dialog and runs immediately
+    // Running straight away is the common case; Shift-click opens the dialog
+    // to add context or pick another agent.
     if (shiftClickRef.current) {
-      runAiResolve(task)
+      setAiResolveTask(task)
       return
     }
-    setAiResolveTask(task)
+    runAiResolve(task)
   }, [terminalStatus, runAiResolve])
 
   const handleCsvExport = () => {

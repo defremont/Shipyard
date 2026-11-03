@@ -9,6 +9,8 @@ interface TaskSearchBoxProps {
   /** Matches found, shown inside the input while filtering. */
   resultCount?: number
   className?: string
+  /** Width of the open input; the board's toolbar has more room than the rail. */
+  inputClassName?: string
 }
 
 /**
@@ -16,7 +18,7 @@ interface TaskSearchBoxProps {
  * input never collapses while it has text, so an active filter is always
  * visible and nobody hides tasks by accident.
  */
-export function TaskSearchBox({ value, onChange, resultCount, className }: TaskSearchBoxProps) {
+export function TaskSearchBox({ value, onChange, resultCount, className, inputClassName = 'w-44' }: TaskSearchBoxProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [open, setOpen] = useState(false)
   const expanded = open || value.length > 0
@@ -63,7 +65,7 @@ export function TaskSearchBox({ value, onChange, resultCount, className }: TaskS
           setOpen(false)
         }}
         onBlur={() => { if (!value) setOpen(false) }}
-        className="h-7 w-44 rounded-md border bg-background pl-7 pr-12 text-xs outline-none focus:ring-1 focus:ring-ring"
+        className={cn('h-7 rounded-md border', inputClassName, 'bg-background pl-7 pr-12 text-xs outline-none focus:ring-1 focus:ring-ring')}
       />
       {value && (
         <>

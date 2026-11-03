@@ -429,7 +429,7 @@ function SectionTasks() {
       <Bullet title="Delete">Remove the task permanently.</Bullet>
       <Bullet title="Toggle status">Click the status icon on the card to cycle through states.</Bullet>
       <Bullet title="AI Improve">Use the wand button to have Claude improve the task's title, description, and details.</Bullet>
-      <Bullet title="Run with AI">For in-progress tasks, click the sparkles button to open Claude Code with the task context pre-loaded. A small dialog lets you add a decision or extra context for that run — "use option B", "skip the migration" — which is handed to the agent as an instruction that outranks the task description; Shift-click skips the dialog. A pulsing indicator marks the running session, and the finished task is flagged for your review.</Bullet>
+      <Bullet title="Run with AI">Hover a task in Inbox or In Progress and click Run to open Claude Code with the task context pre-loaded. Shift-click opens a small dialog to add a decision or extra context for that run — "use option B", "skip the migration" — handed to the agent as an instruction that outranks the task description, or to pick another agent. A pulsing indicator marks the running session, and the finished task is flagged for your review.</Bullet>
       <Bullet title="Mark all as read">In the Done column header, click the checkmark button to dismiss all completed tasks from the visible list.</Bullet>
 
       <H3>Column Actions</H3>

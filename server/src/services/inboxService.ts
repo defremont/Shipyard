@@ -260,7 +260,43 @@ async function buildCatalog(projects: Awaited<ReturnType<typeof getProjects>>): 
   return catalogMemo.value;
 }
 
-async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ taskId: string; taskNumber?: number; asNote?: boolean }> {
+// ── Arrivals ──────────────────────────────────────────────────────────────
+//
+// What the last syncs delivered, newest first, so the window can say where a
+// demand landed ("#392 became a note on task #97") the moment it does. Kept in
+// memory: a restart loses the list, and with it only toasts already shown.
+
+export interface InboxDelivery {
+  demandId: string;
+  at: string;
+  projectId: string;
+  taskId: string;
+  taskNumber?: number;
+  taskTitle: string;
+  title: string;
+  client?: string;
+  asNote: boolean;
+}
+
+const DELIVERY_LIMIT = 30;
+const deliveries: InboxDelivery[] = [];
+
+function recordDelivery(entry: InboxDelivery): void {
+  deliveries.unshift(entry);
+  if (deliveries.length > DELIVERY_LIMIT) deliveries.length = DELIVERY_LIMIT;
+}
+
+/** Deliveries after `since` (ISO), newest first. */
+export function getDeliveries(since?: string): InboxDelivery[] {
+  return since ? deliveries.filter(d => d.at > since) : deliveries.slice();
+}
+
+/** The client's name, from the private part the inbox writes ("Cliente: …"). */
+function clientOf(d: InboxDemand): string | undefined {
+  return (d.context || d.prompt || '').match(/^Cliente:\s*(.+)$/m)?.[1]?.trim() || undefined;
+}
+
+async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ taskId: string; taskNumber?: number; taskTitle: string; asNote?: boolean }> {
   if (!knownProjects.has(d.projectId)) throw new Error(`project "${d.projectId}" is not in this Shipyard`);
 
   if (d.parentTaskId) {
@@ -280,7 +316,7 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
         followUpAt: now,
       });
       if (d.attachments?.length) await taskStore.addAttachments(d.projectId, parent.id, d.attachments);
-      return { taskId: parent.id, taskNumber: task?.number, asNote: true };
+      return { taskId: parent.id, taskNumber: task?.number, taskTitle: parent.title, asNote: true };
     }
   }
 
@@ -298,7 +334,7 @@ async function deliver(d: InboxDemand, knownProjects: Set<string>): Promise<{ ta
     // Reviewed by a person, but estimated without seeing the code.
     ...(effort ? { effort, effortSource: 'manual' as const, effortConfidence: 'low' as const } : {}),
   });
-  return { taskId: task.id, taskNumber: task.number };
+  return { taskId: task.id, taskNumber: task.number, taskTitle: task.title };
 }
 
 // ── Private context ───────────────────────────────────────────────────────
@@ -456,9 +492,20 @@ async function runSync(): Promise<{ created: number }> {
         continue;
       }
       try {
-        const { taskId, taskNumber, asNote } = await deliver(d, known);
+        const { taskId, taskNumber, taskTitle, asNote } = await deliver(d, known);
         newlyImported[d.id] = { projectId: d.projectId, taskId, reported: 'todo' };
         results.push({ demandId: d.id, taskId, taskNumber, asNote });
+        recordDelivery({
+          demandId: d.id,
+          at: new Date().toISOString(),
+          projectId: d.projectId,
+          taskId,
+          taskNumber,
+          taskTitle,
+          title: d.title,
+          client: clientOf(d),
+          asNote: !!asNote,
+        });
         touched.add(d.projectId);
         created++;
         log.info('tasks', `WhatsApp demand → "${d.title}"`, undefined, d.projectId);

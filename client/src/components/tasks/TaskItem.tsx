@@ -1,6 +1,6 @@
 import { useState, useMemo, useSyncExternalStore, useCallback, memo } from 'react'
 import { Link } from 'react-router-dom'
-import { Pencil, Trash2, Copy, CopyPlus, Check, Circle, Sparkles, Wand2, Loader2, Paperclip, MessageSquare } from 'lucide-react'
+import { Pencil, Trash2, Copy, CopyPlus, Check, Circle, Sparkles, Wand2, Loader2, Paperclip, MessageSquare, Play } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -58,6 +58,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
   useSyncExternalStore(_subscribe, _getSnapshot)
   const isAiImproving = _improvingTasks.has(task.id)
   const isAiResolving = hasAiSession(task.id)
+  const canRun = !!onAiResolve && !isAiResolving && (task.status === 'todo' || task.status === 'in_progress')
   const canAiImprove = !!(claudeStatus?.configured || claudeStatus?.cliAvailable)
 
   const priority = priorityVisual(task.priority)
@@ -223,16 +224,6 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
         </div>
 
         <div className="hidden group-hover:flex items-center gap-0.5 absolute top-1 right-1 bg-card rounded-md shadow-sm border px-0.5 py-0.5 z-10">
-          {onAiResolve && task.status === 'in_progress' && !isAiResolving && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-6 w-6 text-primary hover:text-primary/80" onClick={(e) => { e.stopPropagation(); onAiResolve(task) }}>
-                  <Sparkles className="h-3 w-3" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Resolve with AI — opens Claude Code to work on this task</TooltipContent>
-            </Tooltip>
-          )}
           {canAiImprove && task.status !== 'done' && (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -304,6 +295,20 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
 
       <div className="flex items-center mt-0.5 gap-1 leading-none">
         <span className="text-[10px] text-muted-foreground/50 font-mono select-all">#{task.number || '?'}</span>
+        {/* Run sits bottom-left, away from the copy/edit/delete bar at the top right: starting an agent
+            moves the task and opens a terminal, so it must not be a misclick
+            away from "copy". */}
+        {canRun && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAiResolve!(task) }}
+            onPointerDown={(e) => e.stopPropagation()}
+            title="Run with AI (Shift+click to add context or pick the agent)"
+            className="ml-1.5 hidden h-5 items-center gap-1 rounded bg-primary px-1.5 text-[10px] font-medium text-primary-foreground group-hover:flex"
+          >
+            <Play className="h-2.5 w-2.5" />
+            Run
+          </button>
+        )}
         <span className="flex-1" />
         {followUp ? (
           <span
@@ -313,7 +318,7 @@ export const TaskItem = memo(function TaskItem({ task, projectName, projectPath,
             updated {formatDistanceToNow(followUp, { addSuffix: true })}
           </span>
         ) : columnDate && (
-          <span className="text-[10px] text-muted-foreground/40">
+          <span className={'text-[10px] text-muted-foreground/40'}>
             {formatDistanceToNow(columnDate, { addSuffix: true })}
           </span>
         )}

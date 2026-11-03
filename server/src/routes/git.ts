@@ -49,6 +49,38 @@ export async function gitRoutes(app: FastifyInstance) {
   // Track last fetch time per project to avoid fetching too often
   const lastFetch = new Map<string, number>();
 
+  // What every repo of a project still holds — uncommitted files and commits
+  // not pushed — in one call. Backs the list beside the agents, which needs to
+  // say whether a finished agent left work behind without polling each repo.
+  // Reads the shared status cache; never fetches from the network.
+  app.get<{ Params: { projectId: string } }>(
+    '/api/projects/:projectId/git/pending',
+    async (request, reply) => {
+      const projects = await getProjects();
+      const project = projects.find(p => p.id === request.params.projectId);
+      if (!project?.path) return reply.status(404).send({ error: 'Project not found' });
+      const targets: { repo: string | null; path: string }[] = [
+        ...(project.isGitRepo ? [{ repo: null, path: project.path }] : []),
+        ...(project.subRepos || []).map(sub => ({ repo: sub, path: join(project.path, sub) })),
+      ];
+      const repos = await Promise.all(targets.map(async t => {
+        try {
+          const status = await gitService.getStatus(t.path);
+          return {
+            repo: t.repo,
+            branch: status.current || null,
+            uncommitted: status.files.length,
+            ahead: status.ahead || 0,
+            upstream: !!status.tracking,
+          };
+        } catch (err: any) {
+          return { repo: t.repo, branch: null, uncommitted: 0, ahead: 0, upstream: false, error: err.message as string };
+        }
+      }));
+      return { repos };
+    }
+  );
+
   app.get<{ Params: { projectId: string }; Querystring: { subrepo?: string } }>(
     '/api/projects/:projectId/git/status',
     async (request, reply) => {

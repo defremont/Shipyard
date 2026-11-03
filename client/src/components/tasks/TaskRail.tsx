@@ -1,5 +1,5 @@
 import { lazy, memo, Suspense, useCallback, useMemo, useState } from 'react'
-import { ArrowDownUp, Check, ChevronDown, ChevronRight, Play, Plus, SquareTerminal } from 'lucide-react'
+import { ArrowDownUp, ArrowRight, Check, ChevronDown, ChevronRight, Play, Plus, SquareTerminal } from 'lucide-react'
 import { useTasks, useUpdateTask, type Task } from '@/hooks/useTasks'
 import { useProjects } from '@/hooks/useProjects'
 import { useActiveMilestone, useMilestones } from '@/hooks/useMilestones'
@@ -14,6 +14,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
+import { parseSearchTerms, taskMatchesTerms } from '@/lib/taskSearch'
+import { TaskSearchBox } from './TaskSearchBox'
+import { RailGitStatus } from './RailGitStatus'
 
 // The viewer pulls in the review panel and the diff renderer; the rail is on
 // screen next to every terminal and must not carry them until a task is opened.
@@ -77,7 +80,7 @@ const RailTask = memo(function RailTask({ task, session, onOpen, onRun, onMove, 
   task: Task
   session?: TerminalTabInfo
   onOpen: (task: Task) => void
-  onRun: (task: Task, skipDialog: boolean) => void
+  onRun: (task: Task, withDialog: boolean) => void
   onMove: (task: Task, status: SectionKey) => void
   onEdit: (task: Task) => void
 }) {
@@ -122,6 +125,16 @@ const RailTask = memo(function RailTask({ task, session, onOpen, onRun, onMove, 
       </span>
       {!done && (
         <div className="absolute right-1.5 top-1.5 flex translate-x-1 items-center gap-1 opacity-0 transition-all duration-150 focus-within:translate-x-0 focus-within:opacity-100 group-hover:translate-x-0 group-hover:opacity-100">
+          {task.status !== 'in_progress' && (
+            <button
+              aria-label="Move to In Progress"
+              title="Move to In Progress without starting an agent"
+              onClick={(e) => { e.stopPropagation(); onMove(task, 'in_progress') }}
+              className="flex h-5 w-5 items-center justify-center rounded border bg-card text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ArrowRight className="h-3 w-3" />
+            </button>
+          )}
           <button
             aria-label="Mark as done"
             title="Mark as done"
@@ -132,7 +145,7 @@ const RailTask = memo(function RailTask({ task, session, onOpen, onRun, onMove, 
           </button>
           <button
             aria-label={live ? 'Open terminal' : 'Run with AI'}
-            title={live ? 'Open terminal' : 'Run with AI (Shift+click skips the dialog)'}
+            title={live ? 'Open terminal' : 'Run with AI (Shift+click to add context or pick the agent)'}
             onClick={(e) => {
               e.stopPropagation()
               if (live) onOpen(task)
@@ -187,10 +200,16 @@ export function TaskRail({ projectId }: { projectId: string }) {
   const [viewing, setViewing] = useState<Task | null>(null)
   const [editing, setEditing] = useState<Task | null>(null)
   const [creating, setCreating] = useState(false)
+  const [search, setSearch] = useState('')
+  const terms = useMemo(() => parseSearchTerms(search), [search])
+  const filtering = terms.length > 0
 
   const grouped = useMemo(() => {
     const result: Record<SectionKey, Task[]> = { in_progress: [], todo: [], backlog: [], done: [] }
-    for (const task of tasks || []) result[task.status].push(task)
+    for (const task of tasks || []) {
+      if (filtering && !taskMatchesTerms(task, terms)) continue
+      result[task.status].push(task)
+    }
     const compare = COMPARATORS[sort]
     result.in_progress.sort(compare)
     result.todo.sort(compare)
@@ -198,7 +217,8 @@ export function TaskRail({ projectId }: { projectId: string }) {
     // Done is always newest first: the rail only shows the recent end of it.
     result.done.sort(byDoneAt)
     return result
-  }, [tasks, sort])
+  }, [tasks, sort, terms, filtering])
+  const matchCount = filtering ? SECTIONS.reduce((n, s) => n + grouped[s.key].length, 0) : undefined
 
   const sessionByTask = useMemo(() => {
     const map = new Map<string, TerminalTabInfo>()
@@ -217,9 +237,10 @@ export function TaskRail({ projectId }: { projectId: string }) {
     setViewing(task)
   }
 
-  const handleRun = (task: Task, skipDialog: boolean) => {
-    if (skipDialog) runAiResolve(task)
-    else window.dispatchEvent(new CustomEvent('shipyard:run-task-with-agent', { detail: task }))
+  // Running straight away is the common case; Shift adds context or picks the agent.
+  const handleRun = (task: Task, withDialog: boolean) => {
+    if (withDialog) window.dispatchEvent(new CustomEvent('shipyard:run-task-with-agent', { detail: task }))
+    else runAiResolve(task)
   }
 
   const handleMove = useCallback((task: Task, status: SectionKey) => {
@@ -235,13 +256,14 @@ export function TaskRail({ projectId }: { projectId: string }) {
     <aside className="anim-slide flex w-[312px] shrink-0 flex-col border-r bg-background">
       <div className="flex h-9 shrink-0 items-center gap-2 border-b px-3">
         <span className="text-[13px] font-semibold">Tasks</span>
-        <span className="truncate text-xs text-muted-foreground/70">{milestoneName}</span>
+        <span className="min-w-0 truncate text-xs text-muted-foreground/70">{milestoneName}</span>
+        <TaskSearchBox value={search} onChange={setSearch} resultCount={matchCount} className="ml-auto" inputClassName="w-32" />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               aria-label="Sort tasks"
               title={`Sorted by ${SORTS.find(s => s.key === sort)?.label.toLowerCase()}`}
-              className="ml-auto flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <ArrowDownUp className="h-3.5 w-3.5" />
             </button>
@@ -267,9 +289,10 @@ export function TaskRail({ projectId }: { projectId: string }) {
       <div className="scrollbar-dark min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {SECTIONS.map(section => {
           const list = grouped[section.key]
-          if (list.length === 0 && section.key !== 'in_progress' && section.key !== 'todo') return null
-          const isOpen = open[section.key]
-          const shown = section.key === 'done' ? list.slice(0, DONE_LIMIT) : list
+          if (list.length === 0 && (filtering || (section.key !== 'in_progress' && section.key !== 'todo'))) return null
+          // A search opens every section with a match: a hit must never hide in a closed group.
+          const isOpen = filtering || open[section.key]
+          const shown = section.key === 'done' && !filtering ? list.slice(0, DONE_LIMIT) : list
           return (
             <div key={section.key}>
               <button
@@ -302,7 +325,12 @@ export function TaskRail({ projectId }: { projectId: string }) {
             </div>
           )
         })}
+        {filtering && matchCount === 0 && (
+          <div className="px-2 py-3 text-[11px] text-muted-foreground/60">No task matches “{search}”</div>
+        )}
       </div>
+
+      {project && <RailGitStatus project={project} />}
 
       {(viewing || editing || creating) && (
         <Suspense fallback={null}>

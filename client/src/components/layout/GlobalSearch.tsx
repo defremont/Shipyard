@@ -225,11 +225,12 @@ export function GlobalSearch() {
     setOpen(false)
   }, [])
 
-  // Hand the task to AiResolveHost — the palette unmounts on close, so the
-  // agent dialog cannot live here.
-  const runWithAgent = useCallback((task: Task) => {
+  // Hand the task to AiResolveHost — the palette unmounts on close, so
+  // neither the run nor the agent dialog can live here. Plain click runs;
+  // Shift opens the dialog for context or another agent.
+  const runWithAgent = useCallback((task: Task, withDialog = false) => {
     close()
-    window.dispatchEvent(new CustomEvent('shipyard:run-task-with-agent', { detail: task }))
+    window.dispatchEvent(new CustomEvent(withDialog ? 'shipyard:run-task-with-agent' : 'shipyard:run-task', { detail: task }))
   }, [close])
 
   const runItem = useCallback((index: number) => {
@@ -432,9 +433,9 @@ export function GlobalSearch() {
                       )}
                       <span className={`text-sm truncate flex-1 ${task.status === 'done' ? 'text-muted-foreground' : ''}`}>{task.title}</span>
                       <button
-                        title="Run with an agent"
+                        title="Run with AI (Shift+click to add context or pick the agent)"
                         className="shrink-0 rounded p-1 text-primary opacity-0 group-hover/task:opacity-100 hover:bg-primary/10 transition-opacity"
-                        onClick={(e) => { e.stopPropagation(); runWithAgent(task) }}
+                        onClick={(e) => { e.stopPropagation(); runWithAgent(task, e.shiftKey) }}
                       >
                         <Sparkles className="h-3.5 w-3.5" />
                       </button>

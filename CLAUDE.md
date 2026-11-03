@@ -119,7 +119,7 @@ interface Project {
 **Projetos**: GET /api/projects, PATCH /:id, POST scan/add/remove/refresh
 **Milestones**: GET/POST /:id/milestones, PUT/DELETE /:id/milestones/:mid
 **Tarefas**: GET /api/tasks/all, GET/POST /:id/tasks, PUT/DELETE /:id/tasks/:tid, POST /:id/tasks/reorder, POST /:id/tasks/replace, POST /:id/tasks/:tid/note, GET /:id/tasks/forecast, POST /:id/tasks/effort/apply
-**Git**: GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
+**Git**: GET /:id/git/pending (todos os repos do projeto), GET /:id/git/status|diff|log|branches|commit-diff|main-commit|task-review, POST /:id/git/stage|stage-all|unstage|commit|push|pull|discard|discard-all (all accept optional `subrepo` param for multi-repo projects)
 **Files**: GET /:id/files/tree|content, PUT /:id/files/content, DELETE /:id/files, POST /:id/files/open-folder
 **Terminais**: POST /api/terminals/launch|folder (nativos), GET/POST/PATCH/DELETE /api/terminal/sessions (integrado; PATCH renomeia a aba; POST aceita `resume` + `resumeTitle`), GET /api/terminal/conversations?projectId= (conversas do Claude para retomar), POST /api/terminal/sessions/:id/clipboard-image, WS /ws/terminal/:id, GET /api/terminal/events (SSE: estado de todas as sessoes), POST /api/terminal/hook/:id (hooks do Claude Code)
 **Claude AI**: GET /api/claude/status|usage, POST config|config/test|chat(SSE)|analyze-task|classify-task-effort|summarize, DELETE config
@@ -147,7 +147,7 @@ interface Project {
     nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
 **Busca**: GET /api/search/files|content (`q`, `projectId?` restringe, `prefer?` = projeto aberto, ranqueia primeiro; content aceita `caseSensitive`)
-**WhatsApp inbox**: GET/PUT/DELETE /api/inbox (`{ url, token }`; o PUT ja testa com um sync), POST /api/inbox/sync
+**WhatsApp inbox**: GET/PUT/DELETE /api/inbox (`{ url, token }`; o PUT ja testa com um sync), POST /api/inbox/sync, GET /api/inbox/deliveries (`?since=`)
 **Shipyard Cloud**: GET /api/cloud/status, POST /api/cloud/signup|login|logout|sync
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
 **Worktrees**: GET /api/worktrees (config + lista), PUT /api/worktrees (`{ enabled?, basePath? }`),
@@ -231,9 +231,18 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   A ordem de In Progress / Inbox / Backlog vem do menu de ordenacao do
   cabecalho (`shipyard:task-rail-sort`: `updated` — default, ultima atualizada
   primeiro —, `priority` ou `board`, a ordem manual do kanban); Done e sempre
-  a mais recente primeiro. Mover de coluna: botao direito na linha ("Move
-  to") ou o check que aparece no hover (Done). Usa `useUpdateTask`, o mesmo
-  caminho do board
+  a mais recente primeiro. Mover de coluna: no hover, a seta (→ In Progress,
+  sem abrir agente) e o check (Done); o resto no botao direito ("Move to").
+  Usa `useUpdateTask`, o mesmo caminho do board
+- A TaskRail tem **busca** (`TaskSearchBox`, mesma regra do board: `#97` casa
+  so o numero). Com filtro, toda secao com resultado abre e o Done nao corta
+- **Rodape de git da TaskRail** (`RailGitStatus`): responde "o agente fez
+  commit e push?". Uma linha quando tudo esta limpo; senao uma linha por repo
+  com arquivos sem commit, commits sem push ou branch sem upstream. Le
+  `GET /:id/git/pending` (raiz + `subRepos` numa chamada, so o cache de
+  `gitService.getStatus`, nunca fetch) a cada 20s e de novo quando um agente
+  do projeto para. Clicar abre o Source Control naquele repo
+  (`shipyard:select-git-repo`)
 - **Abrir uma sessao para uma task move a task para In Progress**, no server
   (`POST /api/terminal/sessions` com `taskId`), seja qual for o botao que
   iniciou. Nao depender do agente chamar `start_task`
@@ -310,6 +319,18 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   pull jogaria qualquer secao nova dentro do prompt). Shipyard Cloud leva a
   task inteira. `replaceTasks` copia os dois do `existing`
 - A busca (board, All Tasks, Ctrl+K e `search_tasks`) tambem procura neles
+
+### Historico da tarefa (aba History do TaskViewer)
+- `lib/taskHistory.ts` (`buildTaskHistory`) monta a linha do tempo do mais novo
+  para o mais antigo a partir do que a task ja guarda: `createdAt`, volta ao
+  Inbox (`inboxAt` depois da criacao), `inProgressAt`, `doneAt` (com a 1a linha
+  de `resolution`), cada `— Note` do prompt (complemento do WhatsApp vira
+  "Client follow-up"), anexos do inbox e comentarios do board, e "Edited"
+  quando `updatedAt` passa de tudo isso. Status movido duas vezes so mostra a
+  ultima vez: a task guarda um timestamp por etapa
+- A aba existe em toda task. Aberta com complemento ainda nao visto
+  (`needsReview` + `followUpAt`), o viewer **comeca no History**
+- Depende do mesmo formato `— Note YYYY-MM-DD HH:MM` do feed de atividade
 
 ### Busca de tarefas (filtro do board)
 - `lib/taskSearch.ts` e a fonte unica do filtro por texto: `parseSearchTerms`
@@ -912,14 +933,21 @@ Os timestamps sao cascading — etapas posteriores preenchem as anteriores autom
 - `aiManagePrompt.ts`: monta prompt para Claude gerenciar MULTIPLAS tarefas a partir de texto livre
 - Auto-close: TerminalPanel detecta quando sessao AI termina e marca task como done se Claude nao o fez
 - Prompt reforça que Claude DEVE atualizar status da task via MCP ao concluir
-- "Run with AI" abre antes o `AiResolveDialog`, onde o usuario pode escrever uma
-  decisao ou contexto extra so para aquela execucao. O texto vai no corpo de
+- **"Run" roda direto** (desde a v1.34: na gravacao de 2026-11-03 o usuario
+  disse que quase nunca usa contexto extra). **Shift+clique** abre o
+  `AiResolveDialog`, onde se escreve uma decisao ou contexto so para aquela
+  execucao e se escolhe o agente. O texto vai no corpo de
   `POST /:id/tasks/:tid/ai-resolve` e vira a secao `## User decision feedback`
-  do prompt, declarada como instrucao que prevalece sobre a descricao.
-  Shift+clique pula o dialogo. Sem feedback, o prompt sai identico ao anterior
-- O mesmo dialogo tem o seletor de agente. `useAiResolve` e o unico caminho que
-  monta o prompt e dispara `shipyard:open-terminal`; a paleta (Ctrl+K) usa
-  `AiResolveHost`, montado no Layout, porque ela desmonta ao fechar
+  do prompt, declarada como instrucao que prevalece sobre a descricao. Vale no
+  board, na TaskRail e na paleta
+- `useAiResolve` e o unico caminho que monta o prompt e dispara
+  `shipyard:open-terminal`. A paleta (Ctrl+K) desmonta ao fechar, entao manda
+  evento para o `AiResolveHost` (montado no Layout): `shipyard:run-task` roda,
+  `shipyard:run-task-with-agent` abre o dialogo
+- No cartao do board o **Run fica embaixo a esquerda**, ao lado do numero, e
+  aparece no hover para tarefas `todo` e `in_progress`. Nao volta para a barra
+  de icones do canto (copiar/duplicar/editar/apagar): rodar move a tarefa e abre
+  um agente, e nao pode estar a um clique errado de "copiar"
 
 ### Agentes de codigo (qual CLI roda a task)
 - `agentRegistry.ts` e a fonte unica: 6 builtins (Claude Code, Codex, Aider,
@@ -1190,6 +1218,13 @@ globais sao mantidas) — usuarios reconectam cada milestone manualmente.
   `disconnect` reabrem. Aviso que chega no meio de um sync marca `rerun`
 - Complemento entregue como nota volta no ack com `asNote: true`; o inbox
   mostra "nota na tarefa #N" em vez de "tarefa #N"
+- **Aviso de chegada**: cada entrega fica numa lista em memoria
+  (`getDeliveries`, as 30 ultimas: tarefa, numero, titulo, cliente lido do
+  `Cliente:` do context, nota ou tarefa nova). `useInboxArrivals` (no Layout)
+  le `GET /api/inbox/deliveries` a cada 10s e mostra um toast "Follow-up on #97
+  · Canoe" com **Open**, que abre a aba do projeto e a tarefa. O que ja estava
+  na lista quando a janela abriu nao vira toast. Antes, achar onde a demanda
+  entrou exigia voltar a area web, abrir "Enviadas" e procurar o numero
 - Do outro lado a demanda levada fica `claimed` e so vira `sent` com o ack (sem
   ack, volta a `approved` em 10 min). Aqui `imported` (demandId → task) e
   gravado **antes** do ack: um ack perdido reenvia a demanda, e ela so e

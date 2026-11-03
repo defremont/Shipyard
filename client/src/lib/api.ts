@@ -4,6 +4,16 @@ interface RequestOptions extends RequestInit {
   timeout?: number;
 }
 
+/** One repo of a project and what it still holds (GET /git/pending). `repo` null = the project root. */
+export interface GitPendingRepo {
+  repo: string | null
+  branch: string | null
+  uncommitted: number
+  ahead: number
+  upstream: boolean
+  error?: string
+}
+
 export interface Agent {
   id: string
   name: string
@@ -170,6 +180,19 @@ export interface InboxStatus {
   lastError: string | null
   lastCreated: number
   imported: number
+}
+
+/** A demand the last syncs turned into a task or a note (GET /inbox/deliveries). */
+export interface InboxDelivery {
+  demandId: string
+  at: string
+  projectId: string
+  taskId: string
+  taskNumber?: number
+  taskTitle: string
+  title: string
+  client?: string
+  asNote: boolean
 }
 
 export interface DeployLinkInput {
@@ -503,6 +526,7 @@ export const api = {
     ),
 
   // Git
+  getGitPending: (projectId: string) => request<{ repos: GitPendingRepo[] }>(`/projects/${projectId}/git/pending`),
   getGitStatus: (projectId: string, subrepo?: string) => request<any>(`/projects/${projectId}/git/status${subrepo ? `?subrepo=${encodeURIComponent(subrepo)}` : ''}`),
   getGitDiff: (projectId: string, file?: string, staged = false, subrepo?: string) => request<{ diff: string }>(`/projects/${projectId}/git/diff?${file ? `file=${encodeURIComponent(file)}&` : ''}staged=${staged}${subrepo ? `&subrepo=${encodeURIComponent(subrepo)}` : ''}`),
   getGitFileAtRef: (projectId: string, file: string, ref = 'HEAD', subrepo?: string) => request<{ content: string }>(`/projects/${projectId}/git/show?file=${encodeURIComponent(file)}&ref=${encodeURIComponent(ref)}${subrepo ? `&subrepo=${encodeURIComponent(subrepo)}` : ''}`),
@@ -635,6 +659,7 @@ export const api = {
 
   // WhatsApp inbox
   getInboxStatus: () => request<InboxStatus>('/inbox'),
+  getInboxDeliveries: (since?: string) => request<{ deliveries: InboxDelivery[] }>(`/inbox/deliveries${since ? `?since=${encodeURIComponent(since)}` : ''}`),
   configureInbox: (url: string, token: string) =>
     request<InboxStatus & { created: number }>('/inbox', {
       method: 'PUT',

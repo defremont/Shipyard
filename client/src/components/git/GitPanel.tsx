@@ -540,6 +540,21 @@ export function GitPanel({ projectId, subRepos, isGitRepo, onOpenInEditor, onOpe
     saveRepo(projectId, key)
   }
 
+  // Another view (the list beside the agents) asks for a repo of this project.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ projectId: string; repo: string | null }>).detail
+      if (detail?.projectId !== projectId) return
+      const key = detail.repo ?? undefined
+      if (repoKeys.some(k => k === key)) {
+        setActiveRepo(key)
+        saveRepo(projectId, key)
+      }
+    }
+    window.addEventListener('shipyard:select-git-repo', handler)
+    return () => window.removeEventListener('shipyard:select-git-repo', handler)
+  }, [projectId, repoKeys])
+
   // If only one repo (root or single sub-repo), render directly without a picker
   if (repoTabs.length <= 1) {
     return <SingleRepoPanel projectId={projectId} subrepo={repoTabs[0]?.key} onOpenInEditor={onOpenInEditor} onOpenDiffInEditor={onOpenDiffInEditor} activeFilePath={activeFilePath} />

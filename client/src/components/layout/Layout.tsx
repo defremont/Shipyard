@@ -16,6 +16,7 @@ import { useIntegrationAutoPull } from '@/hooks/useIntegrationAutoPull'
 import { useElectronMenu } from '@/hooks/useElectronMenu'
 import { useAppUpdate } from '@/hooks/useAppUpdate'
 import { useGlobalShortcuts } from '@/hooks/useGlobalShortcuts'
+import { useInboxArrivals } from '@/hooks/useInboxArrivals'
 import { ShortcutsOverlay } from './ShortcutsOverlay'
 import { AppTitleBar } from './AppTitleBar'
 
@@ -24,6 +25,7 @@ function LayoutInner() {
   useElectronMenu()
   useAppUpdate()
   useGlobalShortcuts()
+  useInboxArrivals()
   // Panels that took the whole space hide their neighbours with `hidden`
   // instead of unmounting them — the board, the editor and the terminals keep
   // their state. With the terminal full-size the workspace shrinks to its
