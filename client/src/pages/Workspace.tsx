@@ -92,6 +92,7 @@ export function Workspace() {
         editor.openFile(pending.path, pending.name, pending.extension, '', {
           diffMode: pending.diffMode,
           subrepo: pending.subrepo,
+          reveal: pending.reveal,
         })
         setWorkspaceMode('editor')
       }

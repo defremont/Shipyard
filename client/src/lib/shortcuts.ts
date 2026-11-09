@@ -44,6 +44,17 @@ export const SHORTCUTS: ShortcutGroup[] = [
     ],
   },
   {
+    scope: 'Search in files (Ctrl+Shift+F)',
+    items: [
+      { keys: 'Alt+C', label: 'Match case' },
+      { keys: 'Alt+W', label: 'Match whole word' },
+      { keys: 'Alt+R', label: 'Use regular expression' },
+      { keys: 'Alt+I', label: 'Include node_modules, build output and ignored files' },
+      { keys: 'Alt+P', label: 'Only the open project' },
+      { keys: 'Enter', label: 'Open the file at the match' },
+    ],
+  },
+  {
     scope: 'Editor',
     items: [
       { keys: 'Ctrl+S', label: 'Save the open file' },

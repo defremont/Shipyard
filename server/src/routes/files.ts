@@ -4,7 +4,7 @@ import { join, resolve, extname, relative, sep, dirname, basename } from 'path';
 import { getProjects } from '../services/projectDiscovery.js';
 import { openFolder } from '../services/terminalLauncher.js';
 import * as log from '../services/logService.js';
-import { searchFileNames, grepProject, projectRanks, orderByRank, mapLimit, snippet, invalidateFileIndex, type ContentResult, type ContentMatch } from '../services/fileSearch.js';
+import { searchFileNames, searchContent, buildMatcher, invalidateFileIndex, SEARCH_EXCLUDED_DIRS } from '../services/fileSearch.js';
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2MB
 
@@ -331,148 +331,50 @@ export async function fileRoutes(app: FastifyInstance) {
       const results = await searchFileNames(targetProjects, query, {
         limit,
         preferId: request.query.prefer || filterProjectId,
-        filter: { ignore: IGNORE_NAMES, isVisibleDotfile },
+        filter: { ignore: SEARCH_EXCLUDED_DIRS, isVisibleDotfile },
       });
       return { results };
     }
   );
 
-  // Search file contents across projects
-  app.get<{ Querystring: { q: string; projectId?: string; prefer?: string; limit?: string; caseSensitive?: string } }>(
+  // Search file contents across projects. Folders like node_modules and
+  // dist stay out unless `includeIgnored`; see searchContent.
+  app.get<{ Querystring: { q: string; projectId?: string; prefer?: string; limit?: string; caseSensitive?: string; wholeWord?: string; regex?: string; includeIgnored?: string } }>(
     '/api/search/content',
     async (request, reply) => {
       const query = (request.query.q || '').trim();
       if (!query || query.length < 2) {
-        return { results: [] };
+        return { results: [], totalMatches: 0, truncated: false, elapsedMs: 0 };
       }
 
-      const limit = Math.min(parseInt(request.query.limit || '50', 10), 100);
-      const caseSensitive = request.query.caseSensitive === 'true';
+      const limit = Math.min(parseInt(request.query.limit || '50', 10) || 50, 100);
       const filterProjectId = request.query.projectId;
       const projects = await getProjects();
-      const ranks = projectRanks(projects, request.query.prefer || filterProjectId);
-      // The open project and its client are searched first and listed first.
-      const targetProjects = orderByRank(
-        filterProjectId ? projects.filter(p => p.id === filterProjectId) : projects,
-        ranks,
-      );
-
-      const MAX_DEPTH = 6;
-      const MAX_FILE_SIZE_SEARCH = 512 * 1024; // 512KB for content search
-
-      const MAX_TOTAL_MATCHES = 500;
-      const MAX_MATCHES_PER_FILE = 20;
-
-      let searchRegex: RegExp;
+      const targetProjects = filterProjectId ? projects.filter(p => p.id === filterProjectId) : projects;
+      const flags = {
+        query,
+        caseSensitive: request.query.caseSensitive === 'true',
+        wholeWord: request.query.wholeWord === 'true',
+        regex: request.query.regex === 'true',
+        includeIgnored: request.query.includeIgnored === 'true',
+      };
       try {
-        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        searchRegex = new RegExp(escaped, caseSensitive ? 'g' : 'gi');
-      } catch {
-        return { results: [] };
+        buildMatcher(flags);
+      } catch (err: any) {
+        return reply.status(400).send({ error: err.message });
       }
 
-      // Additional ignore patterns for content search (large/binary files)
-      const CONTENT_IGNORE_EXT = new Set([
-        '.lock', '.map', '.min.js', '.min.css', '.bundle.js',
-        '.woff', '.woff2', '.ttf', '.eot', '.otf',
-        '.png', '.jpg', '.jpeg', '.gif', '.svg', '.webp', '.ico', '.bmp',
-        '.pdf', '.zip', '.gz', '.tar', '.rar', '.7z',
-        '.mp3', '.mp4', '.avi', '.mov', '.mkv', '.webm',
-        '.exe', '.dll', '.so', '.dylib', '.bin',
-        '.sqlite', '.db',
-      ]);
+      // The palette aborts a request when the query changes: stop the git
+      // processes instead of finishing a search nobody will read.
+      const controller = new AbortController();
+      reply.raw.on('close', () => { if (!reply.raw.writableFinished) controller.abort(); });
 
-      // Fallback for projects without git at the root. Each walk fills its own
-      // `out`, so walks running side by side never mix their results.
-      async function searchDir(dirPath: string, relPath: string, projectId: string, projectName: string, depth: number, out: { results: ContentResult[]; matches: number }) {
-        const { results } = out;
-        if (depth > MAX_DEPTH || results.length >= limit || out.matches >= MAX_TOTAL_MATCHES) return;
-        try {
-          const entries = await readdir(dirPath, { withFileTypes: true });
-          for (const entry of entries) {
-            if (results.length >= limit || out.matches >= MAX_TOTAL_MATCHES) break;
-            if (IGNORE_NAMES.has(entry.name)) continue;
-            if (entry.name.startsWith('.') && !isVisibleDotfile(entry.name)) continue;
-
-            const entryRelPath = relPath ? `${relPath}/${entry.name}` : entry.name;
-
-            if (entry.isDirectory()) {
-              await searchDir(join(dirPath, entry.name), entryRelPath, projectId, projectName, depth + 1, out);
-            } else if (entry.isFile()) {
-              const ext = extname(entry.name).toLowerCase();
-              if (CONTENT_IGNORE_EXT.has(ext)) continue;
-
-              const mime = getMimeHint(ext, entry.name);
-              if (mime === 'application/octet-stream') continue;
-              if (mime.startsWith('image/')) continue;
-
-              try {
-                const filePath = join(dirPath, entry.name);
-                const st = await stat(filePath);
-                if (st.size > MAX_FILE_SIZE_SEARCH || st.size === 0) continue;
-
-                const content = await readFile(filePath, 'utf8');
-                const lines = content.split('\n');
-                const fileMatches: ContentMatch[] = [];
-
-                for (let i = 0; i < lines.length; i++) {
-                  if (fileMatches.length >= MAX_MATCHES_PER_FILE) break;
-                  searchRegex.lastIndex = 0;
-                  const match = searchRegex.exec(lines[i]);
-                  if (match) {
-                    fileMatches.push({
-                      line: i + 1,
-                      text: snippet(lines[i], match.index, query.length),
-                      column: match.index,
-                    });
-                  }
-                }
-
-                if (fileMatches.length > 0) {
-                  results.push({
-                    file: entry.name,
-                    filePath: entryRelPath,
-                    projectId,
-                    projectName,
-                    extension: ext || undefined,
-                    matches: fileMatches,
-                  });
-                  out.matches += fileMatches.length;
-                }
-              } catch {
-                // Skip files we can't read (binary, permissions, etc)
-              }
-            }
-          }
-        } catch {
-          // Skip directories we can't read
-        }
-      }
-
-      // git grep answers a repo in milliseconds and already skips ignored and
-      // binary files. Projects without git at the root fall back to the walk.
-      const perProject = await mapLimit(targetProjects, 6, async project => {
-        const grepped = await grepProject(project, query, {
-          caseSensitive,
-          maxFiles: limit,
-          maxPerFile: MAX_MATCHES_PER_FILE,
-        });
-        if (grepped) return grepped;
-        const out = { results: [] as ContentResult[], matches: 0 };
-        await searchDir(project.path, '', project.id, project.name, 0, out);
-        return out.results;
+      return searchContent(targetProjects, flags, {
+        limit,
+        preferId: request.query.prefer || filterProjectId,
+        filter: { ignore: SEARCH_EXCLUDED_DIRS, isVisibleDotfile },
+        signal: controller.signal,
       });
-
-      const ordered: ContentResult[] = [];
-      let total = 0;
-      for (const list of perProject) {
-        for (const result of list) {
-          if (ordered.length >= limit || total >= MAX_TOTAL_MATCHES) break;
-          ordered.push(result);
-          total += result.matches.length;
-        }
-      }
-      return { results: ordered, totalMatches: total };
     }
   );
 

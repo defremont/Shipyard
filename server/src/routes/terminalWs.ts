@@ -27,8 +27,8 @@ import { openFolder, revealInFolder } from '../services/terminalLauncher.js';
 
 /** Files the system would run, not show: these are only revealed in their folder. */
 const RUNNABLE_EXT = /\.(?:exe|com|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|lnk|url|msi|msp|scr|cpl|jar|reg|pif|appref-ms|sh|app|command)$/i;
-import { searchFileNames } from '../services/fileSearch.js';
-import { IGNORE_NAMES, isVisibleDotfile } from './files.js';
+import { searchFileNames, SEARCH_EXCLUDED_DIRS } from '../services/fileSearch.js';
+import { isVisibleDotfile } from './files.js';
 import { randomUUID } from 'crypto';
 import { DATA_DIR } from '../services/dataDir.js';
 
@@ -100,7 +100,7 @@ export async function terminalWsRoutes(app: FastifyInstance) {
         if (!/[\\/]/.test(raw)) {
           const project = (await getProjects()).find(p => p.id === session.projectId);
           const hits = project
-            ? (await searchFileNames([project], raw, { limit: 10, filter: { ignore: IGNORE_NAMES, isVisibleDotfile } }))
+            ? (await searchFileNames([project], raw, { limit: 10, filter: { ignore: SEARCH_EXCLUDED_DIRS, isVisibleDotfile } }))
                 .filter(r => r.type === 'file' && r.name.toLowerCase() === raw.toLowerCase())
             : [];
           if (hits[0]) return { opened: 'editor', projectId: hits[0].projectId, path: hits[0].path, ...(hits.length > 1 ? { ambiguous: hits.length } : {}) };

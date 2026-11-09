@@ -10,6 +10,24 @@ export interface EditorTab {
   needsFetch: boolean
   diffMode?: 'staged' | 'unstaged'
   subrepo?: string
+  /** Where to put the cursor once the editor shows the file (a search hit).
+   *  `nonce` makes the same spot count again on a second open. */
+  reveal?: EditorReveal
+}
+
+export interface EditorReveal {
+  line: number
+  /** 0-based character index in the line. */
+  column?: number
+  /** Characters to select from `column`. */
+  length?: number
+  nonce: number
+}
+
+export interface OpenFileOptions {
+  diffMode?: 'staged' | 'unstaged'
+  subrepo?: string
+  reveal?: Omit<EditorReveal, 'nonce'>
 }
 
 interface PersistedTab {
@@ -91,15 +109,16 @@ export function useEditorTabs(projectId: string) {
     persistActiveTab(projectId, activeTabPath)
   }, [projectId, activeTabPath])
 
-  const openFile = useCallback((path: string, name: string, extension: string, content: string, options?: { diffMode?: 'staged' | 'unstaged'; subrepo?: string }) => {
+  const openFile = useCallback((path: string, name: string, extension: string, content: string, options?: OpenFileOptions) => {
+    const reveal = options?.reveal ? { ...options.reveal, nonce: Date.now() } : undefined
     setTabs(prev => {
       const existing = prev.find(t => t.path === path)
       if (existing) {
         // Update diff mode if changed
         if (options?.diffMode !== existing.diffMode) {
-          return prev.map(t => t.path === path ? { ...t, diffMode: options?.diffMode, subrepo: options?.subrepo } : t)
+          return prev.map(t => t.path === path ? { ...t, diffMode: options?.diffMode, subrepo: options?.subrepo, reveal } : t)
         }
-        return prev
+        return reveal ? prev.map(t => t.path === path ? { ...t, reveal } : t) : prev
       }
       return [...prev, {
         path,
@@ -111,6 +130,7 @@ export function useEditorTabs(projectId: string) {
         needsFetch: content === '',
         diffMode: options?.diffMode,
         subrepo: options?.subrepo,
+        reveal,
       }]
     })
     setActiveTabPath(path)

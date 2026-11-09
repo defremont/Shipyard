@@ -1,12 +1,12 @@
 import { createContext, useCallback, useContext, type ReactNode } from 'react'
 import { useTabs } from './useTabs'
-import { useEditorTabs, type EditorTab } from './useEditorTabs'
+import { useEditorTabs, type EditorTab, type OpenFileOptions } from './useEditorTabs'
 
 interface EditorTabsContextValue {
   projectId: string
   tabs: EditorTab[]
   activeTabPath: string | null
-  openFile: (path: string, name: string, extension: string, content: string, options?: { diffMode?: 'staged' | 'unstaged'; subrepo?: string }) => void
+  openFile: (path: string, name: string, extension: string, content: string, options?: OpenFileOptions) => void
   initContent: (path: string, content: string) => void
   closeTab: (path: string) => void
   setContent: (path: string, content: string) => void
@@ -14,7 +14,7 @@ interface EditorTabsContextValue {
   setActiveTab: (path: string) => void
   hasDirtyTabs: boolean
   /** Open a file in the editor; if a different project is active, navigate to it first. */
-  openFileForProject: (projectId: string, path: string, name: string, extension: string, options?: { diffMode?: 'staged' | 'unstaged'; subrepo?: string }) => void
+  openFileForProject: (projectId: string, path: string, name: string, extension: string, options?: OpenFileOptions) => void
 }
 
 const EditorTabsContext = createContext<EditorTabsContextValue | null>(null)
@@ -25,7 +25,7 @@ export function EditorTabsProvider({ children }: { children: ReactNode }) {
   const editor = useEditorTabs(projectId)
 
   const openFileForProject = useCallback(
-    (targetProjectId: string, path: string, name: string, extension: string, options?: { diffMode?: 'staged' | 'unstaged'; subrepo?: string }) => {
+    (targetProjectId: string, path: string, name: string, extension: string, options?: OpenFileOptions) => {
       if (targetProjectId === projectId) {
         editor.openFile(path, name, extension, '', options)
         // Opening a file is an explicit intent to see it: flip the workspace

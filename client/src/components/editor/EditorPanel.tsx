@@ -324,6 +324,7 @@ export function EditorPanel({
                   extension={tab.extension}
                   onChange={(val) => onContentChange(tab.path, val)}
                   onSave={handleSave}
+                  reveal={tab.path === activeTabPath ? tab.reveal : undefined}
                   readOnly={tab.extension ? ['application/octet-stream'].includes(tab.extension) : false}
                 />
               )}

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import CodeMirror from '@uiw/react-codemirror'
 import { keymap, EditorView } from '@codemirror/view'
 import { javascript } from '@codemirror/lang-javascript'
@@ -12,7 +12,8 @@ import { sql } from '@codemirror/lang-sql'
 import { xml } from '@codemirror/lang-xml'
 import { yaml } from '@codemirror/lang-yaml'
 import { oneDark } from '@codemirror/theme-one-dark'
-import type { Extension } from '@codemirror/state'
+import { EditorSelection, type Extension } from '@codemirror/state'
+import type { EditorReveal } from '@/hooks/useEditorTabs'
 
 interface CodeMirrorEditorProps {
   value: string
@@ -20,6 +21,8 @@ interface CodeMirrorEditorProps {
   onChange: (value: string) => void
   onSave: () => void
   readOnly?: boolean
+  /** Select this spot and scroll it to the middle (a search hit). */
+  reveal?: EditorReveal
 }
 
 function getLanguageExtension(ext: string): Extension[] {
@@ -52,8 +55,27 @@ function getLanguageExtension(ext: string): Extension[] {
   return factory ? [factory()] : []
 }
 
-export function CodeMirrorEditor({ value, extension, onChange, onSave, readOnly }: CodeMirrorEditorProps) {
+export function CodeMirrorEditor({ value, extension, onChange, onSave, readOnly, reveal }: CodeMirrorEditorProps) {
   const [wordWrap, setWordWrap] = useState(false)
+  // The view is created in the library's own effect, after ours ran once.
+  const [view, setView] = useState<EditorView | null>(null)
+  const revealed = useRef(0)
+
+  // Runs again when the content arrives: the tab can mount before its file.
+  useEffect(() => {
+    if (!view || !reveal || revealed.current === reveal.nonce) return
+    const doc = view.state.doc
+    if (reveal.line > doc.lines) return
+    revealed.current = reveal.nonce
+    const line = doc.line(Math.max(1, reveal.line))
+    const from = Math.min(line.from + (reveal.column ?? 0), line.to)
+    const to = Math.min(from + (reveal.length ?? 0), line.to)
+    view.dispatch({
+      selection: EditorSelection.range(from, to),
+      effects: EditorView.scrollIntoView(from, { y: 'center' }),
+    })
+    view.focus()
+  }, [view, reveal, value])
 
   const handleChange = useCallback((val: string) => {
     onChange(val)
@@ -86,6 +108,7 @@ export function CodeMirrorEditor({ value, extension, onChange, onSave, readOnly 
 
   return (
     <CodeMirror
+      onCreateEditor={setView}
       value={value}
       height="100%"
       theme={oneDark}

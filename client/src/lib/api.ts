@@ -324,6 +324,31 @@ function searchParams(params: Record<string, string | undefined>): string {
   return qs.toString()
 }
 
+export interface ContentSearchOptions {
+  caseSensitive?: boolean
+  wholeWord?: boolean
+  regex?: boolean
+  /** Also search node_modules, dist, build and git-ignored files. */
+  includeIgnored?: boolean
+}
+
+export interface ContentSearchMatch { line: number; text: string; column: number; length: number }
+export interface ContentSearchResult {
+  file: string
+  filePath: string
+  projectId: string
+  projectName: string
+  extension?: string
+  matches: ContentSearchMatch[]
+}
+export interface ContentSearchResponse {
+  results: ContentSearchResult[]
+  totalMatches: number
+  truncated: boolean
+  timedOut: boolean
+  elapsedMs: number
+}
+
 async function request<T>(path: string, options?: RequestOptions): Promise<T> {
   const { timeout, ...fetchOptions } = options || {};
   const headers: Record<string, string> = {};
@@ -801,9 +826,17 @@ export const api = {
       `/search/files?${searchParams({ q: query, projectId: opts.projectId, prefer: opts.prefer })}`,
       { signal: opts.signal },
     ),
-  searchContent: (query: string, opts: { projectId?: string; prefer?: string; caseSensitive?: boolean; signal?: AbortSignal } = {}) =>
-    request<{ results: Array<{ file: string; filePath: string; projectId: string; projectName: string; extension?: string; matches: Array<{ line: number; text: string; column: number }> }>; totalMatches: number }>(
-      `/search/content?${searchParams({ q: query, projectId: opts.projectId, prefer: opts.prefer, caseSensitive: opts.caseSensitive ? 'true' : undefined })}`,
+  searchContent: (query: string, opts: ContentSearchOptions & { projectId?: string; prefer?: string; signal?: AbortSignal } = {}) =>
+    request<ContentSearchResponse>(
+      `/search/content?${searchParams({
+        q: query,
+        projectId: opts.projectId,
+        prefer: opts.prefer,
+        caseSensitive: opts.caseSensitive ? 'true' : undefined,
+        wholeWord: opts.wholeWord ? 'true' : undefined,
+        regex: opts.regex ? 'true' : undefined,
+        includeIgnored: opts.includeIgnored ? 'true' : undefined,
+      })}`,
       { signal: opts.signal },
     ),
 

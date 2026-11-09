@@ -1,7 +1,21 @@
 import { spawn } from 'child_process';
-import { readdir } from 'fs/promises';
+import { readdir, readFile, stat } from 'fs/promises';
 import { join, extname } from 'path';
 import type { Project } from '../types/index.js';
+
+/**
+ * Folders no search enters by default: dependencies, build output, caches and
+ * virtualenvs. Both palettes and the walk fallback use this list; content
+ * search can opt back in with `includeIgnored`. The file tree has its own,
+ * shorter list (IGNORE_NAMES in routes/files.ts).
+ */
+export const SEARCH_EXCLUDED_DIRS = new Set([
+  '.git', 'node_modules', 'bower_components', 'jspm_packages', 'vendor',
+  'dist', 'build', 'out', 'release', 'target', 'coverage', 'storybook-static',
+  '.next', '.nuxt', '.output', '.svelte-kit', '.turbo', '.vercel', '.wrangler', '.expo',
+  '.cache', '.parcel-cache', '__pycache__', '.pytest_cache', '.mypy_cache',
+  '.venv', 'venv', '.gradle', '.idea', '.vs', 'Pods', 'DerivedData', '.terraform',
+]);
 
 /**
  * The two search palettes (Ctrl+K file names, Ctrl+Shift+F contents) run on
@@ -189,9 +203,10 @@ export async function searchFileNames(
     .map(s => s.result);
 }
 
-// ── Content search (git grep) ───────────────────────────
 
-export interface ContentMatch { line: number; text: string; column: number }
+// ── Content search ──────────────────────────────────────
+
+export interface ContentMatch { line: number; text: string; column: number; length: number }
 export interface ContentResult {
   file: string;
   filePath: string;
@@ -201,37 +216,117 @@ export interface ContentResult {
   matches: ContentMatch[];
 }
 
-const MAX_CONTEXT_CHARS = 200;
-const GREP_EXCLUDES = [
-  ':(exclude)*.lock', ':(exclude)*.map', ':(exclude)*.min.js', ':(exclude)*.min.css',
-  ':(exclude)*.svg', ':(exclude)pnpm-lock.yaml', ':(exclude)**/pnpm-lock.yaml',
-  ':(exclude)package-lock.json', ':(exclude)**/package-lock.json',
-];
+export interface ContentQuery {
+  query: string;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  regex: boolean;
+  /** Also search SEARCH_EXCLUDED_DIRS (node_modules, dist...) and git-ignored files. */
+  includeIgnored: boolean;
+}
 
-export function snippet(line: string, column: number, queryLength: number): string {
+export interface ContentSearchResult {
+  results: ContentResult[];
+  totalMatches: number;
+  /** A cap was hit: there is more than what came back. */
+  truncated: boolean;
+  /** The time budget ran out before every folder was searched. */
+  timedOut: boolean;
+  elapsedMs: number;
+}
+
+const MAX_CONTEXT_CHARS = 200;
+const MAX_MATCHES_PER_FILE = 20;
+const MAX_TOTAL_MATCHES = 500;
+const WALK_MAX_DEPTH = 8;
+const WALK_MAX_FILE_SIZE = 512 * 1024;
+/** git processes and walks in flight at once, across every project. */
+const ROOT_CONCURRENCY = 8;
+
+/** Generated, minified and lock files: never worth reading, even with includeIgnored. */
+const GREP_FILE_EXCLUDES = [
+  '*.lock', '*.map', '*.min.js', '*.min.css', '*.svg',
+  'pnpm-lock.yaml', 'package-lock.json', 'yarn.lock',
+].map(g => `:(exclude,glob)**/${g}`);
+
+// Untracked folders a repo forgot to ignore (a node_modules with no
+// .gitignore) still stay out.
+const DIR_EXCLUDES = [...SEARCH_EXCLUDED_DIRS]
+  .filter(d => d !== '.git')
+  .map(d => `:(exclude,glob)**/${d}/**`);
+
+// Even with includeIgnored: pnpm's virtual store holds every package a
+// second time, and its links point back into the workspace — git follows
+// them on Windows and one search took 266 s. The packages stay reachable
+// through node_modules/<name>.
+const PNPM_STORE_EXCLUDE = ':(exclude,glob)**/node_modules/.pnpm/**';
+
+/** A search that hits this answers with what it has, marked truncated. */
+const TIME_BUDGET_MS = 10_000;
+const TIME_BUDGET_IGNORED_MS = 20_000;
+
+const BINARY_EXT = new Set([
+  '.lock', '.map', '.svg',
+  '.woff', '.woff2', '.ttf', '.eot', '.otf',
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.ico', '.bmp', '.psd',
+  '.pdf', '.zip', '.gz', '.tar', '.rar', '.7z',
+  '.mp3', '.wav', '.mp4', '.avi', '.mov', '.mkv', '.webm',
+  '.exe', '.dll', '.so', '.dylib', '.bin', '.node',
+  '.sqlite', '.db',
+]);
+
+/**
+ * The matcher the walk and the column fix-up use; the client builds the same
+ * one to highlight. Throws on an invalid regular expression (the route
+ * answers 400).
+ */
+export function buildMatcher(q: Pick<ContentQuery, 'query' | 'caseSensitive' | 'wholeWord' | 'regex'>): RegExp {
+  let source = q.regex ? q.query : q.query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (q.wholeWord) source = `\\b(?:${source})\\b`;
+  return new RegExp(source, q.caseSensitive ? 'g' : 'gi');
+}
+
+/** First non-empty match in the line, or null. */
+function findInLine(matcher: RegExp, line: string): { column: number; length: number } | null {
+  matcher.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = matcher.exec(line))) {
+    if (m[0].length > 0) return { column: m.index, length: m[0].length };
+    matcher.lastIndex++;
+    if (matcher.lastIndex > line.length) break;
+  }
+  return null;
+}
+
+function snippet(line: string, column: number, length: number): string {
   if (line.length <= MAX_CONTEXT_CHARS) return line.trimEnd();
-  return line.substring(Math.max(0, column - 60), column + queryLength + 60).trimEnd();
+  return line.substring(Math.max(0, column - 60), column + length + 60).trimEnd();
 }
 
 /**
  * One repo, one `git grep`. Resolves null when git can't answer (not a repo,
- * git missing, a flag this git version lacks) so the caller can walk instead.
+ * git missing, a flag this git lacks, a pattern PCRE refuses) so the caller
+ * can walk instead. An abort resolves with what was read so far.
  */
 function gitGrep(
   cwd: string,
-  query: string,
-  caseSensitive: boolean,
+  q: ContentQuery,
+  matcher: RegExp,
   maxFiles: number,
-  maxPerFile: number,
+  signal: AbortSignal,
 ): Promise<Map<string, ContentMatch[]> | null> {
   return new Promise(resolve => {
+    if (signal.aborted) { resolve(new Map()); return; }
     const args = [
-      '-c', 'core.quotepath=off', 'grep', '-n', '--column', '-I', '--no-color', '-z', '-F',
-      '--untracked', '--max-count', String(maxPerFile),
-      ...(caseSensitive ? [] : ['-i']),
-      '-e', query, '--', '.', ...GREP_EXCLUDES,
+      '-c', 'core.quotepath=off', 'grep', '-n', '--column', '-I', '--no-color', '-z',
+      q.regex ? '-P' : '-F',
+      ...(q.wholeWord ? ['-w'] : []),
+      ...(q.caseSensitive ? [] : ['-i']),
+      '--untracked', ...(q.includeIgnored ? ['--no-exclude-standard'] : []),
+      '--max-count', String(MAX_MATCHES_PER_FILE),
+      '-e', q.query, '--', '.', ...GREP_FILE_EXCLUDES, ...(q.includeIgnored ? [PNPM_STORE_EXCLUDE] : DIR_EXCLUDES),
     ];
-    let child;
+    let child: ReturnType<typeof spawn>;
     try {
       child = spawn('git', args, { cwd, windowsHide: true, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
     } catch {
@@ -240,8 +335,22 @@ function gitGrep(
     }
     const files = new Map<string, ContentMatch[]>();
     let buffer = '';
-    let stopped = false;
-    const needle = caseSensitive ? query : query.toLowerCase();
+    let settled = false;
+
+    const settle = (value: Map<string, ContentMatch[]> | null) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', stop);
+      resolve(value);
+    };
+    // Answer as soon as the cap is hit: on Windows the kill takes ~500ms to
+    // surface as 'close', which is longer than the whole search.
+    function stop() {
+      if (settled) return;
+      child.kill();
+      settle(files);
+    }
+    signal.addEventListener('abort', stop, { once: true });
 
     const consume = (line: string) => {
       const parts = line.split('\0');
@@ -255,73 +364,206 @@ function gitGrep(
         files.set(file, list);
       }
       // git reports a byte column; the editor wants a character index.
-      const at = (caseSensitive ? text : text.toLowerCase()).indexOf(needle);
-      const column = at >= 0 ? at : Math.max(0, Number(col) - 1);
-      list.push({ line: Number(lineNo), text: snippet(text, column, query.length), column });
-    };
-    // Answer as soon as the cap is hit: on Windows the kill takes ~500ms to
-    // surface as 'close', which is longer than the whole search.
-    const stop = () => {
-      if (stopped) return;
-      stopped = true;
-      child.kill();
-      resolve(files);
+      const hit = findInLine(matcher, text) ?? { column: Math.max(0, Number(col) - 1), length: 0 };
+      list.push({ line: Number(lineNo), text: snippet(text, hit.column, hit.length), column: hit.column, length: hit.length });
     };
 
-    child.stdout.setEncoding('utf8');
-    child.stdout.on('data', (chunk: string) => {
-      if (stopped) return;
+    child.stdout!.setEncoding('utf8');
+    child.stdout!.on('data', (chunk: string) => {
+      if (settled) return;
       buffer += chunk;
       let nl: number;
-      while (!stopped && (nl = buffer.indexOf('\n')) >= 0) {
+      while (!settled && (nl = buffer.indexOf('\n')) >= 0) {
         consume(buffer.slice(0, nl).replace(/\r$/, ''));
         buffer = buffer.slice(nl + 1);
       }
     });
-    child.stderr.resume();
-    child.on('error', () => resolve(null));
-    child.on('close', code => {
-      if (stopped || code === 0 || code === 1) resolve(files);
-      else resolve(null);
-    });
+    child.stderr!.resume();
+    child.on('error', () => settle(null));
+    child.on('close', code => settle(code === 0 || code === 1 ? files : null));
   });
 }
 
 /**
- * Searches the project's own repo and each nested sub-repo (a parent repo
- * never descends into them). Null means the project isn't git-backed at the
- * root, or git failed — the caller falls back to walking the tree.
+ * For folders git can't answer: a client folder without a repo at the root,
+ * or a repo whose git failed. Lists the tree first (in parallel), then reads
+ * files 16 at a time and hands them back in path order. A folder with its own
+ * `.git` found on the way (a repo two levels down, which discovery doesn't
+ * list as a sub-repo) goes to `git grep` instead of being read file by file.
  */
-export async function grepProject(
-  project: Project,
-  query: string,
-  opts: { caseSensitive: boolean; maxFiles: number; maxPerFile: number },
-): Promise<ContentResult[] | null> {
-  if (!project.isGitRepo) return null;
-  const roots = ['', ...(project.subRepos || [])];
-  const perRoot = await Promise.all(roots.map(rel =>
-    gitGrep(rel ? join(project.path, rel) : project.path, query, opts.caseSensitive, opts.maxFiles, opts.maxPerFile)
-      .then(files => ({ rel, files })),
-  ));
-  if (!perRoot[0].files) return null;
+async function walkGrep(
+  root: string,
+  skip: Set<string>,
+  q: ContentQuery,
+  matcher: RegExp,
+  maxFiles: number,
+  filter: WalkFilter,
+  signal: AbortSignal,
+): Promise<Map<string, ContentMatch[]>> {
+  const ignore = q.includeIgnored ? new Set(['.git']) : filter.ignore;
+  const paths: string[] = [];
+  const nestedRepos: string[] = [];
+  async function list(dir: string, rel: string, depth: number): Promise<void> {
+    if (depth > WALK_MAX_DEPTH || signal.aborted) return;
+    let items;
+    try { items = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    if (depth > 0 && items.some(item => item.name === '.git')) {
+      nestedRepos.push(rel);
+      return;
+    }
+    const subdirs: Promise<void>[] = [];
+    for (const item of items) {
+      if (ignore.has(item.name)) continue;
+      if (item.name.startsWith('.') && !filter.isVisibleDotfile(item.name)) continue;
+      const path = rel ? `${rel}/${item.name}` : item.name;
+      if (item.isDirectory()) {
+        if (!skip.has(path)) subdirs.push(list(join(dir, item.name), path, depth + 1));
+      } else if (item.isFile()) {
+        const lower = item.name.toLowerCase();
+        if (BINARY_EXT.has(extname(lower)) || lower.endsWith('.min.js') || lower.endsWith('.min.css')) continue;
+        paths.push(path);
+      }
+    }
+    await Promise.all(subdirs);
+  }
+  await list(root, '', 0);
+  paths.sort();
+
+  const found = new Map<string, ContentMatch[]>();
+  await mapLimit(paths, 16, async path => {
+    if (signal.aborted || found.size >= maxFiles) return;
+    const full = join(root, path);
+    try {
+      const st = await stat(full);
+      if (st.size === 0 || st.size > WALK_MAX_FILE_SIZE) return;
+      const content = await readFile(full, 'utf8');
+      if (content.slice(0, 8000).includes('\0')) return; // binary, like git -I
+      const lines = content.split('\n');
+      const matches: ContentMatch[] = [];
+      for (let i = 0; i < lines.length && matches.length < MAX_MATCHES_PER_FILE; i++) {
+        const line = lines[i].replace(/\r$/, '');
+        const hit = findInLine(matcher, line);
+        if (hit) matches.push({ line: i + 1, text: snippet(line, hit.column, hit.length), column: hit.column, length: hit.length });
+      }
+      if (matches.length && found.size < maxFiles) found.set(path, matches);
+    } catch { /* unreadable: skip */ }
+  });
+
+  await mapLimit(nestedRepos, 4, async rel => {
+    if (signal.aborted) return;
+    const cwd = join(root, rel);
+    // git failing here walks the repo; depth 0 keeps it from finding itself.
+    const files = await gitGrep(cwd, q, matcher, maxFiles, signal)
+      ?? await walkGrep(cwd, new Set(), q, matcher, maxFiles, filter, signal);
+    for (const [file, matches] of files) found.set(`${rel}/${file}`, matches);
+  });
+
+  return new Map([...found].sort((a, b) => (a[0] < b[0] ? -1 : 1)).slice(0, maxFiles));
+}
+
+interface SearchRoot {
+  project: Project;
+  /** Relative to the project, forward slashes; '' is the project folder. */
+  rel: string;
+  git: boolean;
+  /** Folders a walk must not enter: the sub-repos, searched as their own roots. */
+  skip: Set<string>;
+}
+
+function rootsOf(project: Project): SearchRoot[] {
+  const subs = (project.subRepos || []).map(r => r.replace(/\\/g, '/').replace(/\/+$/, ''));
+  return [
+    { project, rel: '', git: project.isGitRepo, skip: new Set(subs) },
+    ...subs.map(rel => ({ project, rel, git: true, skip: new Set<string>() })),
+  ];
+}
+
+async function searchRoot(
+  root: SearchRoot,
+  q: ContentQuery,
+  matcher: RegExp,
+  maxFiles: number,
+  filter: WalkFilter,
+  signal: AbortSignal,
+): Promise<ContentResult[]> {
+  const cwd = root.rel ? join(root.project.path, root.rel) : root.project.path;
+  let files = root.git ? await gitGrep(cwd, q, matcher, maxFiles, signal) : null;
+  if (!files) files = signal.aborted ? new Map() : await walkGrep(cwd, root.skip, q, matcher, maxFiles, filter, signal);
+
+  const out: ContentResult[] = [];
+  for (const [file, matches] of files) {
+    const filePath = root.rel ? `${root.rel}/${file}` : file;
+    const name = filePath.slice(filePath.lastIndexOf('/') + 1);
+    out.push({
+      file: name,
+      filePath,
+      projectId: root.project.id,
+      projectName: root.project.name,
+      ...(extname(name) ? { extension: extname(name).toLowerCase() } : {}),
+      matches,
+    });
+  }
+  return out;
+}
+
+/**
+ * Each project splits into roots — its own folder and each sub-repo — and
+ * each root is one `git grep` (a walk without git; a client folder is walked
+ * only outside its sub-repos). Roots run ROOT_CONCURRENCY at a time in
+ * context order, and once the roots that come first fill the page the rest
+ * is cancelled.
+ */
+export async function searchContent(
+  projects: Project[],
+  q: ContentQuery,
+  opts: { limit: number; preferId?: string; filter: WalkFilter; signal?: AbortSignal },
+): Promise<ContentSearchResult> {
+  const started = Date.now();
+  const matcher = buildMatcher(q);
+  const roots = orderByRank(projects, projectRanks(projects, opts.preferId)).flatMap(rootsOf);
+
+  const internal = new AbortController();
+  const abort = () => internal.abort();
+  if (opts.signal?.aborted) internal.abort();
+  opts.signal?.addEventListener('abort', abort, { once: true });
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; internal.abort(); }, q.includeIgnored ? TIME_BUDGET_IGNORED_MS : TIME_BUDGET_MS);
+
+  const done: (ContentResult[] | undefined)[] = new Array(roots.length);
+  const prefixIsFull = () => {
+    let files = 0, matches = 0;
+    for (const list of done) {
+      if (!list) return false;
+      files += list.length;
+      for (const r of list) matches += r.matches.length;
+      if (files >= opts.limit || matches >= MAX_TOTAL_MATCHES) return true;
+    }
+    return false;
+  };
+
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(ROOT_CONCURRENCY, roots.length) }, async () => {
+    while (next < roots.length && !internal.signal.aborted) {
+      const i = next++;
+      done[i] = await searchRoot(roots[i], q, matcher, opts.limit, opts.filter, internal.signal);
+      if (prefixIsFull()) internal.abort();
+    }
+  }));
+  clearTimeout(timer);
+  opts.signal?.removeEventListener('abort', abort);
 
   const results: ContentResult[] = [];
-  for (const { rel, files } of perRoot) {
-    if (!files) continue;
-    for (const [file, matches] of files) {
-      const filePath = rel ? `${rel.replace(/\\/g, '/')}/${file}` : file;
-      const name = filePath.slice(filePath.lastIndexOf('/') + 1);
-      results.push({
-        file: name,
-        filePath,
-        projectId: project.id,
-        projectName: project.name,
-        ...(extname(name) ? { extension: extname(name).toLowerCase() } : {}),
-        matches,
-      });
+  let totalMatches = 0;
+  let truncated = internal.signal.aborted;
+  outer: for (const list of done) {
+    if (!list) continue;
+    for (const result of list) {
+      if (results.length >= opts.limit || totalMatches >= MAX_TOTAL_MATCHES) { truncated = true; break outer; }
+      results.push(result);
+      totalMatches += result.matches.length;
     }
   }
-  return results.slice(0, opts.maxFiles);
+  return { results, totalMatches, truncated, timedOut, elapsedMs: Date.now() - started };
 }
 
 /** Runs `task` over `items` with at most `limit` in flight, in order. */

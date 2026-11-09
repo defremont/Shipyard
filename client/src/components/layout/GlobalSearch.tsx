@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import { useEffect, useState, useCallback, useRef, useMemo, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   FolderOpen,
@@ -6,38 +6,33 @@ import {
   Settings,
   HelpCircle,
   LayoutDashboard,
-  Search,
-  AlertTriangle,
-  ArrowUp,
-  Minus,
-  ArrowDown as ArrowDownIcon,
-  File,
-  Folder,
-  Loader2,
+  LayoutGrid,
+  ScrollText,
+  TextSearch,
   Sparkles,
+  type LucideIcon,
 } from 'lucide-react'
 import { useProjects } from '@/hooks/useProjects'
 import { useAllTasks, type Task } from '@/hooks/useTasks'
 import { useTabs } from '@/hooks/useTabs'
+import { useEditorTabsContext } from '@/hooks/useEditorTabsContext'
 import { FileIcon } from '@/components/files/FileIcon'
 import { api } from '@/lib/api'
+import { cn } from '@/lib/utils'
 import { makeContextRank, rankProjects, rankTasks } from '@/lib/searchRanking'
+import { priorityVisual, statusVisual } from '@/lib/taskVisuals'
+import {
+  PaletteShell, PaletteInput, PaletteFooter, SectionHeader, EmptyState, Highlight, Kbd,
+  usePaletteToggle, termsMatcher, openContentSearch, TOGGLE_SEARCH_EVENT, TOGGLE_CONTENT_SEARCH_EVENT,
+} from './SearchPalette'
 
 type FilterTab = 'all' | 'projects' | 'tasks' | 'files'
-
-const priorityConfig: Record<string, { icon: typeof AlertTriangle; color: string; label: string }> = {
-  urgent: { icon: AlertTriangle, color: 'text-destructive', label: 'Urgent' },
-  high: { icon: ArrowUp, color: 'text-warning', label: 'High' },
-  medium: { icon: Minus, color: 'text-muted-foreground', label: 'Medium' },
-  low: { icon: ArrowDownIcon, color: 'text-muted-foreground/60', label: 'Low' },
-}
-
-const statusLabels: Record<string, string> = {
-  backlog: 'Backlog',
-  todo: 'To Do',
-  in_progress: 'In Progress',
-  done: 'Done',
-}
+const FILTERS: Array<{ id: FilterTab; label: string }> = [
+  { id: 'all', label: 'All' },
+  { id: 'projects', label: 'Projects' },
+  { id: 'tasks', label: 'Tasks' },
+  { id: 'files', label: 'Files' },
+]
 
 interface FileResult {
   name: string
@@ -46,6 +41,45 @@ interface FileResult {
   projectName: string
   type: 'file' | 'dir'
   extension?: string
+}
+
+interface Command {
+  id: string
+  label: string
+  icon: LucideIcon
+  shortcut?: string
+  run: () => void
+}
+
+interface Item {
+  id: string
+  run: () => void
+}
+
+const isShortcut = (e: KeyboardEvent) => (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.code === 'KeyK'
+
+/** A palette row: one height, one selection style, hover selects. */
+function Row({ selected, onSelect, onRun, children, className }: {
+  selected: boolean
+  onSelect: () => void
+  onRun: () => void
+  children: ReactNode
+  className?: string
+}) {
+  return (
+    <div
+      data-selected={selected}
+      onMouseMove={() => !selected && onSelect()}
+      onClick={onRun}
+      className={cn(
+        'mx-1.5 flex h-9 cursor-pointer items-center gap-3 rounded-md px-2.5 text-sm',
+        selected ? 'bg-accent text-accent-foreground' : 'text-foreground',
+        className,
+      )}
+    >
+      {children}
+    </div>
+  )
 }
 
 export function GlobalSearch() {
@@ -57,9 +91,9 @@ export function GlobalSearch() {
   const [fileSearching, setFileSearching] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>()
   const navigate = useNavigate()
   const { openTab, activeTabId } = useTabs()
+  const { openFileForProject } = useEditorTabsContext()
   const { data: projects } = useProjects()
   // Mounted on every page, but only visible on Ctrl+K — don't poll while closed.
   const { data: tasks } = useAllTasks({ enabled: open })
@@ -68,57 +102,35 @@ export function GlobalSearch() {
   const contextRank = useMemo(() => makeContextRank(projects, activeTabId), [projects, activeTabId])
   const activeProject = useMemo(() => projects?.find(p => p.id === activeTabId), [projects, activeTabId])
 
-  // Listen for Ctrl+K and the Electron menu action
-  useEffect(() => {
-    const toggle = () => {
-      setOpen(prev => {
-        if (!prev) {
-          setQuery('')
-          setActiveFilter('all')
-          setSelectedIndex(0)
-          setFileResults([])
-        }
-        return !prev
-      })
-    }
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
-        e.preventDefault()
-        e.stopPropagation()
-        toggle()
+  const close = useCallback(() => setOpen(false), [])
+  const onToggle = useCallback((detail?: { open?: boolean }) => {
+    setOpen(prev => {
+      const next = detail?.open ? true : !prev
+      if (next) {
+        setQuery('')
+        setActiveFilter('all')
+        setFileResults([])
       }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('shipyard:toggle-search', toggle)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('shipyard:toggle-search', toggle)
-    }
+      return next
+    })
   }, [])
+  usePaletteToggle(TOGGLE_SEARCH_EVENT, TOGGLE_CONTENT_SEARCH_EVENT, isShortcut, onToggle, close)
 
-  // Focus input when opened
-  useEffect(() => {
-    if (open) {
-      setTimeout(() => inputRef.current?.focus(), 50)
-    }
-  }, [open])
+  const trimmedQuery = query.trim()
+  const isTaskNumber = /^#\d+$/.test(trimmedQuery)
+  const matcher = useMemo(() => termsMatcher(trimmedQuery), [trimmedQuery])
 
   // Debounced file search. The server answers from an in-memory index, so the
   // wait is short; a newer query aborts the request still in flight.
-  const trimmedQuery = query.trim()
-  const isTaskNumber = /^#\d+$/.test(trimmedQuery)
   useEffect(() => {
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-
-    if (trimmedQuery.length < 2 || isTaskNumber || (activeFilter !== 'all' && activeFilter !== 'files')) {
+    if (!open || trimmedQuery.length < 2 || isTaskNumber || (activeFilter !== 'all' && activeFilter !== 'files')) {
       setFileResults([])
       setFileSearching(false)
       return
     }
-
     setFileSearching(true)
     const controller = new AbortController()
-    debounceRef.current = setTimeout(async () => {
+    const timer = setTimeout(async () => {
       try {
         const data = await api.searchFiles(trimmedQuery, { prefer: activeTabId ?? undefined, signal: controller.signal })
         if (!controller.signal.aborted) setFileResults(data.results)
@@ -127,15 +139,13 @@ export function GlobalSearch() {
       } finally {
         if (!controller.signal.aborted) setFileSearching(false)
       }
-    }, 150)
-
+    }, 120)
     return () => {
+      clearTimeout(timer)
       controller.abort()
-      if (debounceRef.current) clearTimeout(debounceRef.current)
     }
-  }, [trimmedQuery, isTaskNumber, activeFilter, activeTabId])
+  }, [open, trimmedQuery, isTaskNumber, activeFilter, activeTabId])
 
-  // Build project name lookup
   const projectNameMap = useMemo(() => {
     const map = new Map<string, string>()
     projects?.forEach(p => map.set(p.id, p.name))
@@ -164,66 +174,77 @@ export function GlobalSearch() {
     window.dispatchEvent(new CustomEvent('shipyard:open-task', { detail: task }))
   }, [openTab])
 
-  // Quick actions (only show when no query)
-  const quickActions = useMemo(() => {
-    if (query) return []
-    return [
-      { id: 'dashboard', label: 'Go to Dashboard', icon: LayoutDashboard, action: () => navigate('/') },
-      { id: 'tasks', label: 'All Tasks', icon: ClipboardList, action: () => navigate('/tasks') },
-      { id: 'settings', label: 'Open Settings', icon: Settings, action: () => navigate('/settings') },
-      { id: 'help', label: 'Open Help', icon: HelpCircle, action: () => navigate('/help') },
-    ]
-  }, [query, navigate])
+  const openFile = useCallback((f: FileResult) => {
+    if (f.type === 'file') openFileForProject(f.projectId, f.path, f.name, f.extension || '')
+    else openTab(f.projectId)
+  }, [openFileForProject, openTab])
 
-  // Build flat items list for keyboard navigation
-  const allItems = useMemo(() => {
-    const items: Array<{ id: string; type: 'action' | 'project' | 'task' | 'file'; action: () => void }> = []
+  const commands = useMemo<Command[]>(() => [
+    { id: 'dashboard', label: 'Go to Dashboard', icon: LayoutDashboard, run: () => navigate('/') },
+    { id: 'tasks', label: 'All Tasks', icon: ClipboardList, run: () => navigate('/tasks') },
+    { id: 'agents', label: 'Agents', icon: LayoutGrid, run: () => navigate('/agents') },
+    { id: 'content', label: 'Search in file contents', icon: TextSearch, shortcut: 'Ctrl+Shift+F', run: () => openContentSearch() },
+    { id: 'settings', label: 'Open Settings', icon: Settings, run: () => navigate('/settings') },
+    { id: 'logs', label: 'Open Logs', icon: ScrollText, run: () => navigate('/logs') },
+    { id: 'help', label: 'Open Help', icon: HelpCircle, run: () => navigate('/help') },
+  ], [navigate])
 
-    if (activeFilter === 'all' || activeFilter === 'projects') {
-      if (!query) {
-        quickActions.forEach(a => items.push({ id: `action-${a.id}`, type: 'action', action: a.action }))
-      }
-      filteredProjects.forEach(p => items.push({ id: `project-${p.id}`, type: 'project', action: () => openTab(p.id) }))
+  // Commands answer to their name too ("set" finds Settings).
+  const filteredCommands = useMemo(() => {
+    if (activeFilter !== 'all' || isTaskNumber) return []
+    if (!trimmedQuery) return commands
+    const terms = trimmedQuery.toLowerCase().split(/\s+/)
+    return commands.filter(c => c.id !== 'content' && terms.every(t => c.label.toLowerCase().includes(t)))
+  }, [commands, activeFilter, trimmedQuery, isTaskNumber])
+
+  // The way out when the name isn't enough: the same text, in every file.
+  const contentSearchRow = activeFilter === 'all' && trimmedQuery.length >= 2 && !isTaskNumber
+
+  const showProjects = activeFilter === 'all' || activeFilter === 'projects'
+  const showTasks = activeFilter === 'all' || activeFilter === 'tasks'
+  const showFiles = activeFilter === 'all' || activeFilter === 'files'
+
+  // Without a query the palette is a launcher: commands first. With one,
+  // the answers first and the commands last.
+  const sections = useMemo(() => {
+    const list: Array<'commands' | 'projects' | 'tasks' | 'files'> = trimmedQuery
+      ? ['projects', 'tasks', 'files', 'commands']
+      : ['commands', 'projects', 'tasks', 'files']
+    return list
+  }, [trimmedQuery])
+
+  const items = useMemo(() => {
+    const out: Item[] = []
+    for (const section of sections) {
+      if (section === 'commands') filteredCommands.forEach(c => out.push({ id: `cmd-${c.id}`, run: c.run }))
+      if (section === 'projects' && showProjects) filteredProjects.forEach(p => out.push({ id: `project-${p.id}`, run: () => openTab(p.id) }))
+      if (section === 'tasks' && showTasks) filteredTasks.forEach((t, i) => out.push({ id: `task-${i}-${t.id}`, run: () => openTask(t) }))
+      if (section === 'files' && showFiles) fileResults.forEach((f, i) => out.push({ id: `file-${i}-${f.path}`, run: () => openFile(f) }))
     }
+    if (contentSearchRow) out.push({ id: 'content-search', run: () => openContentSearch(trimmedQuery) })
+    return out
+  }, [sections, filteredCommands, filteredProjects, filteredTasks, fileResults, showProjects, showTasks, showFiles, contentSearchRow, trimmedQuery, openTab, openTask, openFile])
 
-    if (activeFilter === 'all' || activeFilter === 'tasks') {
-      filteredTasks.forEach((t: Task) => items.push({ id: `task-${t.id}`, type: 'task', action: () => openTask(t) }))
-    }
+  const indexOf = useMemo(() => new Map(items.map((item, i) => [item.id, i])), [items])
 
-    if (activeFilter === 'all' || activeFilter === 'files') {
-      fileResults.forEach((f, i) => items.push({ id: `file-${i}-${f.path}`, type: 'file', action: () => {
-        if (f.type === 'file') {
-          localStorage.setItem('shipyard:pending-editor-file', JSON.stringify({
-            projectId: f.projectId,
-            path: f.path,
-            name: f.name,
-            extension: f.extension || '',
-          }))
-        }
-        openTab(f.projectId)
-      }}))
-    }
-
-    return items
-  }, [activeFilter, query, quickActions, filteredProjects, filteredTasks, fileResults, openTab, openTask])
-
-  // Reset selection when results change
+  // A new query or filter starts at the top; file results landing later keep
+  // the row the user is on.
+  useEffect(() => { setSelectedIndex(0) }, [trimmedQuery, activeFilter])
   useEffect(() => {
-    setSelectedIndex(0)
-  }, [allItems.length, activeFilter, query])
+    setSelectedIndex(prev => Math.min(prev, Math.max(0, items.length - 1)))
+  }, [items.length])
 
-  // Scroll selected item into view
   useEffect(() => {
-    if (!listRef.current) return
-    const selected = listRef.current.querySelector('[data-selected="true"]')
-    if (selected) {
-      selected.scrollIntoView({ block: 'nearest' })
-    }
+    listRef.current?.querySelector('[data-selected="true"]')?.scrollIntoView({ block: 'nearest' })
   }, [selectedIndex])
 
-  const close = useCallback(() => {
-    setOpen(false)
-  }, [])
+  // The content search opens on top of this palette and closes it itself.
+  const runItem = useCallback((index: number) => {
+    const item = items[index]
+    if (!item) return
+    if (item.id !== 'content-search' && item.id !== 'cmd-content') close()
+    item.run()
+  }, [items, close])
 
   // Hand the task to AiResolveHost — the palette unmounts on close, so
   // neither the run nor the agent dialog can live here. Plain click runs;
@@ -233,22 +254,13 @@ export function GlobalSearch() {
     window.dispatchEvent(new CustomEvent(withDialog ? 'shipyard:run-task-with-agent' : 'shipyard:run-task', { detail: task }))
   }, [close])
 
-  const runItem = useCallback((index: number) => {
-    const item = allItems[index]
-    if (item) {
-      item.action()
-      close()
-    }
-  }, [allItems, close])
-
-  // Keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault()
       close()
     } else if (e.key === 'ArrowDown') {
       e.preventDefault()
-      setSelectedIndex(prev => Math.min(prev + 1, allItems.length - 1))
+      setSelectedIndex(prev => Math.min(prev + 1, items.length - 1))
     } else if (e.key === 'ArrowUp') {
       e.preventDefault()
       setSelectedIndex(prev => Math.max(prev - 1, 0))
@@ -257,262 +269,174 @@ export function GlobalSearch() {
       runItem(selectedIndex)
     } else if (e.key === 'Tab') {
       e.preventDefault()
-      const filters: FilterTab[] = ['all', 'projects', 'tasks', 'files']
-      const currentIdx = filters.indexOf(activeFilter)
-      const nextIdx = e.shiftKey
-        ? (currentIdx - 1 + filters.length) % filters.length
-        : (currentIdx + 1) % filters.length
-      setActiveFilter(filters[nextIdx])
+      const i = FILTERS.findIndex(f => f.id === activeFilter)
+      setActiveFilter(FILTERS[(i + (e.shiftKey ? FILTERS.length - 1 : 1)) % FILTERS.length].id)
     }
-  }, [close, allItems.length, selectedIndex, runItem, activeFilter])
-
-  const filterTabs: { id: FilterTab; label: string; count?: number }[] = [
-    { id: 'all', label: 'All' },
-    { id: 'projects', label: 'Projects', count: filteredProjects.length },
-    { id: 'tasks', label: 'Tasks', count: filteredTasks.length },
-    { id: 'files', label: 'Files', count: fileResults.length },
-  ]
+  }, [close, items.length, selectedIndex, runItem, activeFilter])
 
   if (!open) return null
 
-  let itemIndex = -1
+  const counts: Record<FilterTab, number | undefined> = {
+    all: undefined,
+    projects: filteredProjects.length,
+    tasks: filteredTasks.length,
+    files: fileResults.length,
+  }
+
+  const row = (id: string, content: ReactNode, className?: string) => {
+    const idx = indexOf.get(id) ?? -1
+    return (
+      <Row
+        key={id}
+        selected={selectedIndex === idx}
+        onSelect={() => setSelectedIndex(idx)}
+        onRun={() => runItem(idx)}
+        className={className}
+      >
+        {content}
+      </Row>
+    )
+  }
+
+  const renderSection = (section: 'commands' | 'projects' | 'tasks' | 'files') => {
+    if (section === 'commands' && filteredCommands.length > 0) {
+      return (
+        <div key="commands">
+          <SectionHeader label="Commands" />
+          {filteredCommands.map(c => row(`cmd-${c.id}`, <>
+            <c.icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="flex-1 truncate"><Highlight text={c.label} matcher={matcher} /></span>
+            {c.shortcut && <Kbd>{c.shortcut}</Kbd>}
+          </>))}
+        </div>
+      )
+    }
+    if (section === 'projects' && showProjects && filteredProjects.length > 0) {
+      return (
+        <div key="projects">
+          <SectionHeader label="Projects" count={trimmedQuery ? filteredProjects.length : undefined} />
+          {filteredProjects.map(project => row(`project-${project.id}`, <>
+            <FolderOpen className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 truncate"><Highlight text={project.name} matcher={matcher} /></span>
+            {project.techStack?.length > 0 && (
+              <span className="max-w-[160px] truncate text-[11px] text-muted-foreground/60">{project.techStack.slice(0, 3).join(', ')}</span>
+            )}
+            {project.id === activeTabId && <span className="shrink-0 text-[11px] text-muted-foreground">open</span>}
+          </>))}
+        </div>
+      )
+    }
+    if (section === 'tasks' && showTasks && filteredTasks.length > 0) {
+      return (
+        <div key="tasks">
+          <SectionHeader label={trimmedQuery ? 'Tasks' : 'Open tasks'} count={trimmedQuery ? filteredTasks.length : undefined} />
+          {filteredTasks.map((task, i) => {
+            const priority = priorityVisual(task.priority)
+            const status = statusVisual(task.status)
+            const StatusIcon = status.icon
+            return row(`task-${i}-${task.id}`, <>
+              <priority.icon className={cn('h-4 w-4 shrink-0', priority.color)} />
+              {task.number != null && (
+                <span className="shrink-0 font-mono text-[11px] tabular-nums text-muted-foreground/70">#{task.number}</span>
+              )}
+              <span className={cn('min-w-0 flex-1 truncate', task.status === 'done' && 'text-muted-foreground')}>
+                <Highlight text={task.title} matcher={matcher} />
+              </span>
+              <button
+                title="Run with AI (Shift+click to add context or pick the agent)"
+                className="shrink-0 rounded p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-background/60 hover:text-foreground [[data-selected=true]_&]:opacity-100"
+                onClick={(e) => { e.stopPropagation(); runWithAgent(task, e.shiftKey) }}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+              </button>
+              <span className="max-w-[110px] shrink-0 truncate text-[11px] text-muted-foreground">
+                {projectNameMap.get(task.projectId) || task.projectId}
+              </span>
+              <span className="flex w-[92px] shrink-0 items-center gap-1 text-[11px] text-muted-foreground">
+                <StatusIcon className={cn('h-3 w-3 shrink-0', status.color)} />
+                {status.label}
+              </span>
+            </>)
+          })}
+        </div>
+      )
+    }
+    if (section === 'files' && showFiles && fileResults.length > 0) {
+      return (
+        <div key="files">
+          <SectionHeader label="Files" count={fileResults.length} />
+          {fileResults.map((file, i) => {
+            const dir = file.path.slice(0, Math.max(0, file.path.length - file.name.length - 1))
+            return row(`file-${i}-${file.path}`, <>
+              <FileIcon name={file.name} extension={file.extension} type={file.type} className="shrink-0" />
+              <span className="shrink-0 truncate"><Highlight text={file.name} matcher={matcher} /></span>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/60" title={file.path}>{dir}</span>
+              <span className="max-w-[120px] shrink-0 truncate text-[11px] text-muted-foreground">{file.projectName}</span>
+            </>)
+          })}
+        </div>
+      )
+    }
+    return null
+  }
+
+  const nothing = items.length === 0 || (items.length === 1 && contentSearchRow)
 
   return (
-    <div className="fixed inset-0 z-50" onKeyDown={handleKeyDown}>
-      {/* Backdrop */}
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={close}
+    <PaletteShell onClose={close} onKeyDown={handleKeyDown} label="Search">
+      <PaletteInput
+        inputRef={inputRef}
+        value={query}
+        onChange={setQuery}
+        placeholder="Search projects, tasks, files and commands · #123 for a task"
+        busy={fileSearching}
       />
 
-      {/* Search panel */}
-      <div className="fixed left-1/2 top-[12%] -translate-x-1/2 w-full max-w-2xl px-4">
-        <div className="rounded-xl border bg-popover text-popover-foreground shadow-2xl overflow-hidden">
-          {/* Search input */}
-          <div className="flex items-center border-b px-4 gap-3">
-            <Search className="h-5 w-5 shrink-0 text-muted-foreground" />
-            <input
-              ref={inputRef}
-              value={query}
-              onChange={e => setQuery(e.target.value)}
-              placeholder="Search projects, tasks, files… or #123 for a task"
-              className="flex-1 h-14 bg-transparent text-base outline-none placeholder:text-muted-foreground/60"
-              autoComplete="off"
-              spellCheck={false}
-            />
-            {fileSearching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
-            <kbd className="pointer-events-none inline-flex h-5 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground shrink-0">
-              Esc
-            </kbd>
-          </div>
-
-          {/* Filter tabs */}
-          <div className="flex items-center gap-1 px-4 py-2 border-b">
-            {filterTabs.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveFilter(tab.id)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  activeFilter === tab.id
-                    ? 'bg-accent text-accent-foreground'
-                    : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
-                }`}
-              >
-                {tab.label}
-                {tab.count !== undefined && query && (
-                  <span className="ml-1.5 text-[10px] opacity-70">{tab.count}</span>
-                )}
-              </button>
-            ))}
-            <span className="ml-auto text-[10px] text-muted-foreground truncate">
-              {activeProject ? <>Ranked for <span className="text-foreground/80">{activeProject.category || activeProject.name}</span> · </> : null}
-              Tab to switch
-            </span>
-          </div>
-
-          {/* Results */}
-          <div ref={listRef} className="max-h-[60vh] overflow-y-auto p-2 scrollbar-dark">
-            {allItems.length === 0 && (
-              <div className="py-12 text-center text-sm text-muted-foreground">
-                {query ? (
-                  fileSearching ? 'Searching files...' : 'No results found'
-                ) : (
-                  'Start typing to search...'
-                )}
-              </div>
+      <div className="flex shrink-0 items-center gap-1 border-b px-3 py-1.5">
+        {FILTERS.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveFilter(tab.id)}
+            onMouseDown={e => e.preventDefault()}
+            className={cn(
+              'h-6 rounded px-2.5 text-xs font-medium transition-colors',
+              activeFilter === tab.id ? 'bg-accent text-foreground' : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
             )}
-
-            {/* Quick Actions */}
-            {(activeFilter === 'all' || activeFilter === 'projects') && quickActions.length > 0 && (
-              <div className="mb-1">
-                <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">Quick Actions</div>
-                {quickActions.map(action => {
-                  itemIndex++
-                  const idx = itemIndex
-                  const Icon = action.icon
-                  return (
-                    <div
-                      key={action.id}
-                      data-selected={selectedIndex === idx}
-                      onClick={() => runItem(idx)}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
-                        selectedIndex === idx ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                      }`}
-                    >
-                      <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm">{action.label}</span>
-                    </div>
-                  )
-                })}
-              </div>
+          >
+            {tab.label}
+            {counts[tab.id] !== undefined && trimmedQuery && (
+              <span className="ml-1.5 tabular-nums text-muted-foreground/70">{counts[tab.id]}</span>
             )}
-
-            {/* Projects */}
-            {(activeFilter === 'all' || activeFilter === 'projects') && filteredProjects.length > 0 && (
-              <div className="mb-1">
-                <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                  Projects
-                  {query && <span className="ml-1 opacity-70">({filteredProjects.length})</span>}
-                </div>
-                {filteredProjects.map(project => {
-                  itemIndex++
-                  const idx = itemIndex
-                  return (
-                    <div
-                      key={project.id}
-                      data-selected={selectedIndex === idx}
-                      onClick={() => runItem(idx)}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
-                        selectedIndex === idx ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                      }`}
-                    >
-                      <FolderOpen className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm truncate flex-1">{project.name}</span>
-                      {project.techStack?.length > 0 && (
-                        <span className="text-[10px] text-muted-foreground/60 truncate max-w-[120px]">
-                          {project.techStack.slice(0, 3).join(', ')}
-                        </span>
-                      )}
-                      {project.gitBranch && (
-                        <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0 max-w-[100px] truncate">
-                          {project.gitBranch}
-                        </span>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Tasks */}
-            {(activeFilter === 'all' || activeFilter === 'tasks') && filteredTasks.length > 0 && (
-              <div className="mb-1">
-                <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                  Tasks
-                  {query && <span className="ml-1 opacity-70">({filteredTasks.length})</span>}
-                </div>
-                {filteredTasks.map((task: Task) => {
-                  itemIndex++
-                  const idx = itemIndex
-                  const pConfig = priorityConfig[task.priority]
-                  const PriorityIcon = pConfig?.icon || Minus
-                  const projectName = projectNameMap.get(task.projectId) || task.projectId
-
-                  return (
-                    <div
-                      key={task.id}
-                      data-selected={selectedIndex === idx}
-                      onClick={() => runItem(idx)}
-                      className={`group/task flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
-                        selectedIndex === idx ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                      }`}
-                    >
-                      <PriorityIcon className={`h-4 w-4 shrink-0 ${pConfig?.color || 'text-muted-foreground'}`} />
-                      {task.number != null && (
-                        <span className="text-[11px] font-mono tabular-nums text-muted-foreground/70 shrink-0">#{task.number}</span>
-                      )}
-                      <span className={`text-sm truncate flex-1 ${task.status === 'done' ? 'text-muted-foreground' : ''}`}>{task.title}</span>
-                      <button
-                        title="Run with AI (Shift+click to add context or pick the agent)"
-                        className="shrink-0 rounded p-1 text-primary opacity-0 group-hover/task:opacity-100 hover:bg-primary/10 transition-opacity"
-                        onClick={(e) => { e.stopPropagation(); runWithAgent(task, e.shiftKey) }}
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />
-                      </button>
-                      <span className="text-[10px] text-muted-foreground shrink-0 truncate max-w-[100px]">
-                        {projectName}
-                      </span>
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded shrink-0 ${
-                        task.status === 'in_progress' ? 'bg-warning/15 text-warning' :
-                        task.status === 'todo' ? 'bg-primary/15 text-primary' :
-                        task.status === 'done' ? 'bg-success/15 text-success' :
-                        'bg-muted text-muted-foreground'
-                      }`}>
-                        {statusLabels[task.status] || task.status}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-
-            {/* Files */}
-            {(activeFilter === 'all' || activeFilter === 'files') && fileResults.length > 0 && (
-              <div className="mb-1">
-                <div className="px-2 py-1.5 text-xs font-semibold text-muted-foreground">
-                  Files
-                  <span className="ml-1 opacity-70">({fileResults.length})</span>
-                </div>
-                {fileResults.map((file, i) => {
-                  itemIndex++
-                  const idx = itemIndex
-                  return (
-                    <div
-                      key={`${file.projectId}-${file.path}-${i}`}
-                      data-selected={selectedIndex === idx}
-                      onClick={() => runItem(idx)}
-                      className={`flex items-center gap-3 rounded-lg px-3 py-2.5 cursor-pointer transition-colors ${
-                        selectedIndex === idx ? 'bg-accent text-accent-foreground' : 'hover:bg-accent/50'
-                      }`}
-                    >
-                      <FileIcon name={file.name} extension={file.extension} type={file.type} className="shrink-0" />
-                      <div className="flex flex-col min-w-0 flex-1">
-                        <span className="text-sm truncate">{file.name}</span>
-                        <span className="text-[10px] text-muted-foreground/60 truncate">{file.path}</span>
-                      </div>
-                      <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0 max-w-[120px] truncate">
-                        {file.projectName}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="border-t px-4 py-2 flex items-center justify-between text-[11px] text-muted-foreground">
-            <div className="flex items-center gap-4">
-              <span className="flex items-center gap-1">
-                <kbd className="inline-flex h-4 items-center rounded border bg-muted px-1 font-mono text-[10px]">&uarr;&darr;</kbd>
-                navigate
-              </span>
-              <span className="flex items-center gap-1">
-                <kbd className="inline-flex h-4 items-center rounded border bg-muted px-1 font-mono text-[10px]">&crarr;</kbd>
-                open
-              </span>
-              <span className="flex items-center gap-1">
-                <kbd className="inline-flex h-4 items-center rounded border bg-muted px-1 font-mono text-[10px]">Tab</kbd>
-                filter
-              </span>
-              <span className="flex items-center gap-1">
-                <kbd className="inline-flex h-4 items-center rounded border bg-muted px-1 font-mono text-[10px]">Esc</kbd>
-                close
-              </span>
-            </div>
-          </div>
-        </div>
+          </button>
+        ))}
+        {activeProject && (
+          <span className="ml-auto truncate text-[11px] text-muted-foreground/60">
+            {activeProject.category || activeProject.name} first
+          </span>
+        )}
       </div>
-    </div>
+
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto pb-1.5 scrollbar-dark">
+        {nothing && (
+          <EmptyState>
+            {fileSearching ? 'Searching…' : trimmedQuery ? `Nothing named “${trimmedQuery}”.` : 'Start typing to search.'}
+          </EmptyState>
+        )}
+        {sections.map(renderSection)}
+        {contentSearchRow && (
+          <div className={cn(!nothing && 'mt-1 border-t pt-1.5')}>
+            {row('content-search', <>
+              <TextSearch className="h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate">
+                Search <span className="font-medium">“{trimmedQuery}”</span> in file contents
+              </span>
+              <Kbd>Ctrl+Shift+F</Kbd>
+            </>)}
+          </div>
+        )}
+      </div>
+
+      <PaletteFooter hints={[['↑↓', 'navigate'], ['↵', 'open'], ['Tab', 'filter'], ['Esc', 'close']]} />
+    </PaletteShell>
   )
 }

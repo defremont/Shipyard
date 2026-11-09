@@ -146,7 +146,7 @@ interface Project {
     no DELETE, `?link=` remove um deploy, `?subrepo=` os daquele checkout e
     nenhum dos dois remove o projeto inteiro)
 **Logs**: GET /api/logs|logs/stats, DELETE /api/logs
-**Busca**: GET /api/search/files|content (`q`, `projectId?` restringe, `prefer?` = projeto aberto, ranqueia primeiro; content aceita `caseSensitive`)
+**Busca**: GET /api/search/files|content (`q`, `projectId?` restringe, `prefer?` = projeto aberto, ranqueia primeiro; content aceita `caseSensitive`, `wholeWord`, `regex`, `includeIgnored` e devolve `truncated`, `timedOut`, `elapsedMs`; regex invalida = 400)
 **WhatsApp inbox**: GET/PUT/DELETE /api/inbox (`{ url, token }`; o PUT ja testa com um sync), POST /api/inbox/sync, GET /api/inbox/deliveries (`?since=`), GET /api/inbox/review (`?summary=1` = so a contagem), PATCH /api/inbox/review/:id, POST /api/inbox/review/:id/approve|discard
 **Shipyard Cloud**: GET /api/cloud/status, POST /api/cloud/signup|login|logout|sync
 **Agentes**: GET /api/agents (builtins + customizados + `available` por PATH), PUT /api/agents (`{ agents?, defaultAgent? }`)
@@ -398,18 +398,63 @@ nome do cliente repetido 3 vezes). O que ja esta implementado:
   copiam/apagam chamam `invalidateFileIndex`. Score: nome exato > stem > prefixo
   > inicio de palavra/camelCase > contem > caminho; varios termos casam no
   caminho
-- Conteudo: `git grep -F -I --untracked --max-count 20 -z` por repo (raiz +
-  cada `subRepos`, que o repo pai nao percorre), 6 projetos em paralelo, na
-  ordem de contexto. ~70ms por repo contra segundos do walk. Projeto sem git na
-  raiz ou git que falha (flag desconhecida em git antigo) cai no walk antigo,
-  que agora enche um `out` proprio por projeto. Ao bater o teto de arquivos o
-  processo e morto e a promise resolve na hora — esperar o `close` custava
-  ~500ms no Windows
+- **`SEARCH_EXCLUDED_DIRS`** (`fileSearch.ts`) e a lista unica de pastas que
+  busca nenhuma abre: `node_modules`, `dist`, `build`, `out`, `release`,
+  `target`, `.next`, `vendor`, `.venv` etc. Vale para o indice do Ctrl+K, para
+  o nome solto clicado no terminal e para o Ctrl+Shift+F (no `git grep` vira
+  pathspec `:(exclude,glob)**/<pasta>/**`, que pega tambem o `node_modules`
+  que um repo esqueceu de ignorar). A arvore de arquivos tem a sua, mais curta
+  (`IGNORE_NAMES` em routes/files.ts)
+- Conteudo (`searchContent`): cada projeto vira **raizes** — a pasta do projeto
+  e cada `subRepos` — e cada raiz e um `git grep -F|-P -I --untracked
+  --max-count 20 -z`. Raiz sem git (a pasta do cliente) e varrida **so fora
+  dos sub-repos**, listando em paralelo e lendo 16 arquivos por vez; pasta com
+  `.git` achada no caminho (repo dois niveis abaixo, que a descoberta nao
+  lista) vai para o `git grep` em vez de ser lida arquivo a arquivo. Antes
+  disso uma pasta de cliente era lida inteira e em serie: 4,2 s no xifix sem
+  nenhum resultado, contra 0,8 s agora
+- As raizes rodam 8 por vez na ordem de contexto; quando as primeiras ja
+  enchem a pagina (50 arquivos ou 500 linhas) o resto e cancelado (`AbortSignal`
+  mata o git). Requisicao abandonada pelo cliente tambem mata (`reply.raw`
+  `close`). Teto de tempo: 10 s, 20 s com `includeIgnored`; estourou, responde
+  o que tem com `timedOut`. Sem resultado, os 43 repos levam ~2 s: e o custo
+  de abrir processo no Windows, nao muda com mais paralelismo (medido de 4 a
+  16) nem com `grep.threads`
+- `includeIgnored` (botao de pacote / `Alt+I`): `--no-exclude-standard` e sem
+  a lista acima. O store do pnpm (`node_modules/.pnpm`) fica fora sempre: o
+  git segue os links dele no Windows e uma busca levou 266 s
+- Opcoes no padrao do VS Code: `Aa` (Alt+C), palavra inteira (Alt+W, `-w`),
+  regex (Alt+R, `-P`), so o projeto aberto (Alt+P), incluir ignorados (Alt+I).
+  Ficam em `shipyard:content-search-options`. `buildMatcher` monta a mesma
+  regex no server (coluna e trecho) e no client (destaque); PCRE recusando um
+  padrao que o JS aceita cai na varredura
+- **Duas fases**: com todos os projetos no escopo, o client pede antes so o
+  projeto aberto (~0,2 s) e mostra; a resposta completa substitui. Reabrir a
+  paleta mantem a ultima busca selecionada
+- **Abrir um resultado leva a linha**: `openFileForProject(..., { reveal })` →
+  `EditorTab.reveal` (`line`, `column`, `length`, `nonce`) → o
+  `CodeMirrorEditor` seleciona o trecho e centraliza. A view nasce no efeito
+  da propria lib, por isso o `onCreateEditor` guarda a view em estado. Antes o
+  `line` era gravado e ignorado
+- **Moldura unica** (`SearchPalette.tsx`): `PaletteShell`, `PaletteInput`,
+  `OptionToggle`, `PaletteFooter`, `Highlight`, `Kbd`. As duas paletas usam
+  essas pecas; nao desenhar header, rodape ou linha de resultado de novo
+- `usePaletteToggle`: o atalho e lido por `event.code` (Caps Lock e teclado
+  nao americano nao atrapalham) e **na fase de captura** — sem isso o
+  CodeMirror via o Ctrl+Shift+F primeiro e abria a propria barra de busca.
+  Abrir uma paleta fecha a outra. `openContentSearch(query)` abre o
+  Ctrl+Shift+F ja com o texto: e a ultima linha do Ctrl+K ("Search ... in
+  file contents")
+- Ctrl+K: sem texto e um lancador (comandos, projetos, tarefas abertas); com
+  texto, respostas primeiro e comandos filtrados pelo nome no fim. Prioridade
+  e status vem de `taskVisuals`. Chave de linha leva a posicao: ha tarefas com
+  o mesmo id e a chave repetida confundia a selecao
 - Ctrl+Shift+F busca **todos** os projetos, ranqueados; o botao de pasta /
-  `Alt+P` restringe ao projeto aberto (`shipyard:content-search-only-project`)
+  `Alt+P` restringe ao projeto aberto
 - Os dois palettes cancelam a requisicao anterior (`AbortController`) — uma
-  resposta lenta nunca sobrescreve uma nova. Debounce 150ms (nomes) e 250ms
-  (conteudo)
+  resposta lenta nunca sobrescreve uma nova. Debounce 120ms (nomes) e 200ms
+  (conteudo). Resultado que chega depois para a mesma busca mantem a linha
+  selecionada; busca nova volta ao topo. Passar o mouse seleciona
 
 ### Dialogo de tarefa (TaskEditor)
 - Um unico componente serve New Task e Edit Task. O caminho comum e so titulo:
